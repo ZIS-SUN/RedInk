@@ -266,6 +266,7 @@ providers:
    - GCP trial accounts should keep high concurrency disabled
 
 2. **Generation Time**:
+   - Outline generation usually takes 15-30 seconds
    - Image generation takes time — please be patient (don't leave the page)
 
 ---
@@ -279,6 +280,17 @@ If this project helps you, please give it a Star ⭐
 ---
 
 ## Changelog
+
+### v1.4.3 (2026-06-30)
+- ✨ Default outline length changed to 5 pages when the user does not specify a page count
+- ✨ Added clearer outline generation loading copy: "please wait, this step usually takes 15-30 seconds"
+- 🏗️ Modularized image provider logic with reusable provider policy, API client, response extractor, rate limiter, and history image merger
+- 🔧 Fixed GPT Image and Nano Banana compatible image APIs by omitting `response_format` by default and supporting `b64_json`, data URLs, and temporary image URLs
+- 🔧 Added per-record image generation recovery so refreshes or retries reuse existing images instead of spending upstream quota again
+- 🔧 Protected history records from empty image overwrites and status regressions; history reads can self-heal from task image folders
+- ✨ Added structured Problem Details-style API errors and reusable frontend error cards with copyable diagnostics
+- 🐛 Fixed provider connection tests for reasoning models that return `reasoning_content` or reasoning tokens without final `content`
+- 🧪 Added backend coverage for image API compatibility, history merging, structured errors, cached generation, and reasoning-model connection tests
 
 ### v1.4.2 (2026-03-15)
 - ✨ Added English README as default with language toggle (中文/English)
