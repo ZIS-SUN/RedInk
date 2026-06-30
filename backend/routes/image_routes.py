@@ -14,8 +14,15 @@ import json
 import base64
 import logging
 from flask import Blueprint, request, jsonify, Response, send_file
+from backend.errors import ensure_app_error
 from backend.services.image import get_image_service
-from .utils import log_request, log_error
+from .utils import (
+    api_error_response,
+    log_request,
+    log_error,
+    normalize_error_result,
+    validation_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,8 @@ def create_image_blueprint():
             data = request.get_json()
             pages = data.get('pages')
             task_id = data.get('task_id')
+            record_id = data.get('record_id')
+            force = bool(data.get('force', False))
             full_outline = data.get('full_outline', '')
             user_topic = data.get('user_topic', '')
 
@@ -57,16 +66,18 @@ def create_image_blueprint():
             log_request('/generate', {
                 'pages_count': len(pages) if pages else 0,
                 'task_id': task_id,
+                'record_id': record_id,
+                'force': force,
                 'user_topic': user_topic[:50] if user_topic else None,
                 'user_images': user_images
             })
 
             if not pages:
                 logger.warning("图片生成请求缺少 pages 参数")
-                return jsonify({
-                    "success": False,
-                    "error": "参数错误：pages 不能为空。\n请提供要生成的页面列表数据。"
-                }), 400
+                return api_error_response(
+                    validation_error("pages 不能为空", "请提供要生成的页面列表数据。"),
+                    context={"endpoint": "/api/generate", "record_id": record_id},
+                )
 
             logger.info(f"🖼️  开始图片生成任务: {task_id}, 共 {len(pages)} 页")
             image_service = get_image_service()
@@ -76,10 +87,20 @@ def create_image_blueprint():
                 for event in image_service.generate_images(
                     pages, task_id, full_outline,
                     user_images=user_images if user_images else None,
-                    user_topic=user_topic
+                    user_topic=user_topic,
+                    record_id=record_id,
+                    force=force
                 ):
                     event_type = event["event"]
-                    event_data = event["data"]
+                    event_data = _normalize_sse_error(
+                        event_type,
+                        event["data"],
+                        {
+                            "endpoint": "/api/generate",
+                            "task_id": task_id,
+                            "record_id": record_id,
+                        },
+                    )
 
                     # 格式化为 SSE 格式
                     yield f"event: {event_type}\n"
@@ -96,11 +117,7 @@ def create_image_blueprint():
 
         except Exception as e:
             log_error('/generate', e)
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"图片生成异常。\n错误详情: {error_msg}\n建议：检查图片生成服务配置和后端日志"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/generate"})
 
     # ==================== 图片获取 ====================
 
@@ -144,20 +161,17 @@ def create_image_blueprint():
             filepath = os.path.join(history_root, task_id, filename)
 
             if not os.path.exists(filepath):
-                return jsonify({
-                    "success": False,
-                    "error": f"图片不存在：{task_id}/{filename}"
-                }), 404
+                return api_error_response(
+                    "图片不存在",
+                    status=404,
+                    context={"endpoint": "/api/images", "task_id": task_id, "filename": filename},
+                )
 
             return send_file(filepath, mimetype='image/png')
 
         except Exception as e:
             log_error('/images', e)
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"获取图片失败: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/images", "task_id": task_id, "filename": filename})
 
     # ==================== 重试和重新生成 ====================
 
@@ -180,37 +194,45 @@ def create_image_blueprint():
             task_id = data.get('task_id')
             page = data.get('page')
             use_reference = data.get('use_reference', True)
+            record_id = data.get('record_id')
 
             log_request('/retry', {
                 'task_id': task_id,
+                'record_id': record_id,
                 'page_index': page.get('index') if page else None
             })
 
             if not task_id or not page:
                 logger.warning("重试请求缺少必要参数")
-                return jsonify({
-                    "success": False,
-                    "error": "参数错误：task_id 和 page 不能为空。\n请提供任务ID和页面信息。"
-                }), 400
+                return api_error_response(
+                    validation_error("task_id 和 page 不能为空", "请提供任务 ID 和页面信息。"),
+                    context={"endpoint": "/api/retry", "task_id": task_id, "record_id": record_id},
+                )
 
             logger.info(f"🔄 重试生成图片: task={task_id}, page={page.get('index')}")
             image_service = get_image_service()
-            result = image_service.retry_single_image(task_id, page, use_reference)
+            result = image_service.retry_single_image(
+                task_id,
+                page,
+                use_reference,
+                record_id=record_id,
+            )
 
             if result["success"]:
                 logger.info(f"✅ 图片重试成功: {result.get('image_url')}")
             else:
                 logger.error(f"❌ 图片重试失败: {result.get('error')}")
+                result = normalize_error_result(
+                    result,
+                    context={"endpoint": "/api/retry", "task_id": task_id, "record_id": record_id},
+                    fallback_status=500,
+                )
 
-            return jsonify(result), 200 if result["success"] else 500
+            return jsonify(result), 200 if result["success"] else result["error"].get("status", 500)
 
         except Exception as e:
             log_error('/retry', e)
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"重试图片生成失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/retry"})
 
     @image_bp.route('/retry-failed', methods=['POST'])
     def retry_failed_images():
@@ -228,27 +250,37 @@ def create_image_blueprint():
             data = request.get_json()
             task_id = data.get('task_id')
             pages = data.get('pages')
+            record_id = data.get('record_id')
 
             log_request('/retry-failed', {
                 'task_id': task_id,
+                'record_id': record_id,
                 'pages_count': len(pages) if pages else 0
             })
 
             if not task_id or not pages:
                 logger.warning("批量重试请求缺少必要参数")
-                return jsonify({
-                    "success": False,
-                    "error": "参数错误：task_id 和 pages 不能为空。\n请提供任务ID和要重试的页面列表。"
-                }), 400
+                return api_error_response(
+                    validation_error("task_id 和 pages 不能为空", "请提供任务 ID 和要重试的页面列表。"),
+                    context={"endpoint": "/api/retry-failed", "task_id": task_id, "record_id": record_id},
+                )
 
             logger.info(f"🔄 批量重试失败图片: task={task_id}, 共 {len(pages)} 页")
             image_service = get_image_service()
 
             def generate():
                 """SSE 事件生成器"""
-                for event in image_service.retry_failed_images(task_id, pages):
+                for event in image_service.retry_failed_images(task_id, pages, record_id=record_id):
                     event_type = event["event"]
-                    event_data = event["data"]
+                    event_data = _normalize_sse_error(
+                        event_type,
+                        event["data"],
+                        {
+                            "endpoint": "/api/retry-failed",
+                            "task_id": task_id,
+                            "record_id": record_id,
+                        },
+                    )
 
                     yield f"event: {event_type}\n"
                     yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
@@ -264,11 +296,7 @@ def create_image_blueprint():
 
         except Exception as e:
             log_error('/retry-failed', e)
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"批量重试失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/retry-failed"})
 
     @image_bp.route('/regenerate', methods=['POST'])
     def regenerate_image():
@@ -293,41 +321,45 @@ def create_image_blueprint():
             use_reference = data.get('use_reference', True)
             full_outline = data.get('full_outline', '')
             user_topic = data.get('user_topic', '')
+            record_id = data.get('record_id')
 
             log_request('/regenerate', {
                 'task_id': task_id,
+                'record_id': record_id,
                 'page_index': page.get('index') if page else None
             })
 
             if not task_id or not page:
                 logger.warning("重新生成请求缺少必要参数")
-                return jsonify({
-                    "success": False,
-                    "error": "参数错误：task_id 和 page 不能为空。\n请提供任务ID和页面信息。"
-                }), 400
+                return api_error_response(
+                    validation_error("task_id 和 page 不能为空", "请提供任务 ID 和页面信息。"),
+                    context={"endpoint": "/api/regenerate", "task_id": task_id, "record_id": record_id},
+                )
 
             logger.info(f"🔄 重新生成图片: task={task_id}, page={page.get('index')}")
             image_service = get_image_service()
             result = image_service.regenerate_image(
                 task_id, page, use_reference,
                 full_outline=full_outline,
-                user_topic=user_topic
+                user_topic=user_topic,
+                record_id=record_id
             )
 
             if result["success"]:
                 logger.info(f"✅ 图片重新生成成功: {result.get('image_url')}")
             else:
                 logger.error(f"❌ 图片重新生成失败: {result.get('error')}")
+                result = normalize_error_result(
+                    result,
+                    context={"endpoint": "/api/regenerate", "task_id": task_id, "record_id": record_id},
+                    fallback_status=500,
+                )
 
-            return jsonify(result), 200 if result["success"] else 500
+            return jsonify(result), 200 if result["success"] else result["error"].get("status", 500)
 
         except Exception as e:
             log_error('/regenerate', e)
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"重新生成图片失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/regenerate"})
 
     # ==================== 任务状态 ====================
 
@@ -351,10 +383,11 @@ def create_image_blueprint():
             state = image_service.get_task_state(task_id)
 
             if state is None:
-                return jsonify({
-                    "success": False,
-                    "error": f"任务不存在：{task_id}\n可能原因：\n1. 任务ID错误\n2. 任务已过期或被清理\n3. 服务重启导致状态丢失"
-                }), 404
+                return api_error_response(
+                    f"任务不存在：{task_id}",
+                    status=404,
+                    context={"endpoint": "/api/task", "task_id": task_id},
+                )
 
             # 不返回封面图片数据（太大）
             safe_state = {
@@ -369,11 +402,7 @@ def create_image_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"获取任务状态失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/task", "task_id": task_id})
 
     # ==================== 健康检查 ====================
 
@@ -417,3 +446,21 @@ def _parse_base64_images(images_base64: list) -> list:
         images.append(base64.b64decode(img_b64))
 
     return images
+
+
+def _normalize_sse_error(event_type: str, data: dict, context: dict) -> dict:
+    if event_type != "error":
+        return data
+
+    next_data = dict(data)
+    if isinstance(next_data.get("error"), dict):
+        return next_data
+
+    app_error = ensure_app_error(
+        next_data.get("error") or next_data.get("message") or "图片生成失败",
+        context=context,
+    )
+    next_data["error"] = app_error.to_dict()
+    next_data["message"] = app_error.to_message()
+    next_data["retryable"] = bool(next_data.get("retryable", app_error.retryable))
+    return next_data

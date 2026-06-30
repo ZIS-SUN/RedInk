@@ -2,12 +2,14 @@
 import logging
 import os
 import uuid
-import time
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Generator, List, Optional, Tuple
 from backend.config import Config
 from backend.generators.factory import ImageGeneratorFactory
+from backend.generators.image_provider_policy import ImageProviderPolicy
+from backend.services.history import get_history_service
+from backend.services.history_image_merger import HistoryImageMerger
+from backend.services.image_rate_limiter import ImageRateLimiter
 from backend.utils.image_compressor import compress_image
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,6 @@ class ImageService:
     """图片生成服务类"""
 
     # 并发配置
-    MAX_CONCURRENT = 15  # 最大并发数
     AUTO_RETRY_COUNT = 1  # 不自动重试，超时后让用户手动重试
 
     def __init__(self, provider_name: str = None):
@@ -44,6 +45,16 @@ class ImageService:
         # 保存配置信息
         self.provider_name = provider_name
         self.provider_config = provider_config
+        self.policy = ImageProviderPolicy.from_config(
+            provider_config,
+            default_model=provider_config.get('model', 'default-model'),
+        )
+        self.worker_count = self.policy.worker_count
+        self.rate_limiter = ImageRateLimiter(
+            max_concurrent=self.worker_count,
+            interval_seconds=self.policy.request_interval_seconds,
+        )
+        self.history_service = get_history_service()
 
         # 检查是否启用短 prompt 模式
         self.use_short_prompt = provider_config.get('short_prompt', False)
@@ -66,6 +77,17 @@ class ImageService:
         self._task_states: Dict[str, Dict] = {}
 
         logger.info(f"ImageService 初始化完成: provider={provider_name}, type={provider_type}")
+
+    @staticmethod
+    def _count_generated(generated_images: List[str]) -> int:
+        return sum(1 for filename in generated_images if filename)
+
+    @staticmethod
+    def _remember_generated(generated_images: List[str], index: int, filename: str, total: int):
+        target_len = max(len(generated_images), total, index + 1)
+        while len(generated_images) < target_len:
+            generated_images.append("")
+        generated_images[index] = filename
 
     def _load_prompt_template(self, short: bool = False) -> str:
         """加载 Prompt 模板"""
@@ -121,7 +143,9 @@ class ImageService:
         retry_count: int = 0,
         full_outline: str = "",
         user_images: Optional[List[bytes]] = None,
-        user_topic: str = ""
+        user_topic: str = "",
+        record_id: Optional[str] = None,
+        total_count: Optional[int] = None
     ) -> Tuple[int, bool, Optional[str], Optional[str]]:
         """
         生成单张图片（带自动重试）
@@ -162,46 +186,56 @@ class ImageService:
                     user_topic=user_topic if user_topic else "未提供"
                 )
 
-            # 调用生成器生成图片
-            if self.provider_config.get('type') == 'google_genai':
-                logger.debug(f"  使用 Google GenAI 生成器")
-                image_data = self.generator.generate_image(
-                    prompt=prompt,
-                    aspect_ratio=self.provider_config.get('default_aspect_ratio', '3:4'),
-                    temperature=self.provider_config.get('temperature', 1.0),
-                    model=self.provider_config.get('model', 'gemini-3-pro-image-preview'),
-                    reference_image=reference_image,
-                )
-            elif self.provider_config.get('type') == 'image_api':
-                logger.debug(f"  使用 Image API 生成器")
-                # Image API 支持多张参考图片
-                # 组合参考图片：用户上传的图片 + 封面图
-                reference_images = []
-                if user_images:
-                    reference_images.extend(user_images)
-                if reference_image:
-                    reference_images.append(reference_image)
+            # 调用生成器生成图片。所有路径共用 limiter，避免批量和重试打爆上游。
+            with self.rate_limiter.acquire():
+                if self.provider_config.get('type') == 'google_genai':
+                    logger.debug(f"  使用 Google GenAI 生成器")
+                    image_data = self.generator.generate_image(
+                        prompt=prompt,
+                        aspect_ratio=self.provider_config.get('default_aspect_ratio', '3:4'),
+                        temperature=self.provider_config.get('temperature', 1.0),
+                        model=self.provider_config.get('model', 'gemini-3-pro-image-preview'),
+                        reference_image=reference_image,
+                    )
+                elif self.provider_config.get('type') == 'image_api':
+                    logger.debug(f"  使用 Image API 生成器")
+                    # Image API 支持多张参考图片
+                    # 组合参考图片：用户上传的图片 + 封面图
+                    reference_images = []
+                    if user_images:
+                        reference_images.extend(user_images)
+                    if reference_image:
+                        reference_images.append(reference_image)
 
-                image_data = self.generator.generate_image(
-                    prompt=prompt,
-                    aspect_ratio=self.provider_config.get('default_aspect_ratio', '3:4'),
-                    temperature=self.provider_config.get('temperature', 1.0),
-                    model=self.provider_config.get('model', 'nano-banana-2'),
-                    reference_images=reference_images if reference_images else None,
-                )
-            else:
-                logger.debug(f"  使用 OpenAI 兼容生成器")
-                image_data = self.generator.generate_image(
-                    prompt=prompt,
-                    size=self.provider_config.get('default_size', '1024x1024'),
-                    model=self.provider_config.get('model'),
-                    quality=self.provider_config.get('quality', 'standard'),
-                )
+                    image_data = self.generator.generate_image(
+                        prompt=prompt,
+                        aspect_ratio=self.provider_config.get('default_aspect_ratio', '3:4'),
+                        temperature=self.provider_config.get('temperature', 1.0),
+                        model=self.provider_config.get('model', 'nano-banana-2'),
+                        reference_images=reference_images if reference_images else None,
+                    )
+                else:
+                    logger.debug(f"  使用 OpenAI 兼容生成器")
+                    image_data = self.generator.generate_image(
+                        prompt=prompt,
+                        size=self.provider_config.get('default_size', '1024x1024'),
+                        model=self.provider_config.get('model'),
+                        quality=self.provider_config.get('quality', 'standard'),
+                    )
 
             # 保存图片（使用当前任务目录）
             filename = f"{index}.png"
             self._save_image(image_data, filename, self.current_task_dir)
             logger.info(f"✅ 图片 [{index}] 生成成功: {filename}")
+
+            if record_id:
+                self.history_service.merge_generated_image(
+                    record_id,
+                    task_id,
+                    index,
+                    filename,
+                    total_count=total_count,
+                )
 
             return (index, True, filename, None)
 
@@ -216,7 +250,9 @@ class ImageService:
         task_id: str = None,
         full_outline: str = "",
         user_images: Optional[List[bytes]] = None,
-        user_topic: str = ""
+        user_topic: str = "",
+        record_id: Optional[str] = None,
+        force: bool = False
     ) -> Generator[Dict[str, Any], None, None]:
         """
         生成图片（生成器，支持 SSE 流式返回）
@@ -232,6 +268,17 @@ class ImageService:
         Yields:
             进度事件字典
         """
+        if record_id and not force:
+            cached_events = self.get_cached_generation_events(record_id, pages)
+            if cached_events:
+                for event in cached_events:
+                    yield event
+                return
+
+        if task_id is None and record_id:
+            record = self.history_service.get_record(record_id, sync_images=True)
+            task_id = record.get("images", {}).get("task_id") if record else None
+
         if task_id is None:
             task_id = f"task_{uuid.uuid4().hex[:8]}"
 
@@ -243,7 +290,7 @@ class ImageService:
         logger.debug(f"任务目录: {self.current_task_dir}")
 
         total = len(pages)
-        generated_images = []
+        generated_images = [""] * total
         failed_pages = []
         cover_image_data = None
 
@@ -295,11 +342,12 @@ class ImageService:
             # 生成封面（使用用户上传的图片作为参考）
             index, success, filename, error = self._generate_single_image(
                 cover_page, task_id, reference_image=None, full_outline=full_outline,
-                user_images=compressed_user_images, user_topic=user_topic
+                user_images=compressed_user_images, user_topic=user_topic,
+                record_id=record_id, total_count=total
             )
 
             if success:
-                generated_images.append(filename)
+                self._remember_generated(generated_images, index, filename, total)
                 self._task_states[task_id]["generated"][index] = filename
 
                 # 读取封面图片作为参考，并立即压缩到200KB以内
@@ -337,8 +385,7 @@ class ImageService:
 
         # ==================== 第二阶段：生成其他页面 ====================
         if other_pages:
-            # 检查是否启用高并发模式
-            high_concurrency = self.provider_config.get('high_concurrency', False)
+            high_concurrency = self.worker_count > 1
 
             if high_concurrency:
                 # 高并发模式：并行生成
@@ -347,14 +394,14 @@ class ImageService:
                     "data": {
                         "status": "batch_start",
                         "message": f"开始并发生成 {len(other_pages)} 页内容...",
-                        "current": len(generated_images),
+                        "current": self._count_generated(generated_images),
                         "total": total,
                         "phase": "content"
                     }
                 }
 
                 # 使用线程池并发生成
-                with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT) as executor:
+                with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
                     # 提交所有任务
                     future_to_page = {
                         executor.submit(
@@ -365,7 +412,9 @@ class ImageService:
                             0,  # retry_count
                             full_outline,  # 传入完整大纲
                             compressed_user_images,  # 用户上传的参考图片（已压缩）
-                            user_topic  # 用户原始输入
+                            user_topic,  # 用户原始输入
+                            record_id,
+                            total
                         ): page
                         for page in other_pages
                     }
@@ -377,7 +426,7 @@ class ImageService:
                             "data": {
                                 "index": page["index"],
                                 "status": "generating",
-                                "current": len(generated_images) + 1,
+                                "current": self._count_generated(generated_images) + 1,
                                 "total": total,
                                 "phase": "content"
                             }
@@ -390,7 +439,7 @@ class ImageService:
                             index, success, filename, error = future.result()
 
                             if success:
-                                generated_images.append(filename)
+                                self._remember_generated(generated_images, index, filename, total)
                                 self._task_states[task_id]["generated"][index] = filename
 
                                 yield {
@@ -439,7 +488,7 @@ class ImageService:
                     "data": {
                         "status": "batch_start",
                         "message": f"开始顺序生成 {len(other_pages)} 页内容...",
-                        "current": len(generated_images),
+                        "current": self._count_generated(generated_images),
                         "total": total,
                         "phase": "content"
                     }
@@ -452,7 +501,7 @@ class ImageService:
                         "data": {
                             "index": page["index"],
                             "status": "generating",
-                            "current": len(generated_images) + 1,
+                            "current": self._count_generated(generated_images) + 1,
                             "total": total,
                             "phase": "content"
                         }
@@ -466,11 +515,13 @@ class ImageService:
                         0,
                         full_outline,
                         compressed_user_images,
-                        user_topic
+                        user_topic,
+                        record_id,
+                        total
                     )
 
                     if success:
-                        generated_images.append(filename)
+                        self._remember_generated(generated_images, index, filename, total)
                         self._task_states[task_id]["generated"][index] = filename
 
                         yield {
@@ -505,11 +556,71 @@ class ImageService:
                 "task_id": task_id,
                 "images": generated_images,
                 "total": total,
-                "completed": len(generated_images),
+                "completed": self._count_generated(generated_images),
                 "failed": len(failed_pages),
                 "failed_indices": [p["index"] for p in failed_pages]
             }
         }
+
+    def get_cached_generation_events(self, record_id: str, pages: list) -> List[Dict[str, Any]]:
+        record = self.history_service.get_record(record_id, sync_images=True)
+        if not record:
+            return []
+
+        images = record.get("images") or {}
+        task_id = images.get("task_id")
+        generated = images.get("generated") or []
+        if not task_id or not HistoryImageMerger.has_images(generated):
+            return []
+
+        total = len(pages)
+        completed = 0
+        failed_indices = []
+        events: List[Dict[str, Any]] = []
+
+        for page in pages:
+            index = page.get("index")
+            filename = generated[index] if isinstance(index, int) and index < len(generated) else ""
+            if filename:
+                completed += 1
+                events.append({
+                    "event": "complete",
+                    "data": {
+                        "index": index,
+                        "status": "done",
+                        "image_url": f"/api/images/{task_id}/{filename}",
+                        "phase": "cached",
+                        "cached": True,
+                    }
+                })
+            else:
+                failed_indices.append(index)
+                events.append({
+                    "event": "error",
+                    "data": {
+                        "index": index,
+                        "status": "error",
+                        "message": "历史记录中缺少该页图片，可手动补全",
+                        "retryable": True,
+                        "phase": "cached",
+                        "cached": True,
+                    }
+                })
+
+        events.append({
+            "event": "finish",
+            "data": {
+                "success": len(failed_indices) == 0,
+                "task_id": task_id,
+                "images": generated,
+                "total": total,
+                "completed": completed,
+                "failed": len(failed_indices),
+                "failed_indices": failed_indices,
+                "cached": True,
+            }
+        })
+        return events
 
     def retry_single_image(
         self,
@@ -517,7 +628,8 @@ class ImageService:
         page: Dict,
         use_reference: bool = True,
         full_outline: str = "",
-        user_topic: str = ""
+        user_topic: str = "",
+        record_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         重试生成单张图片
@@ -559,6 +671,10 @@ class ImageService:
                 # 压缩封面图到 200KB
                 reference_image = compress_image(cover_data, max_size_kb=200)
 
+        total_count = None
+        if task_id in self._task_states:
+            total_count = len(self._task_states[task_id].get("pages", []))
+
         index, success, filename, error = self._generate_single_image(
             page,
             task_id,
@@ -566,7 +682,9 @@ class ImageService:
             0,
             full_outline,
             user_images,
-            user_topic
+            user_topic,
+            record_id,
+            total_count
         )
 
         if success:
@@ -591,7 +709,8 @@ class ImageService:
     def retry_failed_images(
         self,
         task_id: str,
-        pages: List[Dict]
+        pages: List[Dict],
+        record_id: Optional[str] = None
     ) -> Generator[Dict[str, Any], None, None]:
         """
         批量重试失败的图片
@@ -603,10 +722,24 @@ class ImageService:
         Yields:
             进度事件
         """
-        # 获取参考图
+        self.current_task_dir = os.path.join(self.history_root_dir, task_id)
+        os.makedirs(self.current_task_dir, exist_ok=True)
+
+        # 获取参考图和上下文
         reference_image = None
+        user_images = None
+        user_topic = ""
         if task_id in self._task_states:
-            reference_image = self._task_states[task_id].get("cover_image")
+            task_state = self._task_states[task_id]
+            reference_image = task_state.get("cover_image")
+            user_images = task_state.get("user_images")
+            user_topic = task_state.get("user_topic", "")
+
+        if reference_image is None:
+            cover_path = os.path.join(self.history_root_dir, task_id, "0.png")
+            if os.path.exists(cover_path):
+                with open(cover_path, "rb") as f:
+                    reference_image = compress_image(f.read(), max_size_kb=200)
 
         total = len(pages)
         success_count = 0
@@ -620,68 +753,94 @@ class ImageService:
             }
         }
 
-        # 并发重试
         # 从任务状态中获取完整大纲
         full_outline = ""
         if task_id in self._task_states:
             full_outline = self._task_states[task_id].get("full_outline", "")
+        total_count = None
+        if task_id in self._task_states:
+            total_count = len(self._task_states[task_id].get("pages", []))
+        if record_id:
+            record = self.history_service.get_record(record_id)
+            if record:
+                total_count = total_count or len(record.get("outline", {}).get("pages", []))
 
-        with ThreadPoolExecutor(max_workers=self.MAX_CONCURRENT) as executor:
-            future_to_page = {
-                executor.submit(
-                    self._generate_single_image,
-                    page,
-                    task_id,
-                    reference_image,
-                    0,  # retry_count
-                    full_outline  # 传入完整大纲
-                ): page
-                for page in pages
+        def handle_result(page: Dict, result: Tuple[int, bool, Optional[str], Optional[str]]):
+            nonlocal success_count, failed_count
+            index, success, filename, error = result
+            if success:
+                success_count += 1
+                if task_id in self._task_states:
+                    self._task_states[task_id]["generated"][index] = filename
+                    if index in self._task_states[task_id]["failed"]:
+                        del self._task_states[task_id]["failed"][index]
+                return {
+                    "event": "complete",
+                    "data": {
+                        "index": index,
+                        "status": "done",
+                        "image_url": f"/api/images/{task_id}/{filename}"
+                    }
+                }
+
+            failed_count += 1
+            return {
+                "event": "error",
+                "data": {
+                    "index": index,
+                    "status": "error",
+                    "message": error,
+                    "retryable": True
+                }
             }
 
-            for future in as_completed(future_to_page):
-                page = future_to_page[future]
-                try:
-                    index, success, filename, error = future.result()
+        if self.worker_count > 1:
+            with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
+                future_to_page = {
+                    executor.submit(
+                        self._generate_single_image,
+                        page,
+                        task_id,
+                        reference_image,
+                        0,
+                        full_outline,
+                        user_images,
+                        user_topic,
+                        record_id,
+                        total_count
+                    ): page
+                    for page in pages
+                }
 
-                    if success:
-                        success_count += 1
-                        if task_id in self._task_states:
-                            self._task_states[task_id]["generated"][index] = filename
-                            if index in self._task_states[task_id]["failed"]:
-                                del self._task_states[task_id]["failed"][index]
-
-                        yield {
-                            "event": "complete",
-                            "data": {
-                                "index": index,
-                                "status": "done",
-                                "image_url": f"/api/images/{task_id}/{filename}"
-                            }
-                        }
-                    else:
+                for future in as_completed(future_to_page):
+                    page = future_to_page[future]
+                    try:
+                        yield handle_result(page, future.result())
+                    except Exception as e:
                         failed_count += 1
                         yield {
                             "event": "error",
                             "data": {
-                                "index": index,
+                                "index": page["index"],
                                 "status": "error",
-                                "message": error,
+                                "message": str(e),
                                 "retryable": True
                             }
                         }
-
-                except Exception as e:
-                    failed_count += 1
-                    yield {
-                        "event": "error",
-                        "data": {
-                            "index": page["index"],
-                            "status": "error",
-                            "message": str(e),
-                            "retryable": True
-                        }
-                    }
+        else:
+            for page in pages:
+                result = self._generate_single_image(
+                    page,
+                    task_id,
+                    reference_image,
+                    0,
+                    full_outline,
+                    user_images,
+                    user_topic,
+                    record_id,
+                    total_count
+                )
+                yield handle_result(page, result)
 
         yield {
             "event": "retry_finish",
@@ -699,7 +858,8 @@ class ImageService:
         page: Dict,
         use_reference: bool = True,
         full_outline: str = "",
-        user_topic: str = ""
+        user_topic: str = "",
+        record_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         重新生成图片（用户手动触发，即使成功的也可以重新生成）
@@ -717,7 +877,8 @@ class ImageService:
         return self.retry_single_image(
             task_id, page, use_reference,
             full_outline=full_outline,
-            user_topic=user_topic
+            user_topic=user_topic,
+            record_id=record_id
         )
 
     def get_image_path(self, task_id: str, filename: str) -> str:

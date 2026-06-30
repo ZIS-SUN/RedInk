@@ -15,6 +15,7 @@ import zipfile
 import logging
 from flask import Blueprint, request, jsonify, send_file
 from backend.services.history import get_history_service
+from .utils import api_error_response, normalize_error_result, validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +66,10 @@ def create_history_blueprint():
             task_id = data.get('task_id')
 
             if not topic or not outline:
-                return jsonify({
-                    "success": False,
-                    "error": "参数错误：topic 和 outline 不能为空。\n请提供主题和大纲内容。"
-                }), 400
+                return api_error_response(
+                    validation_error("topic 和 outline 不能为空", "请提供主题和大纲内容。"),
+                    context={"endpoint": "/api/history"},
+                )
 
             history_service = get_history_service()
             record_id = history_service.create_record(topic, outline, task_id)
@@ -79,11 +80,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"创建历史记录失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history"})
 
     @history_bp.route('/history', methods=['GET'])
     def list_history():
@@ -115,11 +112,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"获取历史记录列表失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history"})
 
     @history_bp.route('/history/<record_id>', methods=['GET'])
     def get_history(record_id):
@@ -135,13 +128,14 @@ def create_history_blueprint():
         """
         try:
             history_service = get_history_service()
-            record = history_service.get_record(record_id)
+            record = history_service.get_record(record_id, sync_images=True)
 
             if not record:
-                return jsonify({
-                    "success": False,
-                    "error": f"历史记录不存在：{record_id}\n可能原因：记录已被删除或ID错误"
-                }), 404
+                return api_error_response(
+                    f"历史记录不存在：{record_id}",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>", "record_id": record_id},
+                )
 
             return jsonify({
                 "success": True,
@@ -149,11 +143,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"获取历史记录详情失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/<id>", "record_id": record_id})
 
     @history_bp.route('/history/<record_id>/exists', methods=['GET'])
     def check_history_exists(record_id):
@@ -177,11 +167,10 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "exists": False,
-                "error": f"检查记录失败。\n错误详情: {error_msg}"
-            }), 500
+            payload, status_code = api_error_response(e, context={"endpoint": "/api/history/<id>/exists", "record_id": record_id})
+            payload_json = payload.get_json()
+            payload_json["exists"] = False
+            return jsonify(payload_json), status_code
 
     @history_bp.route('/history/<record_id>', methods=['PUT'])
     def update_history(record_id):
@@ -243,21 +232,18 @@ def create_history_blueprint():
             )
 
             if not success:
-                return jsonify({
-                    "success": False,
-                    "error": f"更新历史记录失败：{record_id}\n可能原因：记录不存在或数据格式错误"
-                }), 404
+                return api_error_response(
+                    f"更新历史记录失败：{record_id}",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>", "record_id": record_id},
+                )
 
             return jsonify({
                 "success": True
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"更新历史记录失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/<id>", "record_id": record_id})
 
     @history_bp.route('/history/<record_id>', methods=['DELETE'])
     def delete_history(record_id):
@@ -275,21 +261,18 @@ def create_history_blueprint():
             success = history_service.delete_record(record_id)
 
             if not success:
-                return jsonify({
-                    "success": False,
-                    "error": f"删除历史记录失败：{record_id}\n可能原因：记录不存在或ID错误"
-                }), 404
+                return api_error_response(
+                    f"删除历史记录失败：{record_id}",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>", "record_id": record_id},
+                )
 
             return jsonify({
                 "success": True
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"删除历史记录失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/<id>", "record_id": record_id})
 
     # ==================== 搜索和统计 ====================
 
@@ -309,10 +292,10 @@ def create_history_blueprint():
             keyword = request.args.get('keyword', '')
 
             if not keyword:
-                return jsonify({
-                    "success": False,
-                    "error": "参数错误：keyword 不能为空。\n请提供搜索关键词。"
-                }), 400
+                return api_error_response(
+                    validation_error("keyword 不能为空", "请输入搜索关键词。"),
+                    context={"endpoint": "/api/history/search"},
+                )
 
             history_service = get_history_service()
             results = history_service.search_records(keyword)
@@ -323,11 +306,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"搜索历史记录失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/search"})
 
     @history_bp.route('/history/stats', methods=['GET'])
     def get_history_stats():
@@ -349,11 +328,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"获取历史记录统计失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/stats"})
 
     # ==================== 扫描和同步 ====================
 
@@ -374,16 +349,17 @@ def create_history_blueprint():
             result = history_service.scan_and_sync_task_images(task_id)
 
             if not result.get("success"):
-                return jsonify(result), 404
+                result = normalize_error_result(
+                    result,
+                    context={"endpoint": "/api/history/scan/<task_id>", "task_id": task_id},
+                    fallback_status=404,
+                )
+                return jsonify(result), result["error"].get("status", 404)
 
             return jsonify(result), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"扫描任务失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/scan/<task_id>", "task_id": task_id})
 
     @history_bp.route('/history/scan-all', methods=['POST'])
     def scan_all_tasks():
@@ -402,16 +378,17 @@ def create_history_blueprint():
             result = history_service.scan_all_tasks()
 
             if not result.get("success"):
-                return jsonify(result), 500
+                result = normalize_error_result(
+                    result,
+                    context={"endpoint": "/api/history/scan-all"},
+                    fallback_status=500,
+                )
+                return jsonify(result), result["error"].get("status", 500)
 
             return jsonify(result), 200
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"扫描所有任务失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/scan-all"})
 
     # ==================== 下载功能 ====================
 
@@ -432,25 +409,28 @@ def create_history_blueprint():
             record = history_service.get_record(record_id)
 
             if not record:
-                return jsonify({
-                    "success": False,
-                    "error": f"历史记录不存在：{record_id}"
-                }), 404
+                return api_error_response(
+                    f"历史记录不存在：{record_id}",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>/download", "record_id": record_id},
+                )
 
             task_id = record.get('images', {}).get('task_id')
             if not task_id:
-                return jsonify({
-                    "success": False,
-                    "error": "该记录没有关联的任务图片"
-                }), 404
+                return api_error_response(
+                    "该记录没有关联的任务图片",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>/download", "record_id": record_id},
+                )
 
             # 获取任务目录
             task_dir = os.path.join(history_service.history_dir, task_id)
             if not os.path.exists(task_dir):
-                return jsonify({
-                    "success": False,
-                    "error": f"任务目录不存在：{task_id}"
-                }), 404
+                return api_error_response(
+                    f"任务目录不存在：{task_id}",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>/download", "record_id": record_id, "task_id": task_id},
+                )
 
             # 创建内存中的 ZIP 文件
             zip_buffer = _create_images_zip(task_dir)
@@ -468,11 +448,7 @@ def create_history_blueprint():
             )
 
         except Exception as e:
-            error_msg = str(e)
-            return jsonify({
-                "success": False,
-                "error": f"下载失败。\n错误详情: {error_msg}"
-            }), 500
+            return api_error_response(e, context={"endpoint": "/api/history/<id>/download", "record_id": record_id})
 
     return history_bp
 

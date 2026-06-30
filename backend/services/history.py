@@ -8,10 +8,15 @@
 import os
 import json
 import uuid
+import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from enum import Enum
+
+from backend.services.history_image_merger import HistoryImageMerger
+
+logger = logging.getLogger(__name__)
 
 
 class RecordStatus:
@@ -148,7 +153,7 @@ class HistoryService:
 
         return record_id
 
-    def get_record(self, record_id: str) -> Optional[Dict]:
+    def get_record(self, record_id: str, sync_images: bool = False) -> Optional[Dict]:
         """
         获取历史记录详情
 
@@ -175,9 +180,16 @@ class HistoryService:
 
         try:
             with open(record_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                record = json.load(f)
         except Exception:
             return None
+
+        if sync_images:
+            synced = self.sync_record_images(record_id, record)
+            if synced.get("success") and synced.get("updated"):
+                return self.get_record(record_id, sync_images=False)
+
+        return record
 
     def record_exists(self, record_id: str) -> bool:
         """
@@ -239,11 +251,11 @@ class HistoryService:
 
         # 更新图片信息
         if images is not None:
-            record["images"] = images
+            record["images"] = self._merge_safe_images(record.get("images"), images)
 
         # 更新状态（状态流转）
         if status is not None:
-            record["status"] = status
+            record["status"] = self._protect_status(record.get("status"), status, record)
 
         # 更新缩略图
         if thumbnail is not None:
@@ -261,25 +273,141 @@ class HistoryService:
                 idx_record["updated_at"] = now
 
                 # 更新状态
-                if status:
-                    idx_record["status"] = status
+                idx_record["status"] = record.get("status", idx_record.get("status"))
 
                 # 更新缩略图
-                if thumbnail:
-                    idx_record["thumbnail"] = thumbnail
+                idx_record["thumbnail"] = record.get("thumbnail")
 
                 # 更新页数（如果大纲被修改）
                 if outline:
                     idx_record["page_count"] = len(outline.get("pages", []))
 
                 # 更新任务 ID
-                if images is not None and images.get("task_id"):
-                    idx_record["task_id"] = images.get("task_id")
+                if record.get("images", {}).get("task_id"):
+                    idx_record["task_id"] = record.get("images", {}).get("task_id")
 
                 break
 
         self._save_index(index)
         return True
+
+    def merge_generated_image(
+        self,
+        record_id: str,
+        task_id: str,
+        page_index: int,
+        filename: str,
+        total_count: Optional[int] = None
+    ) -> bool:
+        """按页面索引合并单张已生成图片。"""
+        record = self.get_record(record_id)
+        if not record:
+            return False
+
+        if total_count is None:
+            total_count = len(record.get("outline", {}).get("pages", []))
+
+        existing_images = record.get("images") or {}
+        generated = HistoryImageMerger.merge_generated(
+            existing_images.get("generated"),
+            page_index,
+            filename,
+            total_count,
+        )
+        status = HistoryImageMerger.compute_status(generated, total_count)
+        thumbnail = HistoryImageMerger.first_image(generated)
+
+        return self.update_record(
+            record_id,
+            images={
+                "task_id": task_id,
+                "generated": generated,
+            },
+            status=status,
+            thumbnail=thumbnail,
+        )
+
+    def sync_record_images(self, record_id: str, record: Optional[Dict] = None) -> Dict[str, Any]:
+        """从任务目录扫描图片并合并回历史记录。"""
+        if record is None:
+            record = self.get_record(record_id)
+        if not record:
+            return {"success": False, "error": "历史记录不存在"}
+
+        task_id = record.get("images", {}).get("task_id")
+        if not task_id:
+            return {"success": True, "updated": False}
+
+        files_by_index = HistoryImageMerger.files_by_index(self.history_dir, task_id)
+        if not files_by_index:
+            return {"success": True, "updated": False}
+
+        total_count = len(record.get("outline", {}).get("pages", []))
+        existing_generated = record.get("images", {}).get("generated", [])
+        generated = HistoryImageMerger.merge_many(
+            existing_generated,
+            files_by_index,
+            total_count,
+        )
+        status = HistoryImageMerger.compute_status(generated, total_count)
+        thumbnail = HistoryImageMerger.first_image(generated)
+
+        if (
+            generated == existing_generated
+            and record.get("status") == status
+            and record.get("thumbnail") == thumbnail
+        ):
+            return {"success": True, "updated": False}
+
+        updated = self.update_record(
+            record_id,
+            images={
+                "task_id": task_id,
+                "generated": generated,
+            },
+            status=status,
+            thumbnail=thumbnail,
+        )
+        return {
+            "success": updated,
+            "updated": updated,
+            "record_id": record_id,
+            "task_id": task_id,
+            "images": generated,
+            "status": status,
+        }
+
+    def _merge_safe_images(self, current_images: Optional[Dict], incoming_images: Dict) -> Dict:
+        current = dict(current_images or {})
+        incoming = dict(incoming_images or {})
+
+        current_generated = current.get("generated") or []
+        incoming_generated = incoming.get("generated")
+
+        if (
+            isinstance(incoming_generated, list)
+            and not HistoryImageMerger.has_images(incoming_generated)
+            and HistoryImageMerger.has_images(current_generated)
+        ):
+            incoming["generated"] = current_generated
+
+        if not incoming.get("task_id") and current.get("task_id"):
+            incoming["task_id"] = current.get("task_id")
+
+        return {
+            "task_id": incoming.get("task_id"),
+            "generated": [item or "" for item in incoming.get("generated", current_generated)],
+        }
+
+    def _protect_status(self, current_status: Optional[str], incoming_status: str, record: Dict) -> str:
+        if (
+            incoming_status == RecordStatus.GENERATING
+            and current_status in {RecordStatus.PARTIAL, RecordStatus.COMPLETED}
+            and HistoryImageMerger.has_images(record.get("images", {}).get("generated"))
+        ):
+            logger.info("忽略历史状态回退: %s -> %s", current_status, incoming_status)
+            return current_status
+        return incoming_status
 
     def delete_record(self, record_id: str) -> bool:
         """
@@ -452,23 +580,8 @@ class HistoryService:
             }
 
         try:
-            # 扫描目录下所有图片文件（排除缩略图）
-            image_files = []
-            for filename in os.listdir(task_dir):
-                # 跳过缩略图文件（以 thumb_ 开头）
-                if filename.startswith('thumb_'):
-                    continue
-                if filename.endswith('.png') or filename.endswith('.jpg') or filename.endswith('.jpeg'):
-                    image_files.append(filename)
-
-            # 按文件名排序（数字排序）
-            def get_index(filename):
-                try:
-                    return int(filename.split('.')[0])
-                except Exception:
-                    return 999
-
-            image_files.sort(key=get_index)
+            files_by_index = HistoryImageMerger.files_by_index(self.history_dir, task_id)
+            image_files = list(files_by_index.values())
 
             # 查找关联的历史记录
             index = self._load_index()
@@ -484,26 +597,24 @@ class HistoryService:
                 # 更新历史记录
                 record = self.get_record(record_id)
                 if record:
-                    # 根据生成图片数量判断状态
                     expected_count = len(record.get("outline", {}).get("pages", []))
-                    actual_count = len(image_files)
-
-                    if actual_count == 0:
-                        status = RecordStatus.DRAFT  # 无图片：草稿
-                    elif actual_count >= expected_count:
-                        status = RecordStatus.COMPLETED  # 全部完成
-                    else:
-                        status = RecordStatus.PARTIAL  # 部分完成
+                    existing_generated = record.get("images", {}).get("generated", [])
+                    merged_images = HistoryImageMerger.merge_many(
+                        existing_generated,
+                        files_by_index,
+                        expected_count,
+                    )
+                    status = HistoryImageMerger.compute_status(merged_images, expected_count)
 
                     # 更新图片列表和状态
                     self.update_record(
                         record_id,
                         images={
                             "task_id": task_id,
-                            "generated": image_files
+                            "generated": merged_images
                         },
                         status=status,
-                        thumbnail=image_files[0] if image_files else None
+                        thumbnail=HistoryImageMerger.first_image(merged_images)
                     )
 
                     return {
@@ -511,7 +622,7 @@ class HistoryService:
                         "record_id": record_id,
                         "task_id": task_id,
                         "images_count": len(image_files),
-                        "images": image_files,
+                        "images": merged_images,
                         "status": status
                     }
 
