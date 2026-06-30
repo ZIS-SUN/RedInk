@@ -1,9 +1,10 @@
 """Image API 图片生成器"""
 import logging
 import base64
-import requests
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 from .base import ImageGeneratorBase
+from .image_api_client import ImageApiClient
+from .image_provider_policy import ImageProviderPolicy
 from ..utils.image_compressor import compress_image
 
 logger = logging.getLogger(__name__)
@@ -15,24 +16,17 @@ class ImageApiGenerator(ImageGeneratorBase):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         logger.debug("初始化 ImageApiGenerator...")
-        self.base_url = config.get('base_url', 'https://api.example.com').rstrip('/')
-        if self.base_url.endswith('/v1'):
-            self.base_url = self.base_url[:-3]
-        self.model = config.get('model', 'default-model')
+        self.policy = ImageProviderPolicy.from_config(
+            config,
+            default_model='default-model',
+            default_endpoint='/v1/images/generations',
+        )
+        self.client = ImageApiClient(self.policy)
+        self.base_url = self.policy.base_url
+        self.model = self.policy.model
         self.default_aspect_ratio = config.get('default_aspect_ratio', '3:4')
         self.image_size = config.get('image_size', '4K')
-
-        # 支持自定义端点路径
-        endpoint_type = config.get('endpoint_type', '/v1/images/generations')
-        # 兼容旧的简写格式
-        if endpoint_type == 'images':
-            endpoint_type = '/v1/images/generations'
-        elif endpoint_type == 'chat':
-            endpoint_type = '/v1/chat/completions'
-        # 确保以 / 开头
-        if not endpoint_type.startswith('/'):
-            endpoint_type = '/' + endpoint_type
-        self.endpoint_type = endpoint_type
+        self.endpoint_type = self.policy.endpoint_type
 
         logger.info(f"ImageApiGenerator 初始化完成: base_url={self.base_url}, model={self.model}, endpoint={self.endpoint_type}")
 
@@ -111,7 +105,6 @@ class ImageApiGenerator(ImageGeneratorBase):
         payload = {
             "model": model,
             "prompt": prompt,
-            "response_format": "b64_json",
             "aspect_ratio": aspect_ratio,
             "image_size": self.image_size
         }
@@ -148,51 +141,7 @@ class ImageApiGenerator(ImageGeneratorBase):
 4. 如果参考图中有人物或产品，可以适当融入"""
             payload["prompt"] = enhanced_prompt
 
-        api_url = f"{self.base_url}{self.endpoint_type}"
-        logger.debug(f"  发送请求到: {api_url}")
-        response = requests.post(api_url, headers=headers, json=payload, timeout=300)
-
-        if response.status_code != 200:
-            error_detail = response.text[:500]
-            logger.error(f"Image API 请求失败: status={response.status_code}, error={error_detail}")
-            raise Exception(
-                f"Image API 请求失败 (状态码: {response.status_code})\n"
-                f"错误详情: {error_detail}\n"
-                f"请求地址: {api_url}\n"
-                "可能原因：\n"
-                "1. API密钥无效或已过期\n"
-                "2. 请求参数不符合API要求\n"
-                "3. API服务端错误\n"
-                "4. Base URL配置错误\n"
-                "建议：检查API密钥和base_url配置"
-            )
-
-        result = response.json()
-        logger.debug(f"  API 响应: data 长度={len(result.get('data', []))}")
-
-        if "data" in result and len(result["data"]) > 0:
-            item = result["data"][0]
-
-            if "b64_json" in item:
-                b64_data_uri = item["b64_json"]
-                if b64_data_uri.startswith('data:'):
-                    b64_string = b64_data_uri.split(',', 1)[1]
-                else:
-                    b64_string = b64_data_uri
-                image_data = base64.b64decode(b64_string)
-                logger.info(f"✅ Image API 图片生成成功: {len(image_data)} bytes")
-                return image_data
-
-        logger.error(f"无法从响应中提取图片数据: {str(result)[:200]}")
-        raise Exception(
-            f"图片数据提取失败：未找到 b64_json 数据。\n"
-            f"API响应片段: {str(result)[:500]}\n"
-            "可能原因：\n"
-            "1. API返回格式与预期不符\n"
-            "2. response_format 参数未生效\n"
-            "3. 该模型不支持 b64_json 格式\n"
-            "建议：检查API文档确认返回格式要求"
-        )
+        return self.client.generate_via_images(payload)
 
     def _generate_via_chat_api(
         self,
@@ -203,13 +152,6 @@ class ImageApiGenerator(ImageGeneratorBase):
         reference_images: Optional[List[bytes]] = None
     ) -> bytes:
         """通过 /v1/chat/completions 端点生成图片（如即梦 API）"""
-        import re
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
         # 构建用户消息内容
         user_content: Any = prompt
 
@@ -243,98 +185,4 @@ class ImageApiGenerator(ImageGeneratorBase):
             "temperature": 1.0
         }
 
-        api_url = f"{self.base_url}{self.endpoint_type}"
-        logger.info(f"Chat API 生成图片: {api_url}, model={model}")
-
-        response = requests.post(api_url, headers=headers, json=payload, timeout=300)
-
-        if response.status_code != 200:
-            error_detail = response.text[:500]
-            status_code = response.status_code
-
-            if status_code == 401:
-                raise Exception(
-                    "❌ API Key 认证失败\n\n"
-                    "【可能原因】\n"
-                    "1. API Key 无效或已过期\n"
-                    "2. API Key 格式错误\n\n"
-                    "【解决方案】\n"
-                    "在系统设置页面检查 API Key 是否正确"
-                )
-            elif status_code == 429:
-                raise Exception(
-                    "⏳ API 配额或速率限制\n\n"
-                    "【解决方案】\n"
-                    "1. 稍后再试\n"
-                    "2. 检查 API 配额使用情况"
-                )
-            else:
-                raise Exception(
-                    f"❌ Chat API 请求失败 (状态码: {status_code})\n\n"
-                    f"【错误详情】\n{error_detail[:300]}\n\n"
-                    f"【请求地址】{api_url}\n"
-                    f"【模型】{model}"
-                )
-
-        result = response.json()
-        logger.debug(f"Chat API 响应: {str(result)[:500]}")
-
-        # 解析响应
-        if "choices" in result and len(result["choices"]) > 0:
-            choice = result["choices"][0]
-            if "message" in choice and "content" in choice["message"]:
-                content = choice["message"]["content"]
-
-                if isinstance(content, str):
-                    # Markdown 图片链接: ![xxx](url)
-                    pattern = r'!\[.*?\]\((https?://[^\s\)]+)\)'
-                    urls = re.findall(pattern, content)
-                    if urls:
-                        logger.info(f"从 Markdown 提取到 {len(urls)} 张图片，下载第一张...")
-                        return self._download_image(urls[0])
-
-                    # Markdown 图片 Base64: ![xxx](data:image/...)
-                    base64_pattern = r'!\[.*?\]\((data:image\/[^;]+;base64,[^\s\)]+)\)'
-                    base64_urls = re.findall(base64_pattern, content)
-                    if base64_urls:
-                        logger.info("从 Markdown 提取到 Base64 图片数据")
-                        base64_data = base64_urls[0].split(",")[1]
-                        return base64.b64decode(base64_data)
-
-                    # 纯 Base64 data URL
-                    if content.startswith("data:image"):
-                        logger.info("检测到 Base64 图片数据")
-                        base64_data = content.split(",")[1]
-                        return base64.b64decode(base64_data)
-
-                    # 纯 URL
-                    if content.startswith("http://") or content.startswith("https://"):
-                        logger.info("检测到图片 URL")
-                        return self._download_image(content.strip())
-
-        raise Exception(
-            "❌ 无法从 Chat API 响应中提取图片数据\n\n"
-            f"【响应内容】\n{str(result)[:500]}\n\n"
-            "【可能原因】\n"
-            "1. 该模型不支持图片生成\n"
-            "2. 响应格式与预期不符\n"
-            "3. 提示词被安全过滤\n\n"
-            "【解决方案】\n"
-            "1. 确认模型名称正确\n"
-            "2. 修改提示词后重试"
-        )
-
-    def _download_image(self, url: str) -> bytes:
-        """下载图片并返回二进制数据"""
-        logger.info(f"下载图片: {url[:100]}...")
-        try:
-            response = requests.get(url, timeout=60)
-            if response.status_code == 200:
-                logger.info(f"✅ 图片下载成功: {len(response.content)} bytes")
-                return response.content
-            else:
-                raise Exception(f"下载图片失败: HTTP {response.status_code}")
-        except requests.exceptions.Timeout:
-            raise Exception("❌ 下载图片超时，请重试")
-        except Exception as e:
-            raise Exception(f"❌ 下载图片失败: {str(e)}")
+        return self.client.generate_via_chat(payload)
