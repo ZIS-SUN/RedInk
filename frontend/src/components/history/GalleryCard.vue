@@ -62,26 +62,26 @@ import { computed } from 'vue'
  */
 
 // 定义记录类型
-interface Record {
+interface GalleryRecord {
   id: string
   title: string
-  status: 'draft' | 'completed' | 'generating'
+  status: string
   page_count: number
   updated_at: string
-  thumbnail?: string
-  task_id?: string
+  thumbnail?: string | null
+  task_id?: string | null
 }
 
 // 定义 Props
 const props = defineProps<{
-  record: Record
+  record: GalleryRecord
 }>()
 
 // 定义 Emits
 defineEmits<{
   (e: 'preview', id: string): void
   (e: 'edit', id: string): void
-  (e: 'delete', record: Record): void
+  (e: 'delete', record: GalleryRecord): void
 }>()
 
 /**

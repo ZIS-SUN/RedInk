@@ -147,6 +147,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { ImageProviderForm } from '../../composables/useProviderForm'
 
 /**
  * 图片服务商编辑/添加弹窗组件
@@ -158,20 +159,6 @@ import { computed } from 'vue'
  * - 支持高并发模式和短 Prompt 模式开关
  */
 
-// 定义表单数据类型
-interface FormData {
-  name: string
-  type: string
-  api_key: string
-  api_key_masked?: string
-  _has_api_key?: boolean
-  base_url: string
-  model: string
-  endpoint_type?: string
-  high_concurrency?: boolean
-  short_prompt?: boolean
-}
-
 // 定义类型选项
 interface TypeOption {
   value: string
@@ -182,7 +169,7 @@ interface TypeOption {
 const props = defineProps<{
   visible: boolean
   isEditing: boolean
-  formData: FormData
+  formData: ImageProviderForm
   testing: boolean
   typeOptions: TypeOption[]
 }>()
@@ -192,11 +179,11 @@ const emit = defineEmits<{
   (e: 'close'): void
   (e: 'save'): void
   (e: 'test'): void
-  (e: 'update:formData', data: FormData): void
+  (e: 'update:formData', data: ImageProviderForm): void
 }>()
 
 // 更新表单字段
-function updateField(field: keyof FormData, value: string | boolean) {
+function updateField(field: keyof ImageProviderForm, value: string | boolean) {
   emit('update:formData', {
     ...props.formData,
     [field]: value

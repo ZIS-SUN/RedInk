@@ -103,12 +103,12 @@ const onDragStart = (e: DragEvent, index: number) => {
   }
 }
 
-const onDragOver = (e: DragEvent, index: number) => {
+const onDragOver = (_e: DragEvent, index: number) => {
   if (draggedIndex.value === index) return
   dragOverIndex.value = index
 }
 
-const onDrop = (e: DragEvent, index: number) => {
+const onDrop = (_e: DragEvent, index: number) => {
   dragOverIndex.value = null
   if (draggedIndex.value !== null && draggedIndex.value !== index) {
     store.movePage(draggedIndex.value, index)
@@ -190,7 +190,10 @@ const autoSaveOutline = async () => {
     isSaving.value = true
 
     // 调用更新历史记录 API
-    const result = await updateHistory(store.recordId, {
+    const recordId = store.recordId
+    if (!recordId) return
+
+    const result = await updateHistory(recordId, {
       outline: {
         raw: store.outline.raw,
         pages: store.outline.pages
