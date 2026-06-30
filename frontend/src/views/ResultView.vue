@@ -16,6 +16,14 @@
       </div>
     </div>
 
+    <ErrorCard
+      v-if="error"
+      :error="error"
+      dismissible
+      style="margin-bottom: 16px;"
+      @dismiss="error = null"
+    />
+
     <div class="card">
       <div class="grid-cols-4">
         <div v-for="image in store.images" :key="image.index" class="image-card group">
@@ -93,10 +101,13 @@ import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { regenerateImage } from '../api'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
+import ErrorCard from '../components/common/ErrorCard.vue'
+import { normalizeApiError, type AppError } from '../utils/errors'
 
 const router = useRouter()
 const store = useGeneratorStore()
 const regeneratingIndex = ref<number | null>(null)
+const error = ref<AppError | null>(null)
 
 const viewImage = (url: string) => {
   const baseUrl = url.split('?')[0]
@@ -146,14 +157,15 @@ const handleRegenerate = async (image: any) => {
     // Find the page content from outline
     const pageContent = store.outline.pages.find(p => p.index === image.index)
     if (!pageContent) {
-       alert('无法找到对应页面的内容')
+       error.value = normalizeApiError('无法找到对应页面的内容', '无法重新生成')
        return
     }
 
     // 构建上下文信息
     const context = {
       fullOutline: store.outline.raw || '',
-      userTopic: store.topic || ''
+      userTopic: store.topic || '',
+      recordId: store.recordId
     }
 
     const result = await regenerateImage(store.taskId, pageContent, true, context)
@@ -161,10 +173,10 @@ const handleRegenerate = async (image: any) => {
        const newUrl = result.image_url
        store.updateImage(image.index, newUrl)
     } else {
-       alert('重绘失败: ' + (result.error || '未知错误'))
+       error.value = normalizeApiError(result.error || result.error_message || '重绘失败', '重绘失败')
     }
   } catch (e: any) {
-    alert('重绘失败: ' + e.message)
+    error.value = normalizeApiError(e, '重绘失败')
   } finally {
     regeneratingIndex.value = null
   }

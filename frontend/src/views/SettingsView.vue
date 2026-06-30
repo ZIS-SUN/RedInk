@@ -11,6 +11,24 @@
     </div>
 
     <div v-else class="settings-container">
+      <ErrorCard
+        v-if="feedback?.type === 'error'"
+        :error="feedback.error"
+        dismissible
+        @dismiss="clearFeedback"
+        style="margin-bottom: 16px;"
+      />
+
+      <div
+        v-else-if="feedback?.type === 'success'"
+        class="success-card"
+        role="status"
+        aria-live="polite"
+      >
+        <span>{{ feedback.message }}</span>
+        <button type="button" @click="clearFeedback" aria-label="关闭提示">×</button>
+      </div>
+
       <!-- 文本生成配置 -->
       <div class="card">
         <div class="section-header">
@@ -100,6 +118,7 @@ import { onMounted } from 'vue'
 import ProviderTable from '../components/settings/ProviderTable.vue'
 import ProviderModal from '../components/settings/ProviderModal.vue'
 import ImageProviderModal from '../components/settings/ImageProviderModal.vue'
+import ErrorCard from '../components/common/ErrorCard.vue'
 import {
   useProviderForm,
   textTypeOptions,
@@ -121,6 +140,7 @@ const {
   loading,
   testingText,
   testingImage,
+  feedback,
 
   // 配置数据
   textConfig,
@@ -138,6 +158,7 @@ const {
 
   // 方法
   loadConfig,
+  clearFeedback,
 
   // 文本服务商方法
   activateTextProvider,
@@ -191,6 +212,29 @@ onMounted(() => {
   font-size: 14px;
   color: #666;
   margin: 0;
+}
+
+.success-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.success-card button {
+  border: none;
+  background: transparent;
+  color: #166534;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 /* 按钮样式 */

@@ -24,6 +24,19 @@
       </div>
     </div>
 
+    <ErrorCard
+      v-if="error"
+      :error="error"
+      dismissible
+      style="margin-bottom: 16px;"
+      @dismiss="error = null"
+    />
+
+    <div v-else-if="successMessage" class="success-card" role="status" aria-live="polite">
+      <span>{{ successMessage }}</span>
+      <button type="button" @click="successMessage = ''" aria-label="关闭提示">×</button>
+    </div>
+
     <!-- Stats Overview -->
     <StatsOverview v-if="stats" :stats="stats" />
 
@@ -140,6 +153,8 @@ import StatsOverview from '../components/history/StatsOverview.vue'
 import GalleryCard from '../components/history/GalleryCard.vue'
 import ImageGalleryModal from '../components/history/ImageGalleryModal.vue'
 import OutlineModal from '../components/history/OutlineModal.vue'
+import ErrorCard from '../components/common/ErrorCard.vue'
+import { normalizeApiError, type AppError } from '../utils/errors'
 
 const router = useRouter()
 const route = useRoute()
@@ -159,21 +174,26 @@ const viewingRecord = ref<any>(null)
 const regeneratingImages = ref<Set<number>>(new Set())
 const showOutlineModal = ref(false)
 const isScanning = ref(false)
+const error = ref<AppError | null>(null)
+const successMessage = ref('')
 
 /**
  * 加载历史记录列表
  */
 async function loadData() {
   loading.value = true
+  error.value = null
   try {
     let statusFilter = currentTab.value === 'all' ? undefined : currentTab.value
     const res = await getHistoryList(currentPage.value, 12, statusFilter)
     if (res.success) {
       records.value = res.records
       totalPages.value = res.total_pages
+    } else {
+      error.value = normalizeApiError(res.error || res.error_message || '获取历史记录列表失败', '获取历史记录列表失败')
     }
   } catch(e) {
-    console.error(e)
+    error.value = normalizeApiError(e, '获取历史记录列表失败')
   } finally {
     loading.value = false
   }
@@ -185,8 +205,14 @@ async function loadData() {
 async function loadStats() {
   try {
     const res = await getHistoryStats()
-    if (res.success) stats.value = res
-  } catch(e) {}
+    if (res.success) {
+      stats.value = res
+    } else {
+      error.value = normalizeApiError(res.error || res.error_message || '获取统计信息失败', '获取统计信息失败')
+    }
+  } catch(e) {
+    error.value = normalizeApiError(e, '获取统计信息失败')
+  }
 }
 
 /**
@@ -207,13 +233,18 @@ async function handleSearch() {
     return
   }
   loading.value = true
+  error.value = null
   try {
     const res = await searchHistory(searchKeyword.value)
     if (res.success) {
       records.value = res.records
       totalPages.value = 1
+    } else {
+      error.value = normalizeApiError(res.error || res.error_message || '搜索历史记录失败', '搜索历史记录失败')
     }
-  } catch(e) {} finally {
+  } catch(e) {
+    error.value = normalizeApiError(e, '搜索历史记录失败')
+  } finally {
     loading.value = false
   }
 }
@@ -227,12 +258,13 @@ async function loadRecord(id: string) {
     store.setTopic(res.record.title)
     store.setOutline(res.record.outline.raw, res.record.outline.pages)
     store.setRecordId(res.record.id)
-    if (res.record.images.generated.length > 0) {
+    const generated = res.record.images.generated || []
+    if (generated.some(Boolean)) {
       store.taskId = res.record.images.task_id
       store.images = res.record.outline.pages.map((page, idx) => {
-        const filename = res.record!.images.generated[idx]
+        const filename = generated[page.index] || generated[idx] || ''
         return {
-          index: idx,
+          index: page.index,
           url: filename ? `/api/images/${res.record!.images.task_id}/${filename}` : '',
           status: filename ? 'done' : 'error',
           retryable: !filename
@@ -240,6 +272,8 @@ async function loadRecord(id: string) {
       })
     }
     router.push('/outline')
+  } else {
+    error.value = normalizeApiError(res.error || res.error_message || '打开历史记录失败', '打开历史记录失败')
   }
 }
 
@@ -248,7 +282,11 @@ async function loadRecord(id: string) {
  */
 async function viewImages(id: string) {
   const res = await getHistory(id)
-  if (res.success) viewingRecord.value = res.record
+  if (res.success) {
+    viewingRecord.value = res.record
+  } else {
+    error.value = normalizeApiError(res.error || res.error_message || '查看图片失败', '查看图片失败')
+  }
 }
 
 /**
@@ -264,9 +302,13 @@ function closeGallery() {
  */
 async function confirmDelete(record: any) {
   if(confirm('确定删除吗？')) {
-    await deleteHistory(record.id)
-    loadData()
-    loadStats()
+    const result = await deleteHistory(record.id)
+    if (result.success) {
+      loadData()
+      loadStats()
+    } else {
+      error.value = normalizeApiError(result.error || result.error_message || '删除历史记录失败', '删除历史记录失败')
+    }
   }
 }
 
@@ -283,11 +325,11 @@ function changePage(p: number) {
  */
 async function regenerateHistoryImage(index: number) {
   if (!viewingRecord.value || !viewingRecord.value.images.task_id) {
-    alert('无法重新生成：缺少任务信息')
+    error.value = normalizeApiError('缺少任务信息，无法重新生成图片。', '无法重新生成')
     return
   }
 
-  const page = viewingRecord.value.outline.pages[index]
+  const page = viewingRecord.value.outline.pages.find((item: any) => item.index === index)
   if (!page) return
 
   regeneratingImages.value.add(index)
@@ -295,7 +337,8 @@ async function regenerateHistoryImage(index: number) {
   try {
     const context = {
       fullOutline: viewingRecord.value.outline.raw || '',
-      userTopic: viewingRecord.value.title || ''
+      userTopic: viewingRecord.value.title || '',
+      recordId: viewingRecord.value.id
     }
 
     const result = await apiRegenerateImage(
@@ -307,6 +350,9 @@ async function regenerateHistoryImage(index: number) {
 
     if (result.success && result.image_url) {
       const filename = result.image_url.split('/').pop()
+      while (viewingRecord.value.images.generated.length <= index) {
+        viewingRecord.value.images.generated.push('')
+      }
       viewingRecord.value.images.generated[index] = filename
 
       // 刷新图片
@@ -327,11 +373,11 @@ async function regenerateHistoryImage(index: number) {
       regeneratingImages.value.delete(index)
     } else {
       regeneratingImages.value.delete(index)
-      alert('重新生成失败: ' + (result.error || '未知错误'))
+      error.value = normalizeApiError(result.error || result.error_message || '重新生成失败', '重新生成失败')
     }
   } catch (e) {
     regeneratingImages.value.delete(index)
-    alert('重新生成失败: ' + String(e))
+    error.value = normalizeApiError(e, '重新生成失败')
   }
 }
 
@@ -373,15 +419,15 @@ async function handleScanAll() {
         message += `- 孤立任务（无记录）: ${result.orphan_tasks.length} 个\n`
       }
 
-      alert(message)
+      successMessage.value = message
       await loadData()
       await loadStats()
     } else {
-      alert('扫描失败: ' + (result.error || '未知错误'))
+      error.value = normalizeApiError(result.error || result.error_message || '扫描失败', '扫描失败')
     }
   } catch (e) {
     console.error('扫描失败:', e)
-    alert('扫描失败: ' + String(e))
+    error.value = normalizeApiError(e, '扫描失败')
   } finally {
     isScanning.value = false
   }
@@ -465,6 +511,30 @@ onMounted(async () => {
   top: 50%;
   transform: translateY(-50%);
   color: #ccc;
+}
+
+.success-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+  border-radius: 8px;
+  font-size: 14px;
+  white-space: pre-line;
+}
+
+.success-card button {
+  border: none;
+  background: transparent;
+  color: #166534;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 /* Gallery Grid */

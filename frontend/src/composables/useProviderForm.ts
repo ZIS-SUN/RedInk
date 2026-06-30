@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { getConfig, updateConfig, testConnection, type Config } from '../api'
+import { normalizeApiError, type AppError } from '../utils/errors'
 
 /**
  * 服务商表单管理 Composable
@@ -21,6 +22,7 @@ export interface Provider {
   endpoint_type?: string
   high_concurrency?: boolean
   short_prompt?: boolean
+  [key: string]: any
 }
 
 // 服务商配置类型
@@ -76,6 +78,11 @@ export function useProviderForm() {
   const saving = ref(false)
   const testingText = ref(false)
   const testingImage = ref(false)
+  const feedback = ref<{
+    type: 'success' | 'error'
+    message?: string
+    error?: AppError
+  } | null>(null)
 
   // 配置数据
   const textConfig = ref<ProviderConfig>({
@@ -146,10 +153,10 @@ export function useProviderForm() {
         }
         imageConfig.value = result.config.image_generation
       } else {
-        alert('加载配置失败: ' + (result.error || '未知错误'))
+        setError(result.error || result.error_message || '加载配置失败', '加载配置失败')
       }
     } catch (e) {
-      alert('加载配置失败: ' + String(e))
+      setError(e, '加载配置失败')
     } finally {
       loading.value = false
     }
@@ -172,10 +179,27 @@ export function useProviderForm() {
       if (result.success) {
         // 重新加载配置以获取最新的脱敏 API Key
         await loadConfig()
+        setSuccess(result.message || '配置已保存')
       }
     } catch (e) {
       console.error('自动保存失败:', e)
+      setError(e, '保存配置失败')
     }
+  }
+
+  function setSuccess(message: string) {
+    feedback.value = { type: 'success', message }
+  }
+
+  function setError(error: unknown, fallbackTitle = '操作失败') {
+    feedback.value = {
+      type: 'error',
+      error: normalizeApiError(error, fallbackTitle)
+    }
+  }
+
+  function clearFeedback() {
+    feedback.value = null
   }
 
   // ==================== 文本服务商操作 ====================
@@ -230,18 +254,18 @@ export function useProviderForm() {
     const name = editingTextProvider.value || textForm.value.name
 
     if (!name) {
-      alert('请填写服务商名称')
+      setError('请填写服务商名称', '配置不完整')
       return
     }
 
     if (!textForm.value.type) {
-      alert('请选择服务商类型')
+      setError('请选择服务商类型', '配置不完整')
       return
     }
 
     // 新增时必须填写 API Key
     if (!editingTextProvider.value && !textForm.value.api_key) {
-      alert('请填写 API Key')
+      setError('请填写 API Key', '配置不完整')
       return
     }
 
@@ -298,13 +322,14 @@ export function useProviderForm() {
         provider_name: editingTextProvider.value || undefined,
         api_key: textForm.value.api_key || undefined,
         base_url: textForm.value.base_url,
+        endpoint_type: textForm.value.endpoint_type,
         model: textForm.value.model
       })
       if (result.success) {
-        alert('✅ ' + result.message)
+        setSuccess(result.message || '连接成功')
       }
     } catch (e: any) {
-      alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
+      setError(e, '连接失败')
     } finally {
       testingText.value = false
     }
@@ -320,13 +345,14 @@ export function useProviderForm() {
         provider_name: name,
         api_key: undefined,
         base_url: provider.base_url,
+        endpoint_type: provider.endpoint_type,
         model: provider.model
       })
       if (result.success) {
-        alert('✅ ' + result.message)
+        setSuccess(`${name} 连接成功`)
       }
     } catch (e: any) {
-      alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
+      setError(e, `${name} 连接失败`)
     }
   }
 
@@ -384,24 +410,25 @@ export function useProviderForm() {
     const name = editingImageProvider.value || imageForm.value.name
 
     if (!name) {
-      alert('请填写服务商名称')
+      setError('请填写服务商名称', '配置不完整')
       return
     }
 
     if (!imageForm.value.type) {
-      alert('请填写服务商类型')
+      setError('请填写服务商类型', '配置不完整')
       return
     }
 
     // 新增时必须填写 API Key
     if (!editingImageProvider.value && !imageForm.value.api_key) {
-      alert('请填写 API Key')
+      setError('请填写 API Key', '配置不完整')
       return
     }
 
     const existingProvider = imageConfig.value.providers[name] || {}
 
     const providerData: any = {
+      ...existingProvider,
       type: imageForm.value.type,
       model: imageForm.value.model,
       high_concurrency: imageForm.value.high_concurrency,
@@ -454,13 +481,14 @@ export function useProviderForm() {
         provider_name: editingImageProvider.value || undefined,
         api_key: imageForm.value.api_key || undefined,
         base_url: imageForm.value.base_url,
+        endpoint_type: imageForm.value.endpoint_type,
         model: imageForm.value.model
       })
       if (result.success) {
-        alert('✅ ' + result.message)
+        setSuccess(result.message || '连接成功')
       }
     } catch (e: any) {
-      alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
+      setError(e, '连接失败')
     } finally {
       testingImage.value = false
     }
@@ -476,13 +504,14 @@ export function useProviderForm() {
         provider_name: name,
         api_key: undefined,
         base_url: provider.base_url,
+        endpoint_type: provider.endpoint_type,
         model: provider.model
       })
       if (result.success) {
-        alert('✅ ' + result.message)
+        setSuccess(`${name} 连接成功`)
       }
     } catch (e: any) {
-      alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
+      setError(e, `${name} 连接失败`)
     }
   }
 
@@ -506,6 +535,7 @@ export function useProviderForm() {
     saving,
     testingText,
     testingImage,
+    feedback,
 
     // 配置数据
     textConfig,
@@ -523,6 +553,7 @@ export function useProviderForm() {
 
     // 方法
     loadConfig,
+    clearFeedback,
 
     // 文本服务商方法
     activateTextProvider,

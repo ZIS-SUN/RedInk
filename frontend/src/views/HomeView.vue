@@ -40,11 +40,13 @@
       </div>
     </div>
 
-    <!-- 错误提示 -->
-    <div v-if="error" class="error-toast">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-      {{ error }}
-    </div>
+    <ErrorCard
+      v-if="error"
+      class="home-error"
+      :error="error"
+      dismissible
+      @dismiss="error = null"
+    />
   </div>
 </template>
 
@@ -53,10 +55,12 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { generateOutline, createHistory } from '../api'
+import { normalizeApiError, type AppError } from '../utils/errors'
 
 // 引入组件
 import ShowcaseBackground from '../components/home/ShowcaseBackground.vue'
 import ComposerInput from '../components/home/ComposerInput.vue'
+import ErrorCard from '../components/common/ErrorCard.vue'
 
 const router = useRouter()
 const store = useGeneratorStore()
@@ -64,7 +68,7 @@ const store = useGeneratorStore()
 // 状态
 const topic = ref('')
 const loading = ref(false)
-const error = ref('')
+const error = ref<AppError | null>(null)
 const composerRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 
 // 上传的图片文件
@@ -84,7 +88,7 @@ async function handleGenerate() {
   if (!topic.value.trim()) return
 
   loading.value = true
-  error.value = ''
+  error.value = null
 
   try {
     const imageFiles = uploadedImageFiles.value
@@ -137,10 +141,10 @@ async function handleGenerate() {
 
       router.push('/outline')
     } else {
-      error.value = result.error || '生成大纲失败'
+      error.value = normalizeApiError(result.error || result.error_message || '生成大纲失败', '生成大纲失败')
     }
   } catch (err: any) {
-    error.value = err.message || '网络错误，请重试'
+    error.value = normalizeApiError(err, '生成大纲失败')
   } finally {
     loading.value = false
   }
@@ -252,20 +256,12 @@ async function handleGenerate() {
   text-decoration: underline;
 }
 
-/* Error Toast */
-.error-toast {
+.home-error {
   position: fixed;
   bottom: 32px;
   left: 50%;
   transform: translateX(-50%);
-  background: #FF4D4F;
-  color: white;
-  padding: 12px 24px;
-  border-radius: 50px;
-  box-shadow: 0 8px 24px rgba(255, 77, 79, 0.3);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  width: min(720px, calc(100vw - 32px));
   z-index: 1000;
   animation: slideUp 0.3s ease-out;
 }
@@ -277,7 +273,7 @@ async function handleGenerate() {
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 </style>

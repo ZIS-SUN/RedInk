@@ -137,6 +137,7 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useGeneratorStore } from '../../stores/generator'
 import { generateContent } from '../../api'
+import { formatErrorMessage } from '../../utils/errors'
 
 const store = useGeneratorStore()
 
@@ -183,10 +184,10 @@ async function handleGenerate() {
     if (result.success && result.titles && result.copywriting && result.tags) {
       store.setContent(result.titles, result.copywriting, result.tags)
     } else {
-      store.setContentError(result.error || '生成失败')
+      store.setContentError(formatErrorMessage(result.error || result.error_message || '生成失败', '内容生成失败'))
     }
   } catch (error: any) {
-    store.setContentError(error.message || '生成失败，请重试')
+    store.setContentError(formatErrorMessage(error, '内容生成失败'))
   } finally {
     loading.value = false
   }
