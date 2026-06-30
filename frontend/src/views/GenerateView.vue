@@ -51,7 +51,6 @@
               <button
                 class="overlay-btn"
                 @click="regenerateImage(image.index)"
-                :disabled="image.status === 'retrying'"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M23 4v6h-6"></path>
@@ -104,30 +103,15 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import {
-  generateImagesPost,
-  regenerateImage as apiRegenerateImage,
-  retryFailedImages as apiRetryFailed,
-  createHistory,
-  getHistory,
-  getImageUrl,
-  type HistoryDetail
-} from '../api'
 import ErrorCard from '../components/common/ErrorCard.vue'
-import {
-  formatErrorMessage,
-  normalizeApiError,
-  type AppError
-} from '../utils/errors'
+import { useGenerationRunner } from '../composables/useGenerationRunner'
+import { useImageRetry } from '../composables/useImageRetry'
+import type { AppError } from '../utils/errors'
 
 const router = useRouter()
 const store = useGeneratorStore()
 
 const error = ref<AppError | null>(null)
-const isRetrying = ref(false)
-const redirectTimer = ref<number | null>(null)
-const regeneratingIndices = ref(new Set<number>())
-let isUnmounted = false
 
 const isGenerating = computed(() => store.progress.status === 'generating')
 
@@ -150,251 +134,24 @@ const getStatusText = (status: string) => {
   return texts[status] || '等待中'
 }
 
-function finishIfAllImagesDone() {
-  if (store.taskId && store.images.length > 0 && store.images.every(img => img.status === 'done')) {
-    store.finishGeneration(store.taskId)
-  }
+function setError(nextError: AppError | null) {
+  error.value = nextError
 }
 
-// 重试单张图片（异步并发执行，不阻塞）
-function retrySingleImage(index: number) {
-  if (!store.taskId || regeneratingIndices.value.has(index)) return
+const {
+  isRetrying,
+  regenerateImage,
+  retryAllFailed,
+  retrySingleImage
+} = useImageRetry(setError)
 
-  const page = store.outline.pages.find(p => p.index === index)
-  if (!page) return
+const {
+  cleanupGenerationRunner,
+  startGenerationFlow
+} = useGenerationRunner(hasFailedImages, setError)
 
-  // 标记为正在重绘
-  regeneratingIndices.value.add(index)
-
-  // 立即设置为重试状态
-  store.setImageRetrying(index)
-
-  // 构建上下文信息
-  const context = {
-    fullOutline: store.outline.raw || '',
-    userTopic: store.topic || '',
-    recordId: store.recordId
-  }
-
-  // 异步执行重绘，不阻塞
-  apiRegenerateImage(store.taskId, page, true, context)
-    .then(result => {
-      if (result.success && result.image_url) {
-        store.updateImage(index, result.image_url)
-        finishIfAllImagesDone()
-      } else {
-        store.updateProgress(
-          index,
-          'error',
-          undefined,
-          formatErrorMessage(result.error || result.error_message || '重绘失败', '重绘失败')
-        )
-      }
-    })
-    .catch(e => {
-      store.updateProgress(index, 'error', undefined, formatErrorMessage(e, '重绘失败'))
-    })
-    .finally(() => {
-      regeneratingIndices.value.delete(index)
-    })
-}
-
-// 重新生成图片（成功的也可以重新生成，立即返回不等待）
-function regenerateImage(index: number) {
-  retrySingleImage(index)
-}
-
-// 批量重试所有失败的图片
-async function retryAllFailed() {
-  if (!store.taskId) return
-
-  const failedPages = store.getFailedPages()
-  if (failedPages.length === 0) return
-
-  isRetrying.value = true
-
-  // 设置所有失败的图片为重试状态
-  failedPages.forEach(page => {
-    store.setImageRetrying(page.index)
-  })
-
-  try {
-    await apiRetryFailed(
-      store.taskId,
-      failedPages,
-      // onProgress
-      () => {},
-      // onComplete
-      (event) => {
-        if (event.image_url) {
-          store.updateImage(event.index, event.image_url)
-        }
-      },
-      // onError
-      (event) => {
-        store.updateProgress(
-          event.index,
-          'error',
-          undefined,
-          formatErrorMessage(event.error || event.message || '补图失败', '补图失败')
-        )
-      },
-      // onFinish
-      (event) => {
-        isRetrying.value = false
-        if (event.failed === 0) {
-          finishIfAllImagesDone()
-        } else {
-          store.progress.status = 'error'
-        }
-      },
-      // onStreamError
-      (err) => {
-        console.error('重试失败:', err)
-        isRetrying.value = false
-        error.value = normalizeApiError(err, '补图失败')
-      },
-      store.recordId
-    )
-  } catch (e) {
-    isRetrying.value = false
-    error.value = normalizeApiError(e, '补图失败')
-  }
-}
-
-function hasGeneratedImages(record: HistoryDetail): boolean {
-  return !!record.images?.task_id && (record.images.generated || []).some(Boolean)
-}
-
-function hydrateFromHistory(record: HistoryDetail) {
-  const taskId = record.images.task_id
-  const generated = record.images.generated || []
-  const pages = record.outline.pages || []
-  const doneCount = pages.reduce((count, page, idx) => {
-    const filename = generated[page.index] || generated[idx]
-    return filename ? count + 1 : count
-  }, 0)
-
-  store.setTopic(record.title)
-  store.setOutline(record.outline.raw, pages)
-  store.setRecordId(record.id)
-  store.taskId = taskId
-  store.images = pages.map((page, idx) => {
-    const filename = generated[page.index] || generated[idx] || ''
-    return {
-      index: page.index,
-      url: filename && taskId ? getImageUrl(taskId, filename) : '',
-      status: filename ? 'done' : 'error',
-      retryable: !filename
-    }
-  })
-  store.progress.total = pages.length
-  store.progress.current = doneCount
-  store.progress.status = doneCount >= pages.length ? 'done' : 'error'
-  store.stage = doneCount >= pages.length ? 'result' : 'generating'
-}
-
-async function restoreFromHistory(): Promise<boolean> {
-  if (!store.recordId) return false
-
-  const res = await getHistory(store.recordId)
-  if (!res.success || !res.record) return false
-
-  if (!hasGeneratedImages(res.record)) return false
-
-  hydrateFromHistory(res.record)
-  return true
-}
-
-async function ensureRecord() {
-  if (store.recordId) return
-
-  console.warn('警告: recordId 不存在，尝试创建历史记录作为兜底')
-  try {
-    const result = await createHistory(store.topic, {
-      raw: store.outline.raw,
-      pages: store.outline.pages
-    })
-    if (result.success && result.record_id) {
-      store.setRecordId(result.record_id)
-      console.log('兜底创建历史记录成功:', store.recordId)
-    }
-  } catch (e) {
-    console.error('兜底创建历史记录失败:', e)
-  }
-}
-
-onMounted(async () => {
-  if (store.outline.pages.length === 0) {
-    router.push('/')
-    return
-  }
-
-  if (await restoreFromHistory()) return
-
-  await ensureRecord()
-
-  store.startGeneration()
-
-  generateImagesPost(
-    store.outline.pages,
-    null,
-    store.outline.raw,  // 传入完整大纲文本
-    // onProgress
-    (event) => {
-      console.log('Progress:', event)
-    },
-    // onComplete
-    (event) => {
-      console.log('Complete:', event)
-      if (event.image_url) {
-        store.updateProgress(event.index, 'done', event.image_url)
-      }
-    },
-    // onError
-    (event) => {
-      console.error('Error:', event)
-      store.updateProgress(
-        event.index,
-        'error',
-        undefined,
-        formatErrorMessage(event.error || event.message || '图片生成失败', '图片生成失败')
-      )
-    },
-    // onFinish
-    async (event) => {
-      console.log('Finish:', event)
-      store.finishGeneration(event.task_id)
-
-      // 如果没有失败的，跳转到结果页
-      if (!hasFailedImages.value) {
-        redirectTimer.value = window.setTimeout(() => {
-          if (!isUnmounted) {
-            router.push('/result')
-          }
-        }, 1000)
-      }
-    },
-    // onStreamError
-    (err) => {
-      console.error('Stream Error:', err)
-      error.value = normalizeApiError(err, '图片生成失败')
-    },
-    // userImages - 用户上传的参考图片
-    store.userImages.length > 0 ? store.userImages : undefined,
-    // userTopic - 用户原始输入
-    store.topic,
-    store.recordId
-  )
-})
-
-onUnmounted(() => {
-  isUnmounted = true
-  if (redirectTimer.value !== null) {
-    clearTimeout(redirectTimer.value)
-    redirectTimer.value = null
-  }
-})
+onMounted(startGenerationFlow)
+onUnmounted(cleanupGenerationRunner)
 </script>
 
 <style scoped>
