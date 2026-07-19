@@ -1,12 +1,14 @@
 <template>
   <div class="container">
+    <StepIndicator :current="4" />
+
     <div class="page-header">
       <div>
         <h1 class="page-title">创作完成</h1>
-        <p class="page-subtitle">恭喜！你的小红书图文已生成完毕，共 {{ store.images.length }} 张</p>
+        <p class="page-subtitle">恭喜！你的小红书图文已生成完毕，共 {{ store.images.length }} 张，当前作品已保存到历史记录</p>
       </div>
       <div style="display: flex; gap: 12px;">
-        <button class="btn" @click="startOver" style="background: white; border: 1px solid var(--border-color);">
+        <button class="btn" @click="showResetConfirm = true" style="background: white; border: 1px solid var(--border-color);">
           再来一篇
         </button>
         <button class="btn btn-primary" @click="downloadAll">
@@ -36,12 +38,14 @@
             <img
               :src="image.url"
               :alt="`第 ${image.index + 1} 页`"
+              loading="lazy"
               style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s;"
+              @error="onImgError"
             />
             <!-- Regenerating Overlay -->
             <div v-if="regeneratingIndex === image.index" style="position: absolute; inset: 0; background: rgba(255,255,255,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
                <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; border-color: var(--primary); border-top-color: transparent;"></div>
-               <span style="font-size: 12px; color: var(--primary); margin-top: 8px; font-weight: 600;">重绘中...</span>
+               <span style="font-size: 12px; color: var(--primary); margin-top: 8px; font-weight: 600;">重新生成中…</span>
             </div>
 
             <!-- Hover Overlay -->
@@ -50,17 +54,18 @@
             </div>
           </div>
 
-          <!-- Action Bar -->
+          <!-- Action Bar（常显操作栏，触屏可达） -->
           <div style="padding: 12px; border-top: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 12px; color: var(--text-sub);">Page {{ image.index + 1 }}</span>
-            <div style="display: flex; gap: 8px;">
+            <span style="font-size: 12px; color: var(--text-sub);">第 {{ image.index + 1 }} 页</span>
+            <div style="display: flex; gap: 10px; align-items: center;">
               <button
-                style="border: none; background: none; color: var(--text-sub); cursor: pointer; display: flex; align-items: center;"
+                class="action-link"
                 title="重新生成此图"
                 @click="handleRegenerate(image)"
                 :disabled="regeneratingIndex === image.index"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                {{ regeneratingIndex === image.index ? '重新生成中…' : '重新生成' }}
               </button>
               <button
                 style="border: none; background: none; color: var(--primary); cursor: pointer; font-size: 12px;"
@@ -76,6 +81,16 @@
 
     <!-- 标题、文案、标签生成区域 -->
     <ContentDisplay />
+
+    <!-- 再来一篇确认 -->
+    <ConfirmDialog
+      :visible="showResetConfirm"
+      title="开始新的创作？"
+      message="当前作品已保存到历史记录，随时可以在「我的创作」中找回。继续将清空当前工作区。"
+      confirm-text="再来一篇"
+      @confirm="startOver"
+      @cancel="showResetConfirm = false"
+    />
   </div>
 </template>
 
@@ -93,6 +108,36 @@
 .image-card:hover img {
   transform: scale(1.05);
 }
+
+.action-link {
+  border: none;
+  background: none;
+  color: var(--text-sub);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 0;
+}
+
+.action-link:hover:not(:disabled) {
+  color: var(--primary);
+}
+
+.action-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
 </style>
 
 <script setup lang="ts">
@@ -102,12 +147,29 @@ import { useGeneratorStore } from '../stores/generator'
 import { regenerateImage } from '../api'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
+import StepIndicator from './shared/StepIndicator.vue'
+import ConfirmDialog from './shared/ConfirmDialog.vue'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
 const router = useRouter()
 const store = useGeneratorStore()
 const regeneratingIndex = ref<number | null>(null)
 const error = ref<AppError | null>(null)
+const showResetConfirm = ref(false)
+
+// 图片加载失败兜底占位（任务目录被清理时避免裸 404 图标）
+const FALLBACK_IMG =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="300" height="400" fill="#f5f5f5"/><text x="150" y="190" text-anchor="middle" font-size="16" fill="#999" font-family="sans-serif">图片加载失败</text><text x="150" y="216" text-anchor="middle" font-size="12" fill="#bbb" font-family="sans-serif">文件可能已被清理</text></svg>'
+  )
+
+function onImgError(e: Event) {
+  const img = e.target as HTMLImageElement
+  if (img.src !== FALLBACK_IMG) {
+    img.src = FALLBACK_IMG
+  }
+}
 
 const viewImage = (url: string) => {
   const baseUrl = url.split('?')[0]
@@ -115,6 +177,7 @@ const viewImage = (url: string) => {
 }
 
 const startOver = () => {
+  showResetConfirm.value = false
   store.reset()
   router.push('/')
 }
@@ -173,10 +236,10 @@ const handleRegenerate = async (image: any) => {
        const newUrl = result.image_url
        store.updateImage(image.index, newUrl)
     } else {
-       error.value = normalizeApiError(result.error || result.error_message || '重绘失败', '重绘失败')
+       error.value = normalizeApiError(result.error || result.error_message || '重新生成失败', '重新生成失败')
     }
   } catch (e: any) {
-    error.value = normalizeApiError(e, '重绘失败')
+    error.value = normalizeApiError(e, '重新生成失败')
   } finally {
     regeneratingIndex.value = null
   }

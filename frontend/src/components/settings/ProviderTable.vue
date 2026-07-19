@@ -165,9 +165,9 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 }
 
 .btn-activate.active {
-  background: rgba(34, 197, 94, 0.1);
-  border-color: #22c55e;
-  color: #22c55e;
+  background: var(--color-success-soft, rgba(34, 197, 94, 0.1));
+  border-color: var(--color-success, #22c55e);
+  color: var(--color-success, #22c55e);
   cursor: default;
 }
 
@@ -196,7 +196,7 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 }
 
 .apikey-masked.empty {
-  color: #f59e0b;
+  color: var(--color-warning, #f59e0b);
 }
 
 /* 操作列 */
@@ -228,9 +228,9 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 }
 
 .btn-icon.danger:hover {
-  border-color: #ef4444;
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
+  border-color: var(--color-danger, #ef4444);
+  color: var(--color-danger, #ef4444);
+  background: var(--color-danger-soft, rgba(239, 68, 68, 0.05));
 }
 
 /* 响应式 */

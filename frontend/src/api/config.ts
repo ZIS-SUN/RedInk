@@ -1,5 +1,4 @@
-import axios from 'axios'
-import { API_BASE_URL } from './client'
+import { LLM_TIMEOUT, http } from './client'
 import type { Config } from './types'
 import type { AppError } from '../utils/errors'
 
@@ -9,7 +8,7 @@ export async function getConfig(): Promise<{
   error?: AppError | string
   error_message?: string
 }> {
-  const response = await axios.get(`${API_BASE_URL}/config`)
+  const response = await http.get('/config')
   return response.data
 }
 
@@ -19,7 +18,7 @@ export async function updateConfig(config: Partial<Config>): Promise<{
   error?: AppError | string
   error_message?: string
 }> {
-  const response = await axios.post(`${API_BASE_URL}/config`, config)
+  const response = await http.post('/config', config)
   return response.data
 }
 
@@ -36,6 +35,7 @@ export async function testConnection(config: {
   error?: AppError | string
   error_message?: string
 }> {
-  const response = await axios.post(`${API_BASE_URL}/config/test`, config)
+  // 连通性测试会真实请求上游 LLM，超时放宽
+  const response = await http.post('/config/test', config, { timeout: LLM_TIMEOUT })
   return response.data
 }

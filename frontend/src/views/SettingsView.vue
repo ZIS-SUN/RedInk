@@ -16,6 +16,7 @@
         :error="feedback.error"
         dismissible
         @dismiss="clearFeedback"
+        @retry="handleRetry"
         style="margin-bottom: 16px;"
       />
 
@@ -183,6 +184,14 @@ const {
   updateImageForm
 } = useProviderForm()
 
+/**
+ * 错误重试：清除错误提示并重新加载配置
+ */
+function handleRetry() {
+  clearFeedback()
+  loadConfig()
+}
+
 onMounted(() => {
   loadConfig()
 })
@@ -221,9 +230,9 @@ onMounted(() => {
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px 14px;
-  border: 1px solid #bbf7d0;
-  background: #f0fdf4;
-  color: #166534;
+  border: 1px solid var(--color-success-soft, #bbf7d0);
+  background: var(--color-success-soft, #f0fdf4);
+  color: var(--color-success, #166534);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -231,7 +240,7 @@ onMounted(() => {
 .success-card button {
   border: none;
   background: transparent;
-  color: #166534;
+  color: var(--color-success, #166534);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -254,5 +263,13 @@ onMounted(() => {
   justify-content: center;
   padding: 80px 20px;
   color: #666;
+}
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .section-header {
+    flex-direction: column;
+    gap: 10px;
+  }
 }
 </style>

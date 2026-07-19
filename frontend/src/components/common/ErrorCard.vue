@@ -9,6 +9,14 @@
         </div>
         <p class="error-detail">{{ normalized.detail }}</p>
         <p v-if="normalized.suggestion" class="error-suggestion">{{ normalized.suggestion }}</p>
+        <button
+          v-if="normalized.retryable"
+          class="retry-btn"
+          type="button"
+          @click="$emit('retry')"
+        >
+          重试
+        </button>
       </div>
       <button v-if="dismissible" class="error-close" type="button" @click="$emit('dismiss')" aria-label="关闭错误提示">
         ×
@@ -42,6 +50,7 @@ const props = defineProps<{
 
 defineEmits<{
   (e: 'dismiss'): void
+  (e: 'retry'): void
 }>()
 
 const copied = ref(false)
@@ -181,5 +190,22 @@ async function copyDiagnostics() {
   padding: 6px 10px;
   font-size: 12px;
   cursor: pointer;
+}
+
+.retry-btn {
+  margin-top: 10px;
+  border: none;
+  background: var(--color-danger, #ef4444);
+  color: #fff;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.retry-btn:hover {
+  opacity: 0.85;
 }
 </style>

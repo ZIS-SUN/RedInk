@@ -1,5 +1,7 @@
 <template>
   <div class="container" style="max-width: 100%;">
+    <StepIndicator :current="2" />
+
     <div class="page-header" style="max-width: 1200px; margin: 0 auto 30px auto;">
       <div>
         <h1 class="page-title">编辑大纲</h1>
@@ -20,10 +22,31 @@
       </div>
     </div>
 
+    <!-- 当前风格提示条：让用户在生成前明确知道会使用什么风格 -->
+    <div class="style-hint-wrap">
+      <div class="style-hint" :class="{ inactive: !activeStyle }" role="status">
+        <template v-if="activeStyle">
+          <span class="style-hint-colors" aria-hidden="true">
+            <span
+              v-for="color in activeStyle.colors.slice(0, 3)"
+              :key="color"
+              class="style-hint-color"
+              :style="{ background: color }"
+            />
+          </span>
+          <span>本次生成将使用风格：<strong>{{ activeStyle.name }}</strong></span>
+        </template>
+        <template v-else>
+          <span>未应用风格，</span>
+          <RouterLink to="/tools/style" class="style-hint-link">去风格模板库选择</RouterLink>
+        </template>
+      </div>
+    </div>
+
     <div class="outline-grid">
       <div 
         v-for="(page, idx) in store.outline.pages" 
-        :key="page.index"
+        :key="pageKey(page)"
         class="card outline-card"
         :draggable="true"
         @dragstart="onDragStart($event, idx)"
@@ -34,15 +57,33 @@
         <!-- 拖拽手柄 (改为右上角或更加隐蔽) -->
         <div class="card-top-bar">
           <div class="page-info">
-             <span class="page-number">P{{ idx + 1 }}</span>
+             <span class="page-number">第 {{ idx + 1 }} 页</span>
              <span class="page-type" :class="page.type">{{ getPageTypeName(page.type) }}</span>
           </div>
           
           <div class="card-controls">
+            <button
+              class="icon-btn"
+              :disabled="idx === 0"
+              @click="movePageBy(idx, -1)"
+              title="上移此页"
+              aria-label="上移此页"
+            >
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+            </button>
+            <button
+              class="icon-btn"
+              :disabled="idx === store.outline.pages.length - 1"
+              @click="movePageBy(idx, 1)"
+              title="下移此页"
+              aria-label="下移此页"
+            >
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+            </button>
             <div class="drag-handle" title="拖拽排序">
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
             </div>
-            <button class="icon-btn" @click="deletePage(idx)" title="删除此页">
+            <button class="icon-btn danger" @click="requestDeletePage(idx)" title="删除此页" aria-label="删除此页">
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
@@ -68,22 +109,55 @@
     </div>
     
     <div style="height: 100px;"></div>
+
+    <!-- 删除页面确认弹窗 -->
+    <ConfirmDialog
+      :visible="pendingDeleteIndex !== null"
+      title="删除这一页？"
+      message="删除后该页文案将无法恢复。"
+      confirm-text="删除"
+      danger
+      @confirm="doDeletePage"
+      @cancel="pendingDeleteIndex = null"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, RouterLink } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import { updateHistory, createHistory } from '../api'
+import { useStyleLibrary } from '../composables/useStyleLibrary'
+import { updateHistory, createHistory, type Page } from '../api'
+import StepIndicator from './shared/StepIndicator.vue'
+import ConfirmDialog from './shared/ConfirmDialog.vue'
 
 const router = useRouter()
 const store = useGeneratorStore()
+// 当前应用的风格（来自风格模板库），用于生成前的风格提示条
+const { activeStyle } = useStyleLibrary()
 
 const dragOverIndex = ref<number | null>(null)
 const draggedIndex = ref<number | null>(null)
 // 保存状态指示
 const isSaving = ref(false)
+// 待删除的页面索引（确认弹窗用）
+const pendingDeleteIndex = ref<number | null>(null)
+
+// ==================== 稳定 key ====================
+// page.index 在拖拽/删除后会被重新编号，直接用作 :key 会导致卡片
+// （含 textarea）销毁重建、焦点丢失。这里基于页面对象本身维护稳定 key。
+let pageKeySeed = 0
+const pageKeyMap = new WeakMap<Page, number>()
+
+function pageKey(page: Page): number {
+  let key = pageKeyMap.get(page)
+  if (key === undefined) {
+    key = ++pageKeySeed
+    pageKeyMap.set(page, key)
+  }
+  return key
+}
 
 const getPageTypeName = (type: string) => {
   const names = {
@@ -116,10 +190,24 @@ const onDrop = (_e: DragEvent, index: number) => {
   draggedIndex.value = null
 }
 
-const deletePage = (index: number) => {
-  if (confirm('确定要删除这一页吗？')) {
-    store.deletePage(index)
+const requestDeletePage = (index: number) => {
+  pendingDeleteIndex.value = index
+}
+
+const doDeletePage = () => {
+  if (pendingDeleteIndex.value !== null) {
+    store.deletePage(pendingDeleteIndex.value)
   }
+  pendingDeleteIndex.value = null
+}
+
+/**
+ * 上移/下移页面（触屏和键盘可达的拖拽替代方案）
+ */
+const movePageBy = (index: number, offset: number) => {
+  const target = index + offset
+  if (target < 0 || target >= store.outline.pages.length) return
+  store.movePage(index, target)
 }
 
 const addPage = (type: 'cover' | 'content' | 'summary') => {
@@ -131,7 +219,8 @@ const addPage = (type: 'cover' | 'content' | 'summary') => {
 }
 
 const goBack = () => {
-  router.back()
+  // 显式回首页，避免 router.back() 在历史栈不确定时行为不可预测
+  router.push('/')
 }
 
 const startGeneration = async () => {
@@ -291,6 +380,54 @@ watch(
 </script>
 
 <style scoped>
+/* 当前风格提示条 */
+.style-hint-wrap {
+  max-width: 1200px;
+  margin: -14px auto 24px auto;
+  padding: 0 20px;
+}
+
+.style-hint {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm, 8px);
+  font-size: 13px;
+  color: var(--color-info, #3b82f6);
+  background: var(--color-info-soft, #dbeafe);
+}
+
+.style-hint.inactive {
+  color: var(--text-sub, #666);
+  background: var(--bg-body, #f4f5f7);
+  border: 1px solid var(--border-color, #eee);
+}
+
+.style-hint-colors {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.style-hint-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.style-hint-link {
+  color: var(--primary, #ff2442);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.style-hint-link:hover {
+  text-decoration: underline;
+}
+
 /* 保存状态指示器 */
 .save-indicator {
   margin-left: 12px;
@@ -302,15 +439,15 @@ watch(
 }
 
 .save-indicator.saving {
-  color: #1890ff;
-  background: #e6f7ff;
-  border: 1px solid #91d5ff;
+  color: var(--color-info, #1890ff);
+  background: var(--color-info-soft, #e6f7ff);
+  border: 1px solid var(--color-info-soft, #91d5ff);
 }
 
 .save-indicator.saved {
-  color: #52c41a;
-  background: #f6ffed;
-  border: 1px solid #b7eb8f;
+  color: var(--color-success, #52c41a);
+  background: var(--color-success-soft, #f6ffed);
+  border: 1px solid var(--color-success-soft, #b7eb8f);
   opacity: 0.7;
 }
 
@@ -370,8 +507,12 @@ watch(
 .page-number {
   font-size: 14px;
   font-weight: 700;
-  color: #ccc;
+  color: #999;
   font-family: 'Inter', sans-serif;
+}
+
+.outline-card:focus-within .page-number {
+  color: #666;
 }
 
 .page-type {
@@ -382,17 +523,24 @@ watch(
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-.page-type.cover { color: #FF4D4F; background: #FFF1F0; }
+.page-type.cover { color: var(--color-danger, #FF4D4F); background: var(--color-danger-soft, #FFF1F0); }
 .page-type.content { color: #8c8c8c; background: #f5f5f5; }
-.page-type.summary { color: #52C41A; background: #F6FFED; }
+.page-type.summary { color: var(--color-success, #52C41A); background: var(--color-success-soft, #F6FFED); }
 
 .card-controls {
   display: flex;
   gap: 8px;
-  opacity: 0.4;
+  opacity: 0.85;
   transition: opacity 0.2s;
 }
-.outline-card:hover .card-controls { opacity: 1; }
+.outline-card:hover .card-controls,
+.outline-card:focus-within .card-controls { opacity: 1; }
+
+/* 触屏设备无 hover，操作按钮保持完全可见 */
+@media (hover: none) {
+  .card-controls { opacity: 1; }
+  .drag-handle { display: none; }
+}
 
 .drag-handle {
   cursor: grab;
@@ -408,7 +556,12 @@ watch(
   padding: 2px;
   transition: color 0.2s;
 }
-.icon-btn:hover { color: #FF4D4F; }
+.icon-btn:hover:not(:disabled) { color: var(--primary, #ff2442); }
+.icon-btn.danger:hover:not(:disabled) { color: var(--color-danger, #FF4D4F); }
+.icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 
 /* 文本区域 - 核心 */
 .textarea-paper {
@@ -432,8 +585,12 @@ watch(
 .word-count {
   text-align: right;
   font-size: 11px;
-  color: #ddd;
+  color: #999;
   margin-top: auto;
+}
+
+.outline-card:focus-within .word-count {
+  color: #666;
 }
 
 /* 添加卡片 */
@@ -464,5 +621,30 @@ watch(
   font-size: 32px;
   font-weight: 300;
   margin-bottom: 8px;
+}
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+
+  .style-hint-wrap {
+    margin-top: -8px;
+    padding: 0 8px;
+  }
+
+  .outline-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 0 8px;
+  }
+
+  .outline-card,
+  .add-card-dashed {
+    min-height: 240px;
+  }
 }
 </style>

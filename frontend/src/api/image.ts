@@ -1,19 +1,64 @@
-import axios from 'axios'
 import {
   API_BASE_URL,
+  LLM_TIMEOUT,
+  http,
   readErrorResponse,
   readSseResponse
 } from './client'
 import type {
   FinishEvent,
   Page,
-  ProgressEvent
+  ProgressEvent,
+  TaskState
 } from './types'
 import type { AppError } from '../utils/errors'
+import { useGeneratorStore } from '../stores/generator'
+
+/** 参考图上传前压缩：最长边像素上限 */
+const REFERENCE_IMAGE_MAX_DIMENSION = 1600
+/** 参考图上传前压缩：JPEG 质量 */
+const REFERENCE_IMAGE_QUALITY = 0.85
+
+/**
+ * 解析本次请求要携带的 style_prompt：
+ * - 调用方显式传入时以传入值为准（空字符串视为「无风格」，不发送该字段）
+ * - 未传入时兜底读取 generator store 中记录的本次生成风格，
+ *   使不在本模块调用方控制范围内的重试路径（useImageRetry）也能沿用同一风格
+ */
+function resolveStylePrompt(explicit?: string): string | undefined {
+  let value = explicit
+  if (value === undefined) {
+    try {
+      value = useGeneratorStore().stylePrompt
+    } catch {
+      // pinia 未激活（如单测环境）时静默降级为不带风格
+      value = undefined
+    }
+  }
+  return value || undefined
+}
 
 export function getImageUrl(taskId: string, filename: string, thumbnail: boolean = true): string {
   const thumbParam = thumbnail ? '?thumbnail=true' : '?thumbnail=false'
   return `${API_BASE_URL}/images/${taskId}/${filename}${thumbParam}`
+}
+
+/**
+ * 查询后端任务状态（用于刷新后按 taskId 恢复，而不是重开新任务）
+ * 任务不存在（如后端已重启）时返回 success: false
+ */
+export async function getTaskState(taskId: string): Promise<{
+  success: boolean
+  state?: TaskState
+  error?: AppError | string
+  error_message?: string
+}> {
+  try {
+    const response = await http.get(`/task/${encodeURIComponent(taskId)}`)
+    return response.data
+  } catch {
+    return { success: false }
+  }
 }
 
 export async function regenerateImage(
@@ -24,16 +69,23 @@ export async function regenerateImage(
     fullOutline?: string
     userTopic?: string
     recordId?: string | null
+    stylePrompt?: string
   }
 ): Promise<{ success: boolean; index: number; image_url?: string; error?: AppError | string; error_message?: string }> {
-  const response = await axios.post(`${API_BASE_URL}/regenerate`, {
-    task_id: taskId,
-    page,
-    use_reference: useReference,
-    full_outline: context?.fullOutline,
-    user_topic: context?.userTopic,
-    record_id: context?.recordId || undefined
-  })
+  const response = await http.post(
+    '/regenerate',
+    {
+      task_id: taskId,
+      page,
+      use_reference: useReference,
+      full_outline: context?.fullOutline,
+      user_topic: context?.userTopic,
+      record_id: context?.recordId || undefined,
+      style_prompt: resolveStylePrompt(context?.stylePrompt)
+    },
+    // 单张图片重绘走 LLM/绘图模型，耗时较长
+    { timeout: LLM_TIMEOUT }
+  )
   return response.data
 }
 
@@ -45,7 +97,8 @@ export async function retryFailedImages(
   onError: (event: ProgressEvent) => void,
   onFinish: (event: { success: boolean; total: number; completed: number; failed: number }) => void,
   onStreamError: (error: unknown) => void,
-  recordId?: string | null
+  recordId?: string | null,
+  options?: { signal?: AbortSignal; stylePrompt?: string }
 ) {
   try {
     const response = await fetch(`${API_BASE_URL}/retry-failed`, {
@@ -56,8 +109,10 @@ export async function retryFailedImages(
       body: JSON.stringify({
         task_id: taskId,
         pages,
-        record_id: recordId || undefined
-      })
+        record_id: recordId || undefined,
+        style_prompt: resolveStylePrompt(options?.stylePrompt)
+      }),
+      signal: options?.signal
     })
 
     if (!response.ok) {
@@ -69,7 +124,7 @@ export async function retryFailedImages(
       complete: onComplete,
       error: onError,
       retry_finish: onFinish
-    })
+    }, { signal: options?.signal })
   } catch (error) {
     onStreamError(error)
   }
@@ -87,11 +142,12 @@ export async function generateImagesPost(
   userImages?: File[],
   userTopic?: string,
   recordId?: string | null,
-  force: boolean = false
+  force: boolean = false,
+  options?: { signal?: AbortSignal; stylePrompt?: string }
 ) {
   try {
     const userImagesBase64 = userImages && userImages.length > 0
-      ? await Promise.all(userImages.map(readFileAsDataUrl))
+      ? await Promise.all(userImages.map(compressImageToDataUrl))
       : []
 
     const response = await fetch(`${API_BASE_URL}/generate`, {
@@ -106,8 +162,10 @@ export async function generateImagesPost(
         user_images: userImagesBase64.length > 0 ? userImagesBase64 : undefined,
         user_topic: userTopic || '',
         record_id: recordId || undefined,
-        force
-      })
+        force,
+        style_prompt: resolveStylePrompt(options?.stylePrompt)
+      }),
+      signal: options?.signal
     })
 
     if (!response.ok) {
@@ -119,9 +177,41 @@ export async function generateImagesPost(
       complete: onComplete,
       error: onError,
       finish: onFinish
-    })
+    }, { signal: options?.signal })
   } catch (error) {
     onStreamError(error)
+  }
+}
+
+/**
+ * 参考图上传前先用 canvas 压缩再 base64 编码，
+ * 避免多张原图 readAsDataURL 直接塞进 JSON body 导致请求体过大
+ */
+async function compressImageToDataUrl(file: File): Promise<string> {
+  try {
+    const bitmap = await createImageBitmap(file)
+    try {
+      const scale = Math.min(
+        1,
+        REFERENCE_IMAGE_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height)
+      )
+      const width = Math.max(1, Math.round(bitmap.width * scale))
+      const height = Math.max(1, Math.round(bitmap.height * scale))
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('无法创建 canvas 上下文')
+
+      ctx.drawImage(bitmap, 0, 0, width, height)
+      return canvas.toDataURL('image/jpeg', REFERENCE_IMAGE_QUALITY)
+    } finally {
+      bitmap.close()
+    }
+  } catch {
+    // 解码/压缩失败（如不支持的格式）时退回原图编码
+    return readFileAsDataUrl(file)
   }
 }
 

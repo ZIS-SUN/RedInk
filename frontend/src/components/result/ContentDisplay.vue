@@ -126,7 +126,7 @@
             <path d="M23 4v6h-6M1 20v-6h6"/>
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
           </svg>
-          {{ loading ? '生成中...' : '重新生成' }}
+          {{ loading ? '重新生成中…' : '重新生成' }}
         </button>
       </div>
     </div>
@@ -179,7 +179,11 @@ async function handleGenerate() {
   store.startContentGeneration()
 
   try {
-    const result = await generateContent(store.topic, store.outline.raw)
+    const result = await generateContent(
+      store.topic,
+      store.outline.raw,
+      store.brandId || undefined
+    )
 
     if (result.success && result.titles && result.copywriting && result.tags) {
       store.setContent(result.titles, result.copywriting, result.tags)
@@ -311,15 +315,15 @@ async function copyTag(tag: string, index: number) {
 .error-section {
   text-align: center;
   padding: 40px 20px;
-  background: #FFF2F0;
+  background: var(--color-danger-soft, #FFF2F0);
   border-radius: var(--radius-xl);
-  border: 1px solid #FFCCC7;
+  border: 1px solid var(--color-danger-soft, #FFCCC7);
 }
 
 .error-icon {
   width: 48px;
   height: 48px;
-  background: #FF4D4F;
+  background: var(--color-danger, #FF4D4F);
   color: white;
   border-radius: 50%;
   display: flex;
@@ -331,7 +335,7 @@ async function copyTag(tag: string, index: number) {
 }
 
 .error-message {
-  color: #CF1322;
+  color: var(--color-danger, #CF1322);
   margin-bottom: 20px;
   white-space: pre-line;
 }
@@ -395,9 +399,9 @@ async function copyTag(tag: string, index: number) {
 }
 
 .copy-btn.copied {
-  background: #E6FFFB;
-  color: #13C2C2;
-  border-color: #13C2C2;
+  background: var(--color-success-soft, #E6FFFB);
+  color: var(--color-success, #13C2C2);
+  border-color: var(--color-success, #13C2C2);
 }
 
 .copy-btn svg {
@@ -462,7 +466,7 @@ async function copyTag(tag: string, index: number) {
 
 .copy-hint.show {
   opacity: 1;
-  color: #13C2C2;
+  color: var(--color-success, #13C2C2);
 }
 
 /* 文案内容 */
@@ -503,7 +507,7 @@ async function copyTag(tag: string, index: number) {
 }
 
 .tag-item.copied {
-  background: #13C2C2;
+  background: var(--color-success, #13C2C2);
   color: white;
 }
 

@@ -77,14 +77,27 @@ export interface UpdateHistoryParams {
   thumbnail?: string
 }
 
+/**
+ * 后端 /api/task/:taskId 返回的任务状态
+ * generated/failed 的 key 是页面索引（JSON 序列化后为字符串）
+ */
+export interface TaskState {
+  generated: Record<string, string>
+  failed: Record<string, string>
+  has_cover: boolean
+}
+
+/** 服务商配置项：字段因服务商类型而异，读取时再收敛具体类型 */
+export type ProviderSettings = Record<string, unknown>
+
 export interface Config {
   text_generation: {
     active_provider: string
-    providers: Record<string, any>
+    providers: Record<string, ProviderSettings>
   }
   image_generation: {
     active_provider: string
-    providers: Record<string, any>
+    providers: Record<string, ProviderSettings>
   }
 }
 

@@ -38,8 +38,16 @@
         <span class="dot">·</span>
         <span>{{ formattedDate }}</span>
 
-        <div class="more-actions-wrapper">
-          <button class="more-btn" @click.stop="$emit('delete', record)">
+        <!-- 常显操作区（触屏可达，不依赖 hover 遮罩） -->
+        <div class="footer-actions">
+          <button class="footer-edit-btn" @click.stop="$emit('edit', record.id)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            编辑
+          </button>
+          <button class="more-btn" @click.stop="$emit('delete', record)" title="删除" aria-label="删除">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -181,6 +189,13 @@ const formattedDate = computed(() => {
   pointer-events: auto;
 }
 
+/* 触屏设备没有 hover：隐藏遮罩，操作依赖底部常显按钮 */
+@media (hover: none) {
+  .card-overlay {
+    display: none;
+  }
+}
+
 /* 遮罩层按钮 */
 .overlay-btn {
   padding: 8px 24px;
@@ -225,7 +240,7 @@ const formattedDate = computed(() => {
 }
 
 .status-badge.completed {
-  background: rgba(82, 196, 26, 0.9);
+  background: var(--color-success, rgba(82, 196, 26, 0.9));
 }
 
 .status-badge.draft {
@@ -233,7 +248,7 @@ const formattedDate = computed(() => {
 }
 
 .status-badge.generating {
-  background: rgba(24, 144, 255, 0.9);
+  background: var(--color-info, rgba(24, 144, 255, 0.9));
 }
 
 /* 底部区域 */
@@ -262,9 +277,31 @@ const formattedDate = computed(() => {
   margin: 0 6px;
 }
 
-/* 更多操作 */
-.more-actions-wrapper {
+/* 常显操作区 */
+.footer-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 100px;
+  border: 1px solid var(--border-color, #eee);
+  background: white;
+  color: var(--text-sub, #666);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.footer-edit-btn:hover {
+  border-color: var(--primary, #ff2442);
+  color: var(--primary, #ff2442);
 }
 
 .more-btn {
@@ -278,7 +315,7 @@ const formattedDate = computed(() => {
 }
 
 .more-btn:hover {
-  background: #fee;
-  color: #ff4d4f;
+  background: var(--color-danger-soft, #fee);
+  color: var(--color-danger, #ff4d4f);
 }
 </style>

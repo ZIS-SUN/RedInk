@@ -8,7 +8,7 @@ export interface AppError {
   suggestion: string
   status: number
   retryable: boolean
-  diagnostics?: Record<string, any>
+  diagnostics?: Record<string, unknown>
 }
 
 export type ErrorLike = AppError | string | Error | unknown
@@ -36,10 +36,16 @@ export function normalizeApiError(error: ErrorLike, fallbackTitle = '操作失�
     return legacyMessageToError(error.message, fallbackTitle, error.response.status)
   }
 
-  const maybeData = error as any
+  const maybeData = error as {
+    error?: unknown
+    error_message?: unknown
+    message?: unknown
+    status?: number
+  } | null | undefined
   if (isAppError(maybeData?.error)) return maybeData.error
   if (typeof maybeData?.error === 'string') {
-    return legacyMessageToError(maybeData.error, maybeData.error_message || fallbackTitle, maybeData.status)
+    const fallback = typeof maybeData.error_message === 'string' ? maybeData.error_message : fallbackTitle
+    return legacyMessageToError(maybeData.error, fallback, maybeData.status)
   }
   if (typeof maybeData?.message === 'string') {
     return legacyMessageToError(maybeData.message, fallbackTitle, maybeData.status)
@@ -69,12 +75,12 @@ export function diagnosticsText(error: AppError): string {
   return JSON.stringify(payload, null, 2)
 }
 
-function isAppError(value: any): value is AppError {
-  return !!value
-    && typeof value === 'object'
-    && typeof value.code === 'string'
-    && typeof value.title === 'string'
-    && typeof value.detail === 'string'
+function isAppError(value: unknown): value is AppError {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return typeof candidate.code === 'string'
+    && typeof candidate.title === 'string'
+    && typeof candidate.detail === 'string'
 }
 
 function legacyMessageToError(

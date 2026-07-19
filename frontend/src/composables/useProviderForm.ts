@@ -22,6 +22,8 @@ export interface Provider {
   endpoint_type?: string
   high_concurrency?: boolean
   short_prompt?: boolean
+  // 保持 any：SettingsView/组件侧存在同名 Provider 类型，改成 unknown 会破坏互相赋值
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any
 }
 
@@ -149,9 +151,9 @@ export function useProviderForm() {
       if (result.success && result.config) {
         textConfig.value = {
           active_provider: result.config.text_generation.active_provider,
-          providers: result.config.text_generation.providers
+          providers: result.config.text_generation.providers as Record<string, Provider>
         }
-        imageConfig.value = result.config.image_generation
+        imageConfig.value = result.config.image_generation as ProviderConfig
       } else {
         setError(result.error || result.error_message || '加载配置失败', '加载配置失败')
       }
@@ -269,9 +271,9 @@ export function useProviderForm() {
       return
     }
 
-    const existingProvider = textConfig.value.providers[name] || {}
+    const existingProvider = textConfig.value.providers[name] || ({} as Partial<Provider>)
 
-    const providerData: any = {
+    const providerData: Provider = {
       type: textForm.value.type,
       model: textForm.value.model
     }
@@ -328,7 +330,7 @@ export function useProviderForm() {
       if (result.success) {
         setSuccess(result.message || '连接成功')
       }
-    } catch (e: any) {
+    } catch (e) {
       setError(e, '连接失败')
     } finally {
       testingText.value = false
@@ -351,7 +353,7 @@ export function useProviderForm() {
       if (result.success) {
         setSuccess(`${name} 连接成功`)
       }
-    } catch (e: any) {
+    } catch (e) {
       setError(e, `${name} 连接失败`)
     }
   }
@@ -425,9 +427,9 @@ export function useProviderForm() {
       return
     }
 
-    const existingProvider = imageConfig.value.providers[name] || {}
+    const existingProvider = imageConfig.value.providers[name] || ({} as Partial<Provider>)
 
-    const providerData: any = {
+    const providerData: Provider = {
       ...existingProvider,
       type: imageForm.value.type,
       model: imageForm.value.model,
@@ -487,7 +489,7 @@ export function useProviderForm() {
       if (result.success) {
         setSuccess(result.message || '连接成功')
       }
-    } catch (e: any) {
+    } catch (e) {
       setError(e, '连接失败')
     } finally {
       testingImage.value = false
@@ -510,7 +512,7 @@ export function useProviderForm() {
       if (result.success) {
         setSuccess(`${name} 连接成功`)
       }
-    } catch (e: any) {
+    } catch (e) {
       setError(e, `${name} 连接失败`)
     }
   }

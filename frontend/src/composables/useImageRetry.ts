@@ -102,12 +102,15 @@ export function useImageRetry(setError: (error: AppError | null) => void) {
         (err) => {
           console.error('重试失败:', err)
           isRetrying.value = false
+          // 断流时把仍处于重试中的图片标回可重试的 error
+          store.markGeneratingAsError(formatErrorMessage(err, '补图中断'))
           setError(normalizeApiError(err, '补图失败'))
         },
         store.recordId
       )
     } catch (e) {
       isRetrying.value = false
+      store.markGeneratingAsError(formatErrorMessage(e, '补图中断'))
       setError(normalizeApiError(e, '补图失败'))
     }
   }

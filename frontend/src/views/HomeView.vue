@@ -25,6 +25,22 @@
         @generate="handleGenerate"
         @imagesChange="handleImagesChange"
       />
+
+      <!-- 品牌人设选择器（可选） -->
+      <div v-if="brands.length > 0" class="brand-select-row">
+        <label class="brand-select-label" for="brand-select">品牌人设（可选）</label>
+        <select
+          id="brand-select"
+          class="brand-select"
+          :value="store.brandId"
+          @change="handleBrandChange"
+        >
+          <option value="">不使用</option>
+          <option v-for="brand in brands" :key="brand.id" :value="brand.id">
+            {{ brand.name }}
+          </option>
+        </select>
+      </div>
     </div>
 
     <!-- 版权信息 -->
@@ -46,15 +62,17 @@
       :error="error"
       dismissible
       @dismiss="error = null"
+      @retry="handleGenerate"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { generateOutline, createHistory } from '../api'
+import { getBrandList, type BrandKit } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
 // 引入组件
@@ -73,6 +91,46 @@ const composerRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 
 // 上传的图片文件
 const uploadedImageFiles = ref<File[]>([])
+
+// 品牌档案列表（用于品牌人设选择器）
+const brands = ref<BrandKit[]>([])
+
+// 从大纲页「上一步」返回时，回填之前输入的主题
+onMounted(() => {
+  if (store.topic && !topic.value) {
+    topic.value = store.topic
+  }
+  loadBrands()
+})
+
+/**
+ * 拉取品牌档案列表并确定默认选中项：
+ * - store 中已持久化的 brandId 仍有效时沿用
+ * - 否则默认选中当前启用档案；没有启用档案则为「不使用」
+ * 拉取失败静默忽略（选择器不显示，行为与无品牌一致）
+ */
+async function loadBrands() {
+  const result = await getBrandList()
+  if (!result.success) return
+
+  brands.value = result.brands
+
+  const hasBrand = (id: string) => result.brands.some(b => b.id === id)
+  if (store.brandId && hasBrand(store.brandId)) return
+
+  if (result.active_id && hasBrand(result.active_id)) {
+    store.setBrandId(result.active_id)
+  } else {
+    store.setBrandId('')
+  }
+}
+
+/**
+ * 品牌人设选择变化时写入 store
+ */
+function handleBrandChange(event: Event) {
+  store.setBrandId((event.target as HTMLSelectElement).value)
+}
 
 /**
  * 处理图片变化
@@ -95,7 +153,8 @@ async function handleGenerate() {
 
     const result = await generateOutline(
       topic.value.trim(),
-      imageFiles.length > 0 ? imageFiles : undefined
+      imageFiles.length > 0 ? imageFiles : undefined,
+      store.brandId || undefined
     )
 
     if (result.success && result.pages) {
@@ -185,6 +244,37 @@ async function handleGenerate() {
   font-weight: 600;
   margin-bottom: 20px;
   letter-spacing: 0.5px;
+}
+
+/* 品牌人设选择器 */
+.brand-select-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.brand-select-label {
+  font-size: 14px;
+  color: var(--text-sub);
+}
+
+.brand-select {
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--text-main);
+  background: var(--bg-body, #fff);
+  border: 1px solid var(--border-color, #e5e5e5);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.brand-select:hover,
+.brand-select:focus {
+  border-color: var(--primary);
+  outline: none;
 }
 
 .platform-slogan {

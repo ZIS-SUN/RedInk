@@ -69,6 +69,7 @@
               :src="`/api/images/${record.images.task_id}/${img}`"
               loading="lazy"
               decoding="async"
+              @error="onImgError"
             />
             <div class="modal-img-overlay">
               <button
@@ -80,20 +81,29 @@
                   <path d="M23 4v6h-6"></path>
                   <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
                 </svg>
-                {{ regeneratingImages.has(idx) ? '重绘中...' : '重新生成' }}
+                {{ regeneratingImages.has(idx) ? '重新生成中…' : '重新生成' }}
               </button>
             </div>
           </div>
-          <div class="placeholder" v-else>Waiting...</div>
+          <div class="placeholder" v-else>等待生成…</div>
 
           <div class="img-footer">
-            <span>Page {{ idx + 1 }}</span>
-            <span
-              v-if="img"
-              class="download-link"
-              @click="$emit('download', img, idx)"
-            >
-              下载
+            <span>第 {{ idx + 1 }} 页</span>
+            <span v-if="img" class="footer-links">
+              <!-- 常显重新生成入口（触屏可达） -->
+              <button
+                class="regen-link"
+                :disabled="regeneratingImages.has(idx)"
+                @click="$emit('regenerate', idx)"
+              >
+                {{ regeneratingImages.has(idx) ? '重新生成中…' : '重新生成' }}
+              </button>
+              <span
+                class="download-link"
+                @click="$emit('download', img, idx)"
+              >
+                下载
+              </span>
             </span>
           </div>
         </div>
@@ -148,6 +158,20 @@ defineEmits<{
 
 // 标题展开状态
 const titleExpanded = ref(false)
+
+// 图片加载失败兜底占位（任务目录被清理时避免裸 404 图标）
+const FALLBACK_IMG =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400" viewBox="0 0 300 400"><rect width="300" height="400" fill="#f5f5f5"/><text x="150" y="190" text-anchor="middle" font-size="16" fill="#999" font-family="sans-serif">图片加载失败</text><text x="150" y="216" text-anchor="middle" font-size="12" fill="#bbb" font-family="sans-serif">文件可能已被清理</text></svg>'
+  )
+
+function onImgError(e: Event) {
+  const img = e.target as HTMLImageElement
+  if (img.src !== FALLBACK_IMG) {
+    img.src = FALLBACK_IMG
+  }
+}
 
 // 格式化日期
 const formattedDate = computed(() => {
@@ -352,6 +376,13 @@ const formattedDate = computed(() => {
   pointer-events: auto;
 }
 
+/* 触屏设备没有 hover：隐藏遮罩，操作依赖底部常显按钮 */
+@media (hover: none) {
+  .modal-img-overlay {
+    display: none;
+  }
+}
+
 /* 重绘中状态 */
 .modal-img-preview.regenerating .modal-img-overlay {
   opacity: 1;
@@ -416,6 +447,31 @@ const formattedDate = computed(() => {
   justify-content: space-between;
   font-size: 12px;
   color: #666;
+}
+
+.footer-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.regen-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-sub, #666);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.regen-link:hover:not(:disabled) {
+  color: var(--primary, #ff2442);
+}
+
+.regen-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .download-link {

@@ -14,7 +14,8 @@
  * 4. result: 查看生成结果
  */
 import { defineStore } from 'pinia'
-import type { Page } from '../api'
+import type { Page } from '../api/types'
+import { withCacheBuster } from '../utils/url'
 
 /**
  * 生成的图片信息
@@ -64,6 +65,14 @@ export interface GeneratorState {
   // 图片生成任务ID（用于轮询任务状态）
   taskId: string | null
 
+  // 本次生成使用的风格提示词（来自风格模板库，空字符串表示未应用风格）
+  // 记录在 store 中以便刷新恢复、重试时沿用同一风格
+  stylePrompt: string
+
+  // 本次创作使用的品牌档案 ID（空字符串表示不使用品牌人设）
+  // 大纲生成与正文/标题/标签生成时都会作为 brand_id 传给后端
+  brandId: string
+
   // 历史记录ID（用于保存和加载历史记录）
   recordId: string | null
 
@@ -82,13 +91,65 @@ export interface GeneratorState {
 
 const STORAGE_KEY = 'generator-state'
 
-// 从 localStorage 加载状态
+// 持久化数据的版本号：结构不兼容时递增，旧数据会被直接丢弃
+const STORAGE_VERSION = 1
+
+const VALID_STAGES = ['input', 'outline', 'generating', 'result'] as const
+const VALID_PROGRESS_STATUS = ['idle', 'generating', 'done', 'error'] as const
+
+/**
+ * 校验从 localStorage 恢复的数据是否为合法 shape
+ * 只做关键字段的类型检查，不合法整体丢弃，避免脏数据污染 store
+ */
+function isValidPersistedState(data: unknown): data is Partial<GeneratorState> {
+  if (!data || typeof data !== 'object') return false
+  const d = data as Record<string, unknown>
+
+  if (d.stage !== undefined && !VALID_STAGES.includes(d.stage as never)) return false
+  if (d.topic !== undefined && typeof d.topic !== 'string') return false
+
+  if (d.outline !== undefined) {
+    const outline = d.outline as Record<string, unknown>
+    if (!outline || typeof outline !== 'object') return false
+    if (typeof outline.raw !== 'string' || !Array.isArray(outline.pages)) return false
+  }
+
+  if (d.progress !== undefined) {
+    const progress = d.progress as Record<string, unknown>
+    if (!progress || typeof progress !== 'object') return false
+    if (typeof progress.current !== 'number' || typeof progress.total !== 'number') return false
+    if (!VALID_PROGRESS_STATUS.includes(progress.status as never)) return false
+  }
+
+  if (d.images !== undefined && !Array.isArray(d.images)) return false
+  if (d.taskId !== undefined && d.taskId !== null && typeof d.taskId !== 'string') return false
+  if (d.recordId !== undefined && d.recordId !== null && typeof d.recordId !== 'string') return false
+  if (d.stylePrompt !== undefined && typeof d.stylePrompt !== 'string') return false
+  if (d.brandId !== undefined && typeof d.brandId !== 'string') return false
+
+  return true
+}
+
+// 从 localStorage 加载状态（带版本号 + shape 校验，不合法直接丢弃）
 function loadState(): Partial<GeneratorState> {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      return JSON.parse(saved)
+    if (!saved) return {}
+
+    const parsed: unknown = JSON.parse(saved)
+    if (!parsed || typeof parsed !== 'object') return {}
+
+    const { version, ...data } = parsed as { version?: number } & Record<string, unknown>
+    if (version !== STORAGE_VERSION) {
+      // 版本不匹配（含旧版无 version 字段的数据），丢弃并清理
+      localStorage.removeItem(STORAGE_KEY)
+      return {}
     }
+    if (!isValidPersistedState(data)) {
+      localStorage.removeItem(STORAGE_KEY)
+      return {}
+    }
+    return data
   } catch (e) {
     console.error('加载状态失败:', e)
   }
@@ -100,12 +161,15 @@ function saveState(state: GeneratorState) {
   try {
     // 只保存关键数据，不保存 userImages（文件对象无法序列化）
     const toSave = {
+      version: STORAGE_VERSION,              // 持久化版本号
       stage: state.stage,                    // 当前阶段
       topic: state.topic,                    // 用户输入的主题
       outline: state.outline,                // 大纲数据
       progress: state.progress,              // 生成进度
       images: state.images,                  // 生成的图片结果
       taskId: state.taskId,                  // 任务ID
+      stylePrompt: state.stylePrompt,        // 本次生成的风格提示词
+      brandId: state.brandId,                // 本次创作使用的品牌档案ID
       recordId: state.recordId,              // 历史记录ID
       content: state.content,                // 生成的内容（标题、文案、标签）
       outlineStatus: state.outlineStatus,    // 大纲生成状态
@@ -145,6 +209,12 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 任务ID
       taskId: saved.taskId || null,
+
+      // 本次生成的风格提示词
+      stylePrompt: saved.stylePrompt || '',
+
+      // 本次创作使用的品牌档案ID
+      brandId: saved.brandId || '',
 
       // 历史记录ID
       recordId: saved.recordId || null,
@@ -310,13 +380,24 @@ export const useGeneratorStore = defineStore('generator', {
      */
     updateProgress(index: number, status: 'generating' | 'done' | 'error', url?: string, error?: string) {
       const image = this.images.find(img => img.index === index)
-      if (image) {
-        image.status = status
-        if (url) image.url = url
-        if (error) image.error = error
+      if (!image) return
+
+      // 幂等保护：重复的 complete 事件不会重复计数
+      const wasDone = image.status === 'done'
+
+      image.status = status
+      if (url) image.url = url
+      if (error) {
+        image.error = error
+      } else if (status !== 'error') {
+        delete image.error
       }
-      // 成功完成时增加计数
-      if (status === 'done') {
+      if (status === 'error') {
+        image.retryable = true
+      }
+
+      // 成功完成时增加计数（只在从"未完成"变为"完成"时）
+      if (status === 'done' && !wasDone && this.progress.current < this.progress.total) {
         this.progress.current++
       }
     },
@@ -330,14 +411,62 @@ export const useGeneratorStore = defineStore('generator', {
       const image = this.images.find(img => img.index === index)
       if (image) {
         const wasDone = image.status === 'done'
-        // 添加时间戳避免缓存
-        const timestamp = Date.now()
-        image.url = `${newUrl}?t=${timestamp}`
+        // 追加时间戳避免缓存（正确处理 URL 上已有的 query，如 ?thumbnail=true）
+        image.url = withCacheBuster(newUrl)
         image.status = 'done'
         delete image.error
         if (!wasDone && this.progress.current < this.progress.total) {
           this.progress.current++
         }
+      }
+    },
+
+    /**
+     * 设置图片生成任务ID，并立即持久化到 localStorage
+     * 用于流开始时尽早落库，防止刷新丢失 taskId 导致重复生成
+     * @param taskId 任务ID，null 表示清空
+     */
+    setTaskId(taskId: string | null) {
+      this.taskId = taskId
+      // 立即写入 localStorage，不等防抖的自动保存
+      this.saveToStorage()
+    },
+
+    /**
+     * 设置本次生成使用的风格提示词（来自风格模板库）
+     * 生成开始时写入，重试/刷新恢复时从这里读取同一风格
+     * @param stylePrompt 风格提示词，空字符串表示未应用风格
+     */
+    setStylePrompt(stylePrompt: string) {
+      this.stylePrompt = stylePrompt
+    },
+
+    /**
+     * 设置本次创作使用的品牌档案 ID
+     * 大纲生成与正文/标题/标签生成会用它作为 brand_id 传给后端
+     * @param brandId 品牌档案 ID，空字符串表示不使用品牌人设
+     */
+    setBrandId(brandId: string) {
+      this.brandId = brandId
+    },
+
+    /**
+     * 把所有仍处于 generating/retrying 状态的图片批量置为 error（可重试）
+     * 用于 SSE 断流/网络中断时，让"补全失败图片"入口可用
+     * @param error 错误信息，默认为断流提示
+     */
+    markGeneratingAsError(error: string = '生成中断，请重试') {
+      let changed = false
+      this.images.forEach(image => {
+        if (image.status === 'generating' || image.status === 'retrying') {
+          image.status = 'error'
+          image.error = image.error || error
+          image.retryable = true
+          changed = true
+        }
+      })
+      if (changed || this.progress.status === 'generating') {
+        this.progress.status = 'error'
       }
     },
 
@@ -418,6 +547,12 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 清空任务ID
       this.taskId = null
+
+      // 清空本次生成的风格提示词
+      this.stylePrompt = ''
+
+      // 清空本次创作使用的品牌档案ID
+      this.brandId = ''
 
       // 清空历史记录ID
       this.recordId = null
@@ -559,12 +694,28 @@ import { watch } from 'vue'
 
 /**
  * 设置自动保存功能
- * 监听store中关键字段的变化，自动保存到localStorage
+ * 监听store中关键字段的变化，防抖后保存到localStorage
+ * （生成过程中 SSE 事件非常频繁，全量序列化需要防抖，避免每个事件都 stringify）
  */
-export function setupAutoSave() {
+export function setupAutoSave(debounceMs: number = 500) {
   const store = useGeneratorStore()
 
-  // 监听关键字段变化并自动保存到localStorage
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+  const flush = () => {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    store.saveToStorage()
+  }
+
+  const scheduleSave = () => {
+    if (saveTimer !== null) clearTimeout(saveTimer)
+    saveTimer = setTimeout(flush, debounceMs)
+  }
+
+  // 监听关键字段变化并防抖保存到localStorage
   watch(
     () => ({
       stage: store.stage,                    // 当前阶段
@@ -573,14 +724,19 @@ export function setupAutoSave() {
       progress: store.progress,              // 生成进度
       images: store.images,                  // 生成的图片结果
       taskId: store.taskId,                  // 任务ID
+      stylePrompt: store.stylePrompt,        // 本次生成的风格提示词
+      brandId: store.brandId,                // 本次创作使用的品牌档案ID
       recordId: store.recordId,              // 历史记录ID
       content: store.content,                // 生成的内容
       outlineStatus: store.outlineStatus,    // 大纲生成状态
       lastSavedAt: store.lastSavedAt         // 最后保存时间
     }),
-    () => {
-      store.saveToStorage()
-    },
+    scheduleSave,
     { deep: true }  // 深度监听，确保对象内部的变化也能被捕获
   )
+
+  // 页面关闭/刷新前立即落盘，避免丢失防抖窗口内的最后一次变更
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', flush)
+  }
 }

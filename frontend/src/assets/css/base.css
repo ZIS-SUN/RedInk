@@ -1,5 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
 * {
   margin: 0;
   padding: 0;
@@ -7,11 +5,23 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 系统字体栈（含中文回退），避免外链 Google Fonts 阻塞渲染 */
+  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   background-color: var(--bg-body);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
   line-height: 1.6;
+}
+
+/* 键盘可访问性：所有元素在键盘聚焦时显示可见焦点环 */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* 鼠标点击不显示焦点环，仅键盘导航时显示 */
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 #app {
@@ -93,6 +103,47 @@ body {
 .nav-item.active {
   background: var(--primary-light);
   color: var(--primary);
+}
+
+/* 导航文案：桌面显示完整文案，移动端底部 tab 显示短文案 */
+.nav-label-short {
+  display: none;
+}
+
+/* 侧边栏底部用户信息 */
+.sidebar-user {
+  margin-top: auto;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.sidebar-user-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, #ff6b6b 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.sidebar-user-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sidebar-user-id {
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* 通用容器 */
@@ -203,4 +254,94 @@ body {
 .footer-license a:hover {
   color: var(--primary);
   text-decoration: underline;
+}
+
+/* ========== 移动端布局（<=768px）：侧边栏改为底部 tab bar ========== */
+@media (max-width: 768px) {
+  .layout-sidebar {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--mobile-tabbar-height);
+    padding: 0;
+    flex-direction: row;
+    border-right: none;
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+    /* 适配 iPhone 底部安全区 */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  /* 移动端隐藏 Logo 与用户信息，只保留 3 个导航项 */
+  .layout-sidebar .logo-area,
+  .layout-sidebar .sidebar-user {
+    display: none;
+  }
+
+  .nav-menu {
+    flex-direction: row;
+    width: 100%;
+    gap: 0;
+  }
+
+  .nav-item {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 4px;
+    font-size: 11px;
+    border-radius: 0;
+  }
+
+  .nav-item:hover {
+    background: transparent;
+  }
+
+  .nav-item.active {
+    background: transparent;
+  }
+
+  .nav-label-full {
+    display: none;
+  }
+
+  .nav-label-short {
+    display: inline;
+  }
+
+  .layout-main {
+    margin-left: 0;
+    padding: 16px;
+    /* 给底部 tab bar 留出空间 */
+    padding-bottom: calc(var(--mobile-tabbar-height) + env(safe-area-inset-bottom, 0px) + 16px);
+  }
+
+  .page-title {
+    font-size: 24px;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+
+  .page-subtitle {
+    font-size: 15px;
+  }
+
+  .global-footer {
+    margin-top: 40px;
+  }
+}
+
+/* ========== 动效无障碍：用户偏好减少动态效果时弱化/关闭动画 ========== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

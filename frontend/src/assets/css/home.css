@@ -412,7 +412,7 @@
   margin-right: 12px;
   color: var(--text-placeholder);
   font-style: italic;
-  font-family: 'Inter', monospace;
+  font-family: ui-monospace, Menlo, monospace;
 }
 
 .trend-rank.rank-1 { color: #FF2442; }
