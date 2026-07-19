@@ -222,19 +222,19 @@ async function handleGenerate() {
 .cover-header {
   text-align: center;
   margin-bottom: 28px;
-  animation: fadeIn 0.6s ease-out;
+  animation: fadeIn 0.6s var(--ease-out);
 }
 
 .page-subtitle {
-  font-size: 15px;
+  font-size: var(--font-size-subtitle);
   color: var(--text-sub);
   margin-top: 10px;
 }
 
 /* 输入表单（基于全局 .card，仅覆盖布局） */
 .cover-form {
-  padding: 28px 32px;
-  margin-bottom: 32px;
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
 }
 
 .form-field {
@@ -259,10 +259,11 @@ async function handleGenerate() {
   padding: 12px 14px;
   font-size: 14px;
   color: var(--text-main);
-  background: var(--bg-body, #fff);
-  border: 1px solid var(--border-color, #e5e5e5);
-  border-radius: 10px;
-  transition: border-color 0.2s ease;
+  background: var(--gray-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    background var(--transition-fast);
   font-family: inherit;
   box-sizing: border-box;
 }
@@ -275,6 +276,8 @@ async function handleGenerate() {
 .form-input:focus,
 .form-textarea:focus {
   border-color: var(--primary);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-focus);
   outline: none;
 }
 
@@ -289,27 +292,30 @@ async function handleGenerate() {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn 0.5s var(--ease-out);
 }
 
 .direction-card {
   display: flex;
   flex-direction: column;
   background: var(--bg-card);
-  border: 1px solid var(--border-color, #e5e5e5);
-  border-radius: 16px;
-  padding: 20px;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-base), transform var(--transition-base),
+    border-color var(--transition-base);
 }
 
 .direction-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-hover);
+  border-color: var(--border-hover);
   transform: translateY(-2px);
 }
 
 .direction-card-best {
   border-color: var(--primary);
-  box-shadow: 0 4px 16px rgba(255, 36, 66, 0.12);
+  box-shadow: var(--shadow-xs), 0 4px 16px var(--primary-fade);
 }
 
 .card-top {
@@ -331,8 +337,8 @@ async function handleGenerate() {
   font-size: 12px;
   font-weight: 600;
   color: var(--primary);
-  background: var(--primary-fade);
-  border-radius: 100px;
+  background: var(--primary-light);
+  border-radius: var(--radius-full);
 }
 
 /* 评分 */
@@ -346,6 +352,7 @@ async function handleGenerate() {
 .score-value {
   font-size: 32px;
   font-weight: 800;
+  letter-spacing: var(--tracking-tighter);
   color: var(--primary);
   line-height: 1;
 }
@@ -364,22 +371,23 @@ async function handleGenerate() {
 
 .score-bar {
   height: 6px;
-  background: rgba(0, 0, 0, 0.06);
-  border-radius: 100px;
+  background: var(--gray-2);
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 
 .score-bar-fill {
   height: 100%;
   background: var(--primary);
-  border-radius: 100px;
-  transition: width 0.4s ease;
+  border-radius: var(--radius-full);
+  transition: width 0.4s var(--ease-out);
 }
 
 /* 文案 */
 .direction-title {
   font-size: 18px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   line-height: 1.4;
   margin-bottom: 6px;
@@ -397,8 +405,8 @@ async function handleGenerate() {
   padding: 3px 10px;
   font-size: 12px;
   color: var(--text-sub);
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 100px;
+  background: var(--gray-2);
+  border-radius: var(--radius-full);
   margin-bottom: 12px;
 }
 
@@ -433,23 +441,29 @@ async function handleGenerate() {
 .copy-btn {
   flex: 1;
   padding: 9px 12px;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
-  color: #fff;
-  background: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .copy-btn:hover {
-  opacity: 0.88;
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
 }
 
 .copy-btn-secondary {
-  color: var(--primary);
-  background: var(--primary-fade);
+  color: var(--text-sub);
+  background: var(--gray-2);
+}
+
+.copy-btn-secondary:hover {
+  color: var(--text-main);
 }
 
 /* 空状态 */
@@ -467,7 +481,7 @@ async function handleGenerate() {
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 32px));
   z-index: 1000;
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.3s var(--ease-out);
 }
 
 /* 移动端 */

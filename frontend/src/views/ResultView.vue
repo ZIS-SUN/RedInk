@@ -8,7 +8,7 @@
         <p class="page-subtitle">恭喜！你的小红书图文已生成完毕，共 {{ store.images.length }} 张，当前作品已保存到历史记录</p>
       </div>
       <div style="display: flex; gap: 12px;">
-        <button class="btn" @click="showResetConfirm = true" style="background: white; border: 1px solid var(--border-color);">
+        <button class="btn btn-secondary" @click="showResetConfirm = true">
           再来一篇
         </button>
         <button class="btn btn-primary" @click="downloadAll">
@@ -39,7 +39,7 @@
               :src="image.url"
               :alt="`第 ${image.index + 1} 页`"
               loading="lazy"
-              style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s;"
+              style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s var(--ease-out);"
               @error="onImgError"
             />
             <!-- Regenerating Overlay -->
@@ -49,13 +49,13 @@
             </div>
 
             <!-- Hover Overlay -->
-            <div v-else style="position: absolute; inset: 0; background: rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;" class="hover-overlay">
+            <div v-else style="position: absolute; inset: 0; background: rgba(33,30,27,0.4); opacity: 0; transition: opacity var(--transition-fast); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;" class="hover-overlay">
               预览大图
             </div>
           </div>
 
           <!-- Action Bar（常显操作栏，触屏可达） -->
-          <div style="padding: 12px; border-top: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center;">
+          <div style="padding: 12px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
             <span style="font-size: 12px; color: var(--text-sub);">第 {{ image.index + 1 }} 页</span>
             <div style="display: flex; gap: 10px; align-items: center;">
               <button
@@ -105,8 +105,15 @@
 .image-card:hover .hover-overlay {
   opacity: 1;
 }
+/* 克制的图片缩放反馈（原 1.05 过于浮夸） */
 .image-card:hover img {
-  transform: scale(1.05);
+  transform: scale(1.02);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-card:hover img {
+    transform: none;
+  }
 }
 
 .action-link {
@@ -119,6 +126,7 @@
   gap: 4px;
   font-size: 12px;
   padding: 0;
+  transition: color var(--transition-fast);
 }
 
 .action-link:hover:not(:disabled) {

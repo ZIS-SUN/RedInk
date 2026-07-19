@@ -458,18 +458,23 @@ async function copyPrompt(prompt: string, key: string) {
   padding: 9px 20px;
   font-size: 14px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: white;
   background: var(--primary);
   border: 1px solid var(--primary);
-  border-radius: 100px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.2s, border-color 0.2s;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .create-btn:hover {
   background: var(--primary-hover);
   border-color: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ===== 当前已应用风格 ===== */
@@ -481,8 +486,8 @@ async function copyPrompt(prompt: string, key: string) {
   margin-bottom: var(--space-5);
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
 }
 
 .active-style-empty {
@@ -529,11 +534,11 @@ async function copyPrompt(prompt: string, key: string) {
   padding: 6px 12px;
   font-size: 13px;
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-card);
   color: var(--text-main);
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
 }
 
 .mini-btn:hover {
@@ -559,12 +564,13 @@ async function copyPrompt(prompt: string, key: string) {
   font-size: 14px;
   font-family: inherit;
   color: var(--text-sub);
-  background: white;
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   cursor: pointer;
   user-select: none;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .filter-chip:hover {
@@ -593,18 +599,20 @@ async function copyPrompt(prompt: string, key: string) {
   border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--transition-base), box-shadow var(--transition-base),
+    border-color var(--transition-base);
 }
 
 .style-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-2px);
   box-shadow: var(--shadow-hover);
   border-color: var(--border-hover);
 }
 
 .style-card.applied {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-fade);
+  box-shadow: var(--shadow-focus);
 }
 
 .style-cover {
@@ -621,7 +629,7 @@ async function copyPrompt(prompt: string, key: string) {
   font-weight: 600;
   color: white;
   background: var(--primary);
-  border-radius: 100px;
+  border-radius: var(--radius-full);
 }
 
 .category-badge {
@@ -632,7 +640,7 @@ async function copyPrompt(prompt: string, key: string) {
   font-size: 12px;
   color: var(--text-main);
   background: rgba(255, 255, 255, 0.85);
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   backdrop-filter: blur(4px);
 }
 
@@ -644,8 +652,8 @@ async function copyPrompt(prompt: string, key: string) {
   font-size: 12px;
   font-weight: 600;
   color: white;
-  background: rgba(0, 0, 0, 0.55);
-  border-radius: 100px;
+  background: rgba(33, 30, 27, 0.55);
+  border-radius: var(--radius-full);
   backdrop-filter: blur(4px);
 }
 
@@ -656,6 +664,7 @@ async function copyPrompt(prompt: string, key: string) {
 .style-name {
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin-bottom: var(--space-2);
 }
@@ -680,8 +689,8 @@ async function copyPrompt(prompt: string, key: string) {
 .swatch {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -701,11 +710,12 @@ async function copyPrompt(prompt: string, key: string) {
   padding: 8px 0;
   font-size: 13px;
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-card);
   color: var(--text-main);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
   white-space: nowrap;
 }
 
@@ -763,7 +773,9 @@ async function copyPrompt(prompt: string, key: string) {
 .preview-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -779,7 +791,7 @@ async function copyPrompt(prompt: string, key: string) {
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  animation: modalIn 0.25s ease-out;
+  animation: modalIn 0.25s var(--ease-out);
 }
 
 @keyframes modalIn {
@@ -794,13 +806,18 @@ async function copyPrompt(prompt: string, key: string) {
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   background: rgba(255, 255, 255, 0.85);
   color: var(--text-main);
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
   z-index: 1;
+  transition: background var(--transition-fast);
+}
+
+.preview-close:hover {
+  background: white;
 }
 
 .preview-cover {
@@ -813,6 +830,7 @@ async function copyPrompt(prompt: string, key: string) {
 .preview-title {
   font-size: 22px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: white;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
@@ -865,9 +883,9 @@ async function copyPrompt(prompt: string, key: string) {
 .scene-tag {
   padding: 4px 12px;
   font-size: 13px;
-  color: var(--primary);
-  background: var(--primary-light);
-  border-radius: 100px;
+  color: var(--text-sub);
+  background: var(--gray-2);
+  border-radius: var(--radius-full);
 }
 
 .preview-prompt {
@@ -875,7 +893,7 @@ async function copyPrompt(prompt: string, key: string) {
   color: var(--text-sub);
   line-height: 1.7;
   padding: var(--space-3);
-  background: var(--bg-body);
+  background: var(--gray-1);
   border-radius: var(--radius-sm);
   word-break: break-all;
 }
@@ -907,6 +925,7 @@ async function copyPrompt(prompt: string, key: string) {
 .form-title {
   font-size: 18px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0 0 var(--space-4);
 }
@@ -932,17 +951,22 @@ async function copyPrompt(prompt: string, key: string) {
   padding: 9px 12px;
   font-size: 14px;
   color: var(--text-main);
-  background: white;
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   font-family: inherit;
   box-sizing: border-box;
 }
 
+.form-input::placeholder {
+  color: var(--text-placeholder);
+}
+
 .form-input:focus {
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .form-textarea {
@@ -974,8 +998,13 @@ async function copyPrompt(prompt: string, key: string) {
   padding: 2px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: white;
+  background: var(--bg-card);
   cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.color-picker:hover {
+  border-color: var(--border-hover);
 }
 
 .confirm-text {
@@ -992,17 +1021,18 @@ async function copyPrompt(prompt: string, key: string) {
   left: 50%;
   transform: translateX(-50%);
   padding: 10px 24px;
-  background: rgba(0, 0, 0, 0.8);
+  background: rgba(33, 30, 27, 0.86);
   color: white;
   font-size: 14px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
   z-index: 2000;
   white-space: nowrap;
 }
 
 .toast-fade-enter-active,
 .toast-fade-leave-active {
-  transition: opacity 0.25s, transform 0.25s;
+  transition: opacity var(--transition-slow), transform var(--transition-slow);
 }
 
 .toast-fade-enter-from,

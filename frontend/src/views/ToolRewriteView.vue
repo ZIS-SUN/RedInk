@@ -237,7 +237,7 @@ async function copyResult(item: RewriteResult) {
 }
 
 .page-subtitle {
-  font-size: 15px;
+  font-size: var(--font-size-subtitle);
   color: var(--text-sub);
   margin-top: 10px;
 }
@@ -265,13 +265,13 @@ async function copyResult(item: RewriteResult) {
   resize: vertical;
   min-height: 140px;
   font-family: inherit;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .rewrite-textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-fade);
+  box-shadow: var(--shadow-focus);
 }
 
 .rewrite-textarea::placeholder {
@@ -288,16 +288,18 @@ async function copyResult(item: RewriteResult) {
 .source-select {
   padding: 10px 14px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: 14px;
   color: var(--text-main);
   background: var(--bg-card);
   cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .source-select:focus {
   outline: none;
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .brand-empty-hint {
@@ -329,19 +331,24 @@ async function copyResult(item: RewriteResult) {
 
 .platform-chip {
   padding: 8px 18px;
-  background: var(--bg-body);
+  background: var(--gray-2);
   border: 1px solid transparent;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   font-size: 14px;
   font-weight: 500;
   color: var(--text-sub);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .platform-chip:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  background: var(--bg-card);
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
 }
 
 .platform-chip.active {
@@ -367,7 +374,7 @@ async function copyResult(item: RewriteResult) {
 }
 
 .result-card {
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.4s var(--ease-out);
 }
 
 .result-header {
@@ -383,8 +390,8 @@ async function copyResult(item: RewriteResult) {
   padding: 4px 14px;
   background: var(--primary-fade);
   color: var(--primary);
-  border-radius: 100px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-caption);
   font-weight: 600;
 }
 
@@ -396,6 +403,7 @@ async function copyResult(item: RewriteResult) {
 .result-title {
   font-size: 17px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin-bottom: var(--space-3);
   line-height: 1.5;
@@ -418,14 +426,14 @@ async function copyResult(item: RewriteResult) {
 
 .result-tag {
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   cursor: default;
 }
 
 .result-tag:hover {
   transform: none;
   box-shadow: none;
-  background: var(--bg-body);
+  background: var(--gray-2);
   border-color: transparent;
   color: var(--text-sub);
 }
@@ -434,7 +442,7 @@ async function copyResult(item: RewriteResult) {
 .empty-state {
   margin-top: var(--space-5);
   text-align: center;
-  padding: 48px 20px;
+  padding: var(--space-7) var(--space-5);
   color: var(--text-sub);
   font-size: 14px;
 }
@@ -450,7 +458,7 @@ async function copyResult(item: RewriteResult) {
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 32px));
   z-index: 1000;
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.3s var(--ease-out);
 }
 
 @keyframes fadeIn {
@@ -470,7 +478,7 @@ async function copyResult(item: RewriteResult) {
   }
 
   .card {
-    padding: 20px;
+    padding: var(--space-5);
   }
 
   .field-row {

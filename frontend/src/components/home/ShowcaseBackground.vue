@@ -102,7 +102,7 @@ onMounted(() => {
   z-index: -1;
   overflow: hidden;
   opacity: 0;
-  transition: opacity 0.6s ease-out;
+  transition: opacity 0.6s var(--ease-out);
 }
 
 .showcase-background.is-ready {
@@ -133,9 +133,9 @@ onMounted(() => {
 .showcase-item {
   width: 100%;
   aspect-ratio: 3 / 4;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-sm);
 }
 
 .showcase-item img {
@@ -145,7 +145,7 @@ onMounted(() => {
   display: block;
 }
 
-/* 毛玻璃遮罩层 */
+/* 毛玻璃遮罩层：向暖象牙白画布（--bg-body #F7F6F3）调和，压低背景存在感 */
 .showcase-overlay {
   position: absolute;
   top: 0;
@@ -154,11 +154,12 @@ onMounted(() => {
   bottom: 0;
   background: linear-gradient(
     to bottom,
-    rgba(255, 255, 255, 0.7) 0%,
-    rgba(255, 255, 255, 0.65) 30%,
-    rgba(255, 255, 255, 0.6) 100%
+    rgba(247, 246, 243, 0.82) 0%,
+    rgba(247, 246, 243, 0.76) 30%,
+    rgba(247, 246, 243, 0.72) 100%
   );
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
 /* 用户偏好减少动态效果时暂停背景滚动 */

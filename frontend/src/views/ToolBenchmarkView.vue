@@ -233,7 +233,7 @@ function copyDraft() {
 }
 
 .page-subtitle {
-  font-size: 15px;
+  font-size: var(--font-size-subtitle);
   color: var(--text-sub);
   margin-top: 10px;
 }
@@ -268,13 +268,13 @@ function copyDraft() {
   resize: vertical;
   min-height: 180px;
   font-family: inherit;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .benchmark-textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-fade);
+  box-shadow: var(--shadow-focus);
 }
 
 .benchmark-textarea::placeholder {
@@ -295,13 +295,13 @@ function copyDraft() {
   font-size: 15px;
   color: var(--text-main);
   font-family: inherit;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .topic-input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-fade);
+  box-shadow: var(--shadow-focus);
 }
 
 .topic-input::placeholder {
@@ -324,7 +324,7 @@ function copyDraft() {
 }
 
 .result-card {
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.4s var(--ease-out);
   margin-bottom: var(--space-4);
 }
 
@@ -341,8 +341,8 @@ function copyDraft() {
   padding: 4px 14px;
   background: var(--primary-fade);
   color: var(--primary);
-  border-radius: 100px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-caption);
   font-weight: 600;
 }
 
@@ -368,6 +368,7 @@ function copyDraft() {
 .analysis-label {
   font-size: 15px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin-bottom: var(--space-2);
 }
@@ -406,12 +407,12 @@ function copyDraft() {
   line-height: 1.7;
   color: var(--text-main);
   padding: 10px 14px;
-  background: var(--bg-body);
+  background: var(--gray-1);
   border-radius: var(--radius-sm);
 }
 
 .template-item {
-  padding: 16px;
+  padding: var(--space-4);
   background: var(--primary-fade);
   border-radius: var(--radius-md);
 }
@@ -474,7 +475,7 @@ function copyDraft() {
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 32px));
   z-index: 1000;
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.3s var(--ease-out);
 }
 
 @keyframes fadeIn {
@@ -494,7 +495,7 @@ function copyDraft() {
   }
 
   .card {
-    padding: 20px;
+    padding: var(--space-5);
   }
 
   .benchmark-btn {

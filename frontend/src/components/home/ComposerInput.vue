@@ -5,7 +5,7 @@
     <div class="composer-input-wrapper">
       <div class="search-icon-static">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M21 21L16.65 16.65M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M21 21L16.65 16.65M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <textarea
@@ -210,26 +210,32 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 组合框容器 */
+/* 组合框容器：首页第一视觉焦点，干净的白卡 + 柔和多层阴影 */
 .composer-container {
-  background: white;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+}
+
+.composer-container:focus-within {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-hover);
 }
 
 /* 输入区域 */
 .composer-input-wrapper {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .search-icon-static {
   flex-shrink: 0;
   padding-top: 8px;
-  color: #999;
+  color: var(--text-placeholder);
 }
 
 .composer-textarea {
@@ -243,27 +249,28 @@ defineExpose({
   max-height: 200px;
   padding: 8px 0;
   font-family: inherit;
-  color: var(--text-main, #1a1a1a);
+  background: transparent;
+  color: var(--text-main);
 }
 
 .composer-textarea::placeholder {
-  color: #999;
+  color: var(--text-placeholder);
 }
 
 .composer-textarea:disabled {
   background: transparent;
-  color: #999;
+  color: var(--text-placeholder);
 }
 
 /* 已上传图片预览 */
 .uploaded-images-preview {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 16px;
-  background: #fafafa;
-  border-radius: 12px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background: var(--gray-1);
+  border-radius: var(--radius-md);
   align-items: center;
 }
 
@@ -271,9 +278,9 @@ defineExpose({
   position: relative;
   width: 60px;
   height: 60px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-sm);
 }
 
 .uploaded-image-item img {
@@ -288,8 +295,8 @@ defineExpose({
   right: 2px;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-full);
+  background: rgba(33, 30, 27, 0.6);
   border: none;
   cursor: pointer;
   display: flex;
@@ -297,21 +304,22 @@ defineExpose({
   justify-content: center;
   color: white;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 
-.uploaded-image-item:hover .remove-image-btn {
+.uploaded-image-item:hover .remove-image-btn,
+.remove-image-btn:focus-visible {
   opacity: 1;
 }
 
 .remove-image-btn:hover {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
 }
 
 .upload-hint {
   flex: 1;
   font-size: 12px;
-  color: var(--text-sub, #666);
+  color: var(--text-secondary);
   text-align: right;
 }
 
@@ -320,14 +328,14 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-color);
 }
 
 .toolbar-left {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .tool-btn {
@@ -337,22 +345,22 @@ defineExpose({
   position: relative;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
-  background: #f5f5f5;
+  border-radius: var(--radius-md);
+  background: var(--gray-2);
   border: none;
   cursor: pointer;
-  color: #666;
-  transition: all 0.2s;
+  color: var(--text-sub);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .tool-btn:hover {
-  background: #eee;
-  color: var(--primary, #ff2442);
+  background: var(--gray-3);
+  color: var(--text-main);
 }
 
 .tool-btn.active {
-  background: rgba(255, 36, 66, 0.1);
-  color: var(--primary, #ff2442);
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 .badge-count {
@@ -361,9 +369,9 @@ defineExpose({
   right: -4px;
   min-width: 18px;
   height: 18px;
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
-  border-radius: 9px;
+  border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 600;
   display: flex;
@@ -377,10 +385,10 @@ defineExpose({
   min-width: 112px;
   padding: 10px 24px;
   font-size: 15px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .generate-btn:disabled {
@@ -389,11 +397,11 @@ defineExpose({
 }
 
 .loading-hint {
-  margin-top: 12px;
+  margin-top: var(--space-3);
   padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(255, 36, 66, 0.06);
-  color: var(--text-sub, #666);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  color: var(--text-sub);
   font-size: 14px;
   line-height: 1.5;
   text-align: right;
@@ -405,7 +413,7 @@ defineExpose({
   height: 16px;
   border: 2px solid currentColor;
   border-top-color: transparent;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   animation: spin 1s linear infinite;
 }
 

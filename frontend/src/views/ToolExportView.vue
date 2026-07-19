@@ -516,6 +516,7 @@ onBeforeUnmount(() => {
 .section-title {
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0 0 14px;
 }
@@ -536,13 +537,19 @@ onBeforeUnmount(() => {
 
 .source-tab {
   padding: 8px 18px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
-  background: white;
+  background: var(--bg-card);
   color: var(--text-sub);
   font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.source-tab:hover:not(.active) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
 }
 
 .source-tab.active {
@@ -562,7 +569,8 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-md);
   color: var(--text-sub);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .upload-zone:hover {
@@ -583,10 +591,17 @@ onBeforeUnmount(() => {
   min-width: 220px;
   padding: 10px 14px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: 14px;
   color: var(--text-main);
-  background: white;
+  background: var(--bg-card);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.history-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .empty-tip {
@@ -621,7 +636,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   cursor: pointer;
   aspect-ratio: 3/4;
-  background: var(--bg-body);
+  background: var(--gray-1);
+  transition: border-color var(--transition-fast);
 }
 
 .thumb-item img {
@@ -641,7 +657,7 @@ onBeforeUnmount(() => {
   left: 6px;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   background: rgba(255, 255, 255, 0.9);
   color: transparent;
   font-size: 12px;
@@ -690,13 +706,18 @@ onBeforeUnmount(() => {
   right: 4px;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   border: none;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(33, 30, 27, 0.55);
   color: white;
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.thumb-remove:hover {
+  background: rgba(33, 30, 27, 0.75);
 }
 
 .select-summary {
@@ -732,11 +753,12 @@ onBeforeUnmount(() => {
   border: 2px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
 .preset-item:hover {
   border-color: var(--border-hover);
+  background: var(--gray-0);
 }
 
 .preset-item.selected {
@@ -777,12 +799,18 @@ onBeforeUnmount(() => {
 .radio-item {
   padding: 10px 20px;
   border: 2px solid var(--border-color);
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   font-size: 14px;
   color: var(--text-sub);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
   user-select: none;
+}
+
+.radio-item:hover:not(.selected) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
 }
 
 .radio-item.small {
@@ -803,8 +831,13 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 2px;
-  background: white;
+  background: var(--bg-card);
   cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.color-input:hover {
+  border-color: var(--border-hover);
 }
 
 .watermark-row {
@@ -816,14 +849,20 @@ onBeforeUnmount(() => {
   min-width: 220px;
   padding: 10px 16px;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   font-size: 14px;
   color: var(--text-main);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.watermark-input::placeholder {
+  color: var(--text-placeholder);
 }
 
 .watermark-input:focus {
   outline: none;
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .opacity-label {
@@ -896,7 +935,7 @@ onBeforeUnmount(() => {
   height: 14px;
   border: 2px solid rgba(255, 255, 255, 0.4);
   border-top-color: white;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   animation: spin 0.8s linear infinite;
 }
 

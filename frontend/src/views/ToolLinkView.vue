@@ -235,17 +235,17 @@ function sendToCreation() {
 
 /* 输入卡片 */
 .input-card {
-  background: white;
-  border-radius: 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   padding: 24px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-xs);
   margin-bottom: 32px;
 }
 
 .mode-tabs {
   display: inline-flex;
-  background: var(--bg-body);
-  border-radius: 10px;
+  background: var(--gray-1);
+  border-radius: var(--radius-md);
   padding: 4px;
   margin-bottom: 16px;
 }
@@ -254,19 +254,24 @@ function sendToCreation() {
   border: none;
   background: transparent;
   padding: 8px 20px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   font-family: inherit;
   color: var(--text-sub);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.mode-tab:hover:not(.active) {
+  color: var(--text-main);
 }
 
 .mode-tab.active {
-  background: white;
-  color: var(--primary);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
 }
 
 .input-area {
@@ -277,13 +282,18 @@ function sendToCreation() {
 .text-input {
   width: 100%;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   font-size: 15px;
   font-family: inherit;
   color: var(--text-main);
-  transition: border-color 0.2s;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   box-sizing: border-box;
+}
+
+.url-input::placeholder,
+.text-input::placeholder {
+  color: var(--text-placeholder);
 }
 
 .text-input {
@@ -296,6 +306,7 @@ function sendToCreation() {
 .text-input:focus {
   outline: none;
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .input-hint {
@@ -328,7 +339,7 @@ function sendToCreation() {
   height: 14px;
   border: 2px solid rgba(255, 255, 255, 0.4);
   border-top-color: white;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   animation: spin 0.8s linear infinite;
 }
 
@@ -338,15 +349,16 @@ function sendToCreation() {
 
 /* 初始态使用说明 */
 .empty-guide {
-  background: white;
-  border-radius: 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   padding: 24px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-xs);
 }
 
 .empty-guide-title {
   font-size: 16px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0 0 12px;
 }
@@ -374,6 +386,7 @@ function sendToCreation() {
 .preview-title {
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0;
 }
@@ -400,16 +413,18 @@ function sendToCreation() {
 .topic-input {
   flex: 1;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px 12px;
   font-size: 15px;
   font-family: inherit;
   color: var(--text-main);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .topic-input:focus {
   outline: none;
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .preview-grid {
@@ -423,9 +438,9 @@ function sendToCreation() {
   display: flex;
   flex-direction: column;
   padding: 16px;
-  border-radius: 8px;
-  background: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xs);
   min-height: 280px;
 }
 
@@ -447,12 +462,12 @@ function sendToCreation() {
 .page-type {
   font-size: 11px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-weight: 600;
 }
 
 .page-type.cover { color: var(--color-danger); background: var(--color-danger-soft); }
-.page-type.content { color: var(--text-secondary); background: var(--bg-body); }
+.page-type.content { color: var(--text-secondary); background: var(--gray-1); }
 .page-type.summary { color: var(--color-success); background: var(--color-success-soft); }
 
 .icon-btn {
@@ -462,7 +477,7 @@ function sendToCreation() {
   color: var(--text-secondary);
   padding: 2px;
   margin-left: auto;
-  transition: color 0.2s;
+  transition: color var(--transition-fast);
 }
 
 .icon-btn.danger:hover { color: var(--color-danger); }

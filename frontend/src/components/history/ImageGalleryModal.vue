@@ -186,21 +186,24 @@ const formattedDate = computed(() => {
 .modal-fullscreen {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(33, 30, 27, 0.72);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 999;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: var(--space-7);
 }
 
 /* 模态框主体 */
 .modal-body {
-  background: white;
+  background: var(--bg-card);
   width: 100%;
   max-width: 1000px;
   height: 90vh;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -208,21 +211,21 @@ const formattedDate = computed(() => {
 
 /* 头部区域 */
 .modal-header {
-  padding: 20px;
-  border-bottom: 1px solid #eee;
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   flex-shrink: 0;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 /* 标题区域 */
 .title-section {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 4px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
 }
 
 .modal-title {
@@ -230,10 +233,11 @@ const formattedDate = computed(() => {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   line-height: 1.4;
-  color: #1a1a1a;
+  color: var(--text-main);
   word-break: break-word;
-  transition: max-height 0.3s ease;
+  transition: max-height var(--transition-slow);
 }
 
 .modal-title.collapsed {
@@ -247,29 +251,30 @@ const formattedDate = computed(() => {
 .title-expand-btn {
   flex-shrink: 0;
   padding: 2px 8px;
-  background: #f0f0f0;
+  background: var(--gray-2);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   font-size: 11px;
-  color: #666;
-  transition: all 0.2s;
+  font-family: inherit;
+  color: var(--text-sub);
+  transition: background var(--transition-fast), color var(--transition-fast);
   margin-top: 2px;
 }
 
 .title-expand-btn:hover {
-  background: var(--primary, #ff2442);
-  color: white;
+  background: var(--gray-3);
+  color: var(--text-main);
 }
 
 /* 元信息 */
 .modal-meta {
   font-size: 12px;
-  color: #999;
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 8px;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
 }
 
 /* 查看大纲按钮 */
@@ -278,25 +283,27 @@ const formattedDate = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  background: white;
-  border: 1px solid #dee2e6;
-  border-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
   cursor: pointer;
   font-size: 12px;
-  color: #495057;
-  transition: all 0.2s;
+  font-family: inherit;
+  color: var(--text-sub);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .view-outline-btn:hover {
-  background: var(--primary, #ff2442);
-  color: white;
-  border-color: var(--primary, #ff2442);
+  background: var(--gray-1);
+  color: var(--text-main);
+  border-color: var(--border-hover);
 }
 
 /* 头部操作区 */
 .header-actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: center;
 }
 
@@ -306,6 +313,17 @@ const formattedDate = computed(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+  border: 1px solid var(--border-hover);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+}
+
+.download-btn:hover {
+  background: var(--gray-0);
+  border-color: var(--gray-5);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .close-icon {
@@ -313,23 +331,26 @@ const formattedDate = computed(() => {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #666;
-  padding: 0;
+  color: var(--text-secondary);
+  padding: 2px 6px;
   line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .close-icon:hover {
-  color: #333;
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 /* 图片网格 */
 .modal-gallery-grid {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: var(--space-5);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 /* 单个图片项 */
@@ -344,7 +365,8 @@ const formattedDate = computed(() => {
   width: 100%;
   aspect-ratio: 3/4;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
   contain: layout style paint;
 }
 
@@ -357,16 +379,13 @@ const formattedDate = computed(() => {
 /* 悬浮遮罩 */
 .modal-img-overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  background: rgba(33, 30, 27, 0.48);
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.15s ease-out;
+  transition: opacity var(--transition-fast);
   pointer-events: none;
   will-change: opacity;
 }
@@ -405,20 +424,25 @@ const formattedDate = computed(() => {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: white;
+  background: var(--bg-card);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 13px;
-  color: #333;
-  transition: background-color 0.2s, color 0.2s, transform 0.1s;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-fast), box-shadow var(--transition-fast);
   will-change: transform;
 }
 
 .modal-overlay-btn:hover {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
-  transform: scale(1.05);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
 }
 
 .modal-overlay-btn:disabled {
@@ -431,22 +455,23 @@ const formattedDate = computed(() => {
 .placeholder {
   width: 100%;
   aspect-ratio: 3/4;
-  background: #f5f5f5;
-  border-radius: 8px;
+  background: var(--gray-1);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
 /* 图片底部信息 */
 .img-footer {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   display: flex;
   justify-content: space-between;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary);
 }
 
 .footer-links {
@@ -460,13 +485,14 @@ const formattedDate = computed(() => {
   background: none;
   padding: 0;
   font-size: 12px;
-  color: var(--text-sub, #666);
+  font-family: inherit;
+  color: var(--text-sub);
   cursor: pointer;
-  transition: color 0.2s;
+  transition: color var(--transition-fast);
 }
 
 .regen-link:hover:not(:disabled) {
-  color: var(--primary, #ff2442);
+  color: var(--primary);
 }
 
 .regen-link:disabled {
@@ -476,24 +502,24 @@ const formattedDate = computed(() => {
 
 .download-link {
   cursor: pointer;
-  color: var(--primary, #ff2442);
-  transition: opacity 0.2s;
+  color: var(--primary);
+  transition: color var(--transition-fast);
 }
 
 .download-link:hover {
-  opacity: 0.7;
+  color: var(--primary-hover);
 }
 
 /* 响应式 */
 @media (max-width: 768px) {
   .modal-fullscreen {
-    padding: 20px;
+    padding: var(--space-5);
   }
 
   .modal-gallery-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
-    padding: 12px;
+    gap: var(--space-3);
+    padding: var(--space-3);
   }
 }
 </style>

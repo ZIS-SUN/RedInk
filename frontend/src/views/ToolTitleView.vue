@@ -291,7 +291,7 @@ async function handleCopy(text: string) {
 .tool-header {
   text-align: center;
   padding: 28px 16px 8px;
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn 0.5s var(--ease-out);
 }
 
 .brand-pill {
@@ -300,8 +300,8 @@ async function handleCopy(text: string) {
   padding: 6px 16px;
   background: var(--primary-fade);
   color: var(--primary);
-  border-radius: 100px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-caption);
   font-weight: 600;
   margin-bottom: 16px;
   letter-spacing: 0.5px;
@@ -310,6 +310,7 @@ async function handleCopy(text: string) {
 .page-title {
   font-size: 28px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tighter);
   color: var(--text-main);
   margin: 0 0 10px;
 }
@@ -321,11 +322,11 @@ async function handleCopy(text: string) {
   line-height: 1.6;
 }
 
-/* ── 输入卡片（基于全局 .card，仅覆盖内边距） ───────────────────── */
+/* ── 输入卡片（基于全局 .card，内距走 --space-6） ───────────────────── */
 .input-card {
-  padding: 24px;
+  padding: var(--space-6);
   margin-bottom: 0;
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn 0.5s var(--ease-out);
 }
 
 .field-label {
@@ -340,7 +341,7 @@ async function handleCopy(text: string) {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   font-size: 15px;
   font-family: inherit;
@@ -348,14 +349,16 @@ async function handleCopy(text: string) {
   line-height: 1.6;
   resize: vertical;
   min-height: 96px;
-  transition: border-color 0.2s;
-  background: var(--bg-body);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    background var(--transition-fast);
+  background: var(--gray-1);
 }
 
 .topic-input:focus {
   outline: none;
   border-color: var(--primary);
   background: var(--bg-card);
+  box-shadow: var(--shadow-focus);
 }
 
 .field-group {
@@ -370,25 +373,29 @@ async function handleCopy(text: string) {
 
 .option-chip {
   padding: 7px 16px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .option-chip:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
 }
 
 .option-chip.active {
-  background: var(--primary);
+  background: var(--primary-light);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--primary);
   font-weight: 600;
 }
 
@@ -403,18 +410,19 @@ async function handleCopy(text: string) {
   max-width: 320px;
   padding: 10px 14px;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   font-size: 14px;
   font-family: inherit;
   color: var(--text-main);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.2s;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .brand-select:focus {
   outline: none;
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .brand-empty-hint {
@@ -442,7 +450,7 @@ async function handleCopy(text: string) {
 /* ── 结果区 ─────────────────────── */
 .result-section {
   margin-top: 28px;
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.4s var(--ease-out);
 }
 
 .result-toolbar {
@@ -463,19 +471,21 @@ async function handleCopy(text: string) {
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .sort-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
 }
 
 .sort-btn.active {
@@ -497,44 +507,47 @@ async function handleCopy(text: string) {
   gap: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 16px 18px;
-  transition: box-shadow 0.2s, border-color 0.2s, transform 0.3s;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) 18px;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base),
+    transform var(--transition-base);
 }
 
 .title-card:hover {
   border-color: var(--border-hover);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .card-rank {
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 700;
-  background: var(--bg-body);
+  background: var(--gray-2);
   color: var(--text-sub);
   align-self: center;
 }
 
 .card-rank.rank-gold {
-  background: #FFF4D6;
-  color: #B8860B;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 .card-rank.rank-silver {
-  background: #F0F2F5;
-  color: #7A8699;
+  background: var(--gray-2);
+  color: var(--gray-6);
 }
 
 .card-rank.rank-bronze {
-  background: #F9E8DC;
-  color: #A6672E;
+  background: var(--gray-3);
+  color: var(--gray-7);
 }
 
 .card-body {
@@ -550,6 +563,7 @@ async function handleCopy(text: string) {
   margin: 0;
   font-size: 15.5px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   line-height: 1.55;
   word-break: break-word;
@@ -563,9 +577,9 @@ async function handleCopy(text: string) {
 
 .element-tag {
   padding: 2px 10px;
-  border-radius: 100px;
-  background: var(--primary-fade);
-  color: var(--primary);
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  color: var(--text-sub);
   font-size: 12px;
   font-weight: 500;
 }
@@ -619,20 +633,22 @@ async function handleCopy(text: string) {
 
 .copy-btn {
   padding: 5px 14px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast);
   white-space: nowrap;
 }
 
 .copy-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
 }
 
 .copy-btn.copied {
@@ -643,7 +659,7 @@ async function handleCopy(text: string) {
 
 /* 排序过渡动画 */
 .card-move {
-  transition: transform 0.35s ease;
+  transition: transform 0.35s var(--ease-out);
 }
 
 /* ── 空态 / 错误 ────────────────── */
@@ -661,7 +677,7 @@ async function handleCopy(text: string) {
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 32px));
   z-index: 1000;
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.3s var(--ease-out);
 }
 
 /* ── 移动端适配 ─────────────────── */
@@ -684,7 +700,7 @@ async function handleCopy(text: string) {
 
   .input-card {
     padding: 18px 16px;
-    border-radius: 16px;
+    border-radius: var(--radius-lg);
   }
 
   .option-chip {

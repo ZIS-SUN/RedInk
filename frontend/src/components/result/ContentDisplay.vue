@@ -266,15 +266,15 @@ async function copyTag(tag: string, index: number) {
 
 <style scoped>
 .content-display {
-  margin-top: 32px;
+  margin-top: var(--space-6);
 }
 
 .generate-section {
   text-align: center;
-  padding: 40px 20px;
+  padding: var(--space-7) var(--space-5);
   background: var(--bg-card);
   border-radius: var(--radius-xl);
-  border: 2px dashed var(--border-color);
+  border: 2px dashed var(--gray-4);
 }
 
 .generate-btn {
@@ -302,7 +302,7 @@ async function copyTag(tag: string, index: number) {
   height: 48px;
   border: 3px solid var(--border-color);
   border-top-color: var(--primary);
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   animation: spin 1s linear infinite;
   margin: 0 auto 16px;
 }
@@ -315,17 +315,17 @@ async function copyTag(tag: string, index: number) {
 .error-section {
   text-align: center;
   padding: 40px 20px;
-  background: var(--color-danger-soft, #FFF2F0);
+  background: var(--color-danger-soft);
   border-radius: var(--radius-xl);
-  border: 1px solid var(--color-danger-soft, #FFCCC7);
+  border: 1px solid rgba(222, 59, 59, 0.25);
 }
 
 .error-icon {
   width: 48px;
   height: 48px;
-  background: var(--color-danger, #FF4D4F);
+  background: var(--color-danger);
   color: white;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -335,7 +335,7 @@ async function copyTag(tag: string, index: number) {
 }
 
 .error-message {
-  color: var(--color-danger, #CF1322);
+  color: var(--color-danger);
   margin-bottom: 20px;
   white-space: pre-line;
 }
@@ -343,31 +343,33 @@ async function copyTag(tag: string, index: number) {
 .result-section {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-5);
 }
 
 .content-card {
   background: var(--bg-card);
   border-radius: var(--radius-lg);
-  padding: 24px;
-  box-shadow: var(--shadow-sm);
+  padding: var(--space-6);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-xs);
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 12px;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--border-color);
 }
 
 .card-header h3 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0;
 }
@@ -383,25 +385,26 @@ async function copyTag(tag: string, index: number) {
   align-items: center;
   gap: 4px;
   padding: 6px 12px;
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   color: var(--text-sub);
-  background: var(--bg-body);
+  background: var(--gray-1);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .copy-btn:hover {
-  background: var(--primary-light);
-  color: var(--primary);
-  border-color: var(--primary);
+  background: var(--bg-card);
+  color: var(--text-main);
+  border-color: var(--border-hover);
 }
 
 .copy-btn.copied {
-  background: var(--color-success-soft, #E6FFFB);
-  color: var(--color-success, #13C2C2);
-  border-color: var(--color-success, #13C2C2);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 
 .copy-btn svg {
@@ -413,23 +416,23 @@ async function copyTag(tag: string, index: number) {
 .titles-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .title-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--bg-body);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-1);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast);
   position: relative;
 }
 
 .title-item:hover {
-  background: var(--primary-light);
+  background: var(--gray-2);
 }
 
 .title-badge {
@@ -437,18 +440,18 @@ async function copyTag(tag: string, index: number) {
   padding: 4px 8px;
   font-size: 12px;
   font-weight: 500;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--primary);
   color: white;
 }
 
 .title-item:not(:first-child) .title-badge {
-  background: var(--text-sub);
+  background: var(--gray-6);
 }
 
 .title-text {
   flex: 1;
-  font-size: 15px;
+  font-size: var(--font-size-body);
   color: var(--text-main);
   line-height: 1.5;
 }
@@ -457,7 +460,7 @@ async function copyTag(tag: string, index: number) {
   font-size: 12px;
   color: var(--text-sub);
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--transition-fast);
 }
 
 .title-item:hover .copy-hint {
@@ -466,12 +469,12 @@ async function copyTag(tag: string, index: number) {
 
 .copy-hint.show {
   opacity: 1;
-  color: var(--color-success, #13C2C2);
+  color: var(--color-success);
 }
 
 /* 文案内容 */
 .copywriting-content {
-  font-size: 15px;
+  font-size: var(--font-size-body);
   line-height: 1.8;
   color: var(--text-main);
 }
@@ -496,9 +499,9 @@ async function copyTag(tag: string, index: number) {
   font-size: 14px;
   color: var(--primary);
   background: var(--primary-light);
-  border-radius: 20px;
+  border-radius: var(--radius-full);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .tag-item:hover {
@@ -507,7 +510,7 @@ async function copyTag(tag: string, index: number) {
 }
 
 .tag-item.copied {
-  background: var(--color-success, #13C2C2);
+  background: var(--color-success);
   color: white;
 }
 
@@ -539,7 +542,7 @@ async function copyTag(tag: string, index: number) {
   height: 16px;
   border: 2px solid rgba(255,255,255,0.3);
   border-top-color: white;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   animation: spin 0.8s linear infinite;
 }
 </style>

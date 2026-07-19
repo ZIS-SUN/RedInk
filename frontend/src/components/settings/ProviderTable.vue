@@ -104,8 +104,8 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 <style scoped>
 /* 表格容器 */
 .provider-table {
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -113,25 +113,26 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 .table-header {
   display: grid;
   grid-template-columns: 80px 1fr 1fr 1.5fr 120px;
-  gap: 12px;
-  padding: 12px 16px;
-  background: #f9fafb;
-  border-bottom: 1px solid var(--border-color, #eee);
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--gray-1);
+  border-bottom: 1px solid var(--border-color);
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-sub, #666);
+  color: var(--text-secondary);
   text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 /* 表格行 */
 .table-row {
   display: grid;
   grid-template-columns: 80px 1fr 1fr 1.5fr 120px;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-color, #eee);
+  gap: var(--space-3);
+  padding: 14px var(--space-4);
+  border-bottom: 1px solid var(--border-color);
   align-items: center;
-  transition: background-color 0.2s;
+  transition: background var(--transition-fast);
 }
 
 .table-row:last-child {
@@ -139,70 +140,75 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 }
 
 .table-row:hover {
-  background: #f9fafb;
+  background: var(--gray-0);
 }
 
 .table-row.active {
-  background: rgba(255, 36, 66, 0.02);
+  background: var(--primary-fade);
 }
 
 /* 激活按钮 */
 .btn-activate {
   padding: 4px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   font-weight: 500;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
-  color: var(--text-sub, #666);
+  font-family: inherit;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .btn-activate:hover:not(:disabled) {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
+  border-color: var(--border-hover);
+  color: var(--primary);
+  background: var(--primary-light);
 }
 
+/* 激活状态：语义 -soft 底 + 语义色文字 */
 .btn-activate.active {
-  background: var(--color-success-soft, rgba(34, 197, 94, 0.1));
-  border-color: var(--color-success, #22c55e);
-  color: var(--color-success, #22c55e);
+  background: var(--color-success-soft);
+  border-color: rgba(31, 169, 92, 0.3);
+  color: var(--color-success);
   cursor: default;
 }
 
 /* 服务商名称 */
 .provider-name {
   font-weight: 600;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 /* 模型名称 */
 .model-name {
-  font-family: 'Monaco', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-sub, #666);
-  background: #f5f5f5;
+  color: var(--text-sub);
+  background: var(--gray-2);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 /* API Key 显示 */
 .apikey-masked {
   font-size: 12px;
-  font-family: 'Monaco', 'Menlo', monospace;
-  color: #6b7280;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
   word-break: break-all;
 }
 
 .apikey-masked.empty {
-  color: var(--color-warning, #f59e0b);
+  color: var(--color-warning);
 }
 
 /* 操作列 */
 .col-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   justify-content: flex-end;
 }
 
@@ -210,27 +216,29 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 .btn-icon {
   width: 32px;
   height: 32px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
-  color: var(--text-sub, #666);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .btn-icon:hover {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
-  background: rgba(255, 36, 66, 0.05);
+  border-color: var(--border-hover);
+  color: var(--primary);
+  background: var(--primary-fade);
+  box-shadow: var(--shadow-xs);
 }
 
 .btn-icon.danger:hover {
-  border-color: var(--color-danger, #ef4444);
-  color: var(--color-danger, #ef4444);
-  background: var(--color-danger-soft, rgba(239, 68, 68, 0.05));
+  border-color: rgba(222, 59, 59, 0.35);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 
 /* 响应式 */

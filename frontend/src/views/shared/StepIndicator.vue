@@ -72,53 +72,58 @@ function goTo(idx: number) {
   gap: 8px;
   background: none;
   border: none;
-  padding: 4px 6px;
-  border-radius: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   cursor: default;
-  color: var(--text-placeholder, #bbb);
+  color: var(--text-placeholder);
+  font-family: inherit;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .step-item.done {
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
   cursor: pointer;
 }
 
 .step-item.done:hover {
-  color: var(--primary, #ff2442);
-  background: rgba(255, 36, 66, 0.05);
+  color: var(--primary);
+  background: var(--primary-fade);
 }
 
 .step-item.active {
-  color: var(--text-main, #1a1a1a);
+  color: var(--text-main);
 }
 
 .step-dot {
   width: 22px;
   height: 22px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
-  background: #f0f0f0;
-  color: var(--text-sub, #666);
+  background: var(--gray-2);
+  color: var(--text-sub);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .step-item.done .step-dot {
-  background: var(--color-success-soft, #f6ffed);
-  color: var(--color-success, #52c41a);
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 .step-item.active .step-dot {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
+  box-shadow: 0 2px 8px var(--primary-fade);
 }
 
 .step-label {
   font-size: 13px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   white-space: nowrap;
 }
 
@@ -127,12 +132,13 @@ function goTo(idx: number) {
   min-width: 16px;
   max-width: 80px;
   height: 2px;
-  border-radius: 1px;
-  background: var(--border-color, #eee);
+  border-radius: var(--radius-full);
+  background: var(--border-color);
+  transition: background var(--transition-base);
 }
 
 .step-line.done {
-  background: var(--color-success, #52c41a);
+  background: var(--color-success);
 }
 
 @media (max-width: 520px) {

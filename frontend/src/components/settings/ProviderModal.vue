@@ -222,31 +222,33 @@ const previewUrl = computed(() => {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 20px;
+  padding: var(--space-5);
 }
 
 /* 模态框内容 */
 .modal-content {
-  background: white;
-  border-radius: 12px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 500px;
   max-height: 90vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 /* 头部 */
 .modal-header {
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border-color, #eee);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -255,7 +257,9 @@ const previewUrl = computed(() => {
 .modal-header h3 {
   margin: 0;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .close-btn {
@@ -263,25 +267,28 @@ const previewUrl = computed(() => {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #999;
-  padding: 0;
+  color: var(--text-secondary);
+  padding: 2px 6px;
   line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .close-btn:hover {
-  color: #333;
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 /* 主体 */
 .modal-body {
-  padding: 24px;
+  padding: var(--space-5);
   overflow-y: auto;
   flex: 1;
 }
 
 /* 表单组 */
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 
 .form-group:last-child {
@@ -291,92 +298,137 @@ const previewUrl = computed(() => {
 .form-group label {
   display: block;
   font-size: 14px;
-  font-weight: 500;
-  color: var(--text-main, #1a1a1a);
-  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: var(--space-2);
 }
 
+/* 输入框对齐全局 .input 的新样式 */
 .form-input {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   font-size: 14px;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.form-input:hover {
+  border-color: var(--border-hover);
 }
 
 .form-input:focus {
   outline: none;
-  border-color: var(--primary, #ff2442);
-  box-shadow: 0 0 0 3px rgba(255, 36, 66, 0.1);
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .form-select {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   font-size: 14px;
-  background: white;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xs);
   cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-select:hover {
+  border-color: var(--border-hover);
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
 }
 
 .form-hint {
   display: block;
   font-size: 12px;
-  color: var(--text-sub, #666);
+  color: var(--text-secondary);
   margin-top: 6px;
 }
 
 /* 底部 */
 .modal-footer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--border-color, #eee);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
-/* 按钮样式 */
+/* 按钮样式（对齐全局 .btn 语义） */
 .btn {
-  padding: 8px 16px;
-  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 18px;
+  border-radius: var(--radius-md);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: var(--tracking-tight);
   cursor: pointer;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
-  color: var(--text-main, #1a1a1a);
-  transition: all 0.2s;
+  border: 1px solid var(--border-hover);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
-.btn:hover {
-  background: #f5f5f5;
+.btn:hover:not(:disabled) {
+  background: var(--gray-0);
+  border-color: var(--gray-5);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 .btn-primary {
-  background: var(--primary, #ff2442);
-  border-color: var(--primary, #ff2442);
+  background: var(--primary);
+  border-color: var(--primary);
   color: white;
+  box-shadow: var(--shadow-xs), 0 4px 12px var(--primary-fade);
 }
 
-.btn-primary:hover {
-  background: var(--primary-hover, #e61e3a);
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 
 .btn-secondary {
-  background: #f0f0f0;
-  border-color: #ddd;
-  color: #333;
+  background: var(--gray-2);
+  border-color: transparent;
+  color: var(--text-sub);
+  box-shadow: none;
 }
 
-.btn-secondary:hover {
-  background: #e5e5e5;
+.btn-secondary:hover:not(:disabled) {
+  background: var(--gray-3);
+  border-color: transparent;
+  color: var(--text-main);
 }
 
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 /* 加载动画 */

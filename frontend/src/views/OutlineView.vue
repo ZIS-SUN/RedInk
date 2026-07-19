@@ -12,7 +12,7 @@
         </p>
       </div>
       <div style="display: flex; gap: 12px;">
-        <button class="btn btn-secondary" @click="goBack" style="background: white; border: 1px solid var(--border-color);">
+        <button class="btn btn-secondary" @click="goBack">
           上一步
         </button>
         <button class="btn btn-primary" @click="startGeneration">
@@ -81,7 +81,7 @@
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
             </button>
             <div class="drag-handle" title="拖拽排序">
-               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
             </div>
             <button class="icon-btn danger" @click="requestDeletePage(idx)" title="删除此页" aria-label="删除此页">
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -391,19 +391,19 @@ watch(
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   max-width: 100%;
   padding: 8px 14px;
-  border-radius: var(--radius-sm, 8px);
-  font-size: 13px;
-  color: var(--color-info, #3b82f6);
-  background: var(--color-info-soft, #dbeafe);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption);
+  color: var(--color-info);
+  background: var(--color-info-soft);
 }
 
 .style-hint.inactive {
-  color: var(--text-sub, #666);
-  background: var(--bg-body, #f4f5f7);
-  border: 1px solid var(--border-color, #eee);
+  color: var(--text-sub);
+  background: var(--gray-1);
+  border: 1px solid var(--border-color);
 }
 
 .style-hint-colors {
@@ -414,12 +414,12 @@ watch(
 .style-hint-color {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(33, 30, 27, 0.1);
 }
 
 .style-hint-link {
-  color: var(--primary, #ff2442);
+  color: var(--primary);
   font-weight: 600;
   text-decoration: none;
 }
@@ -430,24 +430,25 @@ watch(
 
 /* 保存状态指示器 */
 .save-indicator {
-  margin-left: 12px;
+  margin-left: var(--space-3);
   font-size: 12px;
   font-weight: 500;
   padding: 2px 8px;
-  border-radius: 4px;
-  transition: all 0.3s ease;
+  border-radius: var(--radius-xs);
+  transition: color var(--transition-base), background var(--transition-base),
+    opacity var(--transition-base);
 }
 
 .save-indicator.saving {
-  color: var(--color-info, #1890ff);
-  background: var(--color-info-soft, #e6f7ff);
-  border: 1px solid var(--color-info-soft, #91d5ff);
+  color: var(--color-info);
+  background: var(--color-info-soft);
+  border: 1px solid var(--color-info-soft);
 }
 
 .save-indicator.saved {
-  color: var(--color-success, #52c41a);
-  background: var(--color-success-soft, #f6ffed);
-  border: 1px solid var(--color-success-soft, #b7eb8f);
+  color: var(--color-success);
+  background: var(--color-success-soft);
+  border: 1px solid var(--color-success-soft);
   opacity: 0.7;
 }
 
@@ -456,7 +457,7 @@ watch(
   display: grid;
   /* 响应式列：最小宽度 280px，自动填充 */
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 24px;
+  gap: var(--space-5);
   max-width: 1400px;
   margin: 0 auto;
   padding: 0 20px;
@@ -465,21 +466,17 @@ watch(
 .outline-card {
   display: flex;
   flex-direction: column;
-  padding: 16px; /* 减小内边距 */
-  transition: all 0.2s ease;
-  border: none;
-  border-radius: 8px; /* 较小的圆角 */
-  background: white;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-  /* 保持一定的长宽比感，虽然高度自适应，但由于 flex column 和内容撑开，
-     这里设置一个 min-height 让它看起来像个竖向卡片 */
-  min-height: 360px; 
+  padding: var(--space-4);
+  margin-bottom: 0; /* 间距交给 grid gap */
+  /* 边框/圆角/阴影复用全局 .card（--radius-lg + --shadow-xs + --border-color） */
+  min-height: 360px;
   position: relative;
 }
 
 .outline-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+  border-color: var(--border-hover);
   z-index: 10;
 }
 
@@ -493,45 +490,45 @@ watch(
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #f5f5f5;
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .page-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .page-number {
   font-size: 14px;
   font-weight: 700;
-  color: #999;
-  font-family: 'Inter', sans-serif;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-secondary);
 }
 
 .outline-card:focus-within .page-number {
-  color: #666;
+  color: var(--text-sub);
 }
 
 .page-type {
   font-size: 11px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-.page-type.cover { color: var(--color-danger, #FF4D4F); background: var(--color-danger-soft, #FFF1F0); }
-.page-type.content { color: #8c8c8c; background: #f5f5f5; }
-.page-type.summary { color: var(--color-success, #52C41A); background: var(--color-success-soft, #F6FFED); }
+.page-type.cover { color: var(--color-danger); background: var(--color-danger-soft); }
+.page-type.content { color: var(--text-secondary); background: var(--gray-2); }
+.page-type.summary { color: var(--color-success); background: var(--color-success-soft); }
 
 .card-controls {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   opacity: 0.85;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-fast);
 }
 .outline-card:hover .card-controls,
 .outline-card:focus-within .card-controls { opacity: 1; }
@@ -545,6 +542,7 @@ watch(
 .drag-handle {
   cursor: grab;
   padding: 2px;
+  color: var(--text-secondary);
 }
 .drag-handle:active { cursor: grabbing; }
 
@@ -552,12 +550,13 @@ watch(
   background: none;
   border: none;
   cursor: pointer;
-  color: #999;
+  color: var(--text-secondary);
   padding: 2px;
-  transition: color 0.2s;
+  border-radius: var(--radius-xs);
+  transition: color var(--transition-fast);
 }
-.icon-btn:hover:not(:disabled) { color: var(--primary, #ff2442); }
-.icon-btn.danger:hover:not(:disabled) { color: var(--color-danger, #FF4D4F); }
+.icon-btn:hover:not(:disabled) { color: var(--text-main); }
+.icon-btn.danger:hover:not(:disabled) { color: var(--color-danger); }
 .icon-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
@@ -572,10 +571,14 @@ watch(
   padding: 0;
   font-size: 16px; /* 更大的字号 */
   line-height: 1.7; /* 舒适行高 */
-  color: #333;
+  color: var(--text-main);
   resize: none; /* 禁止手动拉伸，保持卡片整体感 */
   font-family: inherit;
   margin-bottom: 10px;
+}
+
+.textarea-paper::placeholder {
+  color: var(--text-placeholder);
 }
 
 .textarea-paper:focus {
@@ -585,17 +588,17 @@ watch(
 .word-count {
   text-align: right;
   font-size: 11px;
-  color: #999;
+  color: var(--text-secondary);
   margin-top: auto;
 }
 
 .outline-card:focus-within .word-count {
-  color: #666;
+  color: var(--text-sub);
 }
 
 /* 添加卡片 */
 .add-card-dashed {
-  border: 2px dashed #eee;
+  border: 2px dashed var(--gray-4);
   background: transparent;
   box-shadow: none;
   display: flex;
@@ -603,14 +606,16 @@ watch(
   justify-content: center;
   cursor: pointer;
   min-height: 360px;
-  color: #ccc;
-  transition: all 0.2s;
+  margin-bottom: 0;
+  color: var(--gray-5);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .add-card-dashed:hover {
   border-color: var(--primary);
   color: var(--primary);
-  background: rgba(255, 36, 66, 0.02);
+  background: var(--primary-fade);
 }
 
 .add-content {
@@ -620,7 +625,7 @@ watch(
 .add-icon {
   font-size: 32px;
   font-weight: 300;
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 /* 移动端适配 */

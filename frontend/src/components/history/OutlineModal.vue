@@ -66,31 +66,33 @@ function getPageTypeName(type: string): string {
 .outline-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(33, 30, 27, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: var(--space-7);
 }
 
 /* 模态框内容容器 */
 .outline-modal-content {
-  background: white;
+  background: var(--bg-card);
   width: 100%;
   max-width: 800px;
   max-height: 85vh;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
 }
 
 /* 模态框头部 */
 .outline-modal-header {
-  padding: 20px 24px;
-  border-bottom: 1px solid #eee;
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -101,7 +103,8 @@ function getPageTypeName(type: string): string {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: #1a1a1a;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 /* 关闭按钮 */
@@ -110,38 +113,40 @@ function getPageTypeName(type: string): string {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: #666;
-  padding: 0;
+  color: var(--text-secondary);
+  padding: 2px 6px;
   line-height: 1;
-  transition: color 0.2s;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
 .close-icon:hover {
-  color: #333;
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 /* 模态框主体（可滚动） */
 .outline-modal-body {
   flex: 1;
   overflow-y: auto;
-  padding: 20px 24px;
-  background: #f9fafb;
+  padding: var(--space-5);
+  background: var(--gray-1);
 }
 
 /* 大纲页面卡片 */
 .outline-page-card {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 20px;
-  margin-bottom: 16px;
-  border: 1px solid #e5e7eb;
-  transition: all 0.2s;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  background: var(--bg-card);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+  border: 1px solid var(--border-color);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+  box-shadow: var(--shadow-xs);
 }
 
 .outline-page-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  border-color: #d1d5db;
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-hover);
 }
 
 .outline-page-card:last-child {
@@ -153,9 +158,9 @@ function getPageTypeName(type: string): string {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-color);
 }
 
 /* 页码标识 */
@@ -166,62 +171,62 @@ function getPageTypeName(type: string): string {
   min-width: 36px;
   height: 24px;
   padding: 0 8px;
-  background: var(--primary, #ff2442);
-  color: white;
-  border-radius: 4px;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: var(--radius-xs);
   font-size: 12px;
   font-weight: 700;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-mono);
 }
 
-/* 页面类型标识 */
+/* 页面类型标识：语义 -soft 底 + 语义色文字 */
 .page-type-badge {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
   font-weight: 600;
-  background: #e9ecef;
-  color: #6c757d;
+  background: var(--gray-2);
+  color: var(--text-sub);
 }
 
 .page-type-badge.cover {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 .page-type-badge.content {
-  background: #f3e5f5;
-  color: #7b1fa2;
+  background: var(--gray-2);
+  color: var(--text-sub);
 }
 
 .page-type-badge.summary {
-  background: #e8f5e9;
-  color: #388e3c;
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 /* 字数统计 */
 .word-count {
   margin-left: auto;
   font-size: 11px;
-  color: #999;
+  color: var(--text-secondary);
 }
 
 /* 卡片内容 */
 .outline-page-card-content {
   font-size: 14px;
   line-height: 1.8;
-  color: #374151;
+  color: var(--text-sub);
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* 响应式布局 */
 @media (max-width: 768px) {
   .outline-modal-overlay {
-    padding: 20px;
+    padding: var(--space-5);
   }
 
   .outline-modal-content {
@@ -229,11 +234,11 @@ function getPageTypeName(type: string): string {
   }
 
   .outline-modal-header {
-    padding: 16px 20px;
+    padding: var(--space-4) var(--space-5);
   }
 
   .outline-modal-body {
-    padding: 16px 20px;
+    padding: var(--space-4) var(--space-5);
   }
 }
 </style>

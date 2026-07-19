@@ -311,7 +311,7 @@ function platformLabel(value: PlanPlatform): string {
 }
 
 function platformColor(value: PlanPlatform): string {
-  return PLATFORM_OPTIONS.find(p => p.value === value)?.color || 'var(--border-hover, #ccc)'
+  return PLATFORM_OPTIONS.find(p => p.value === value)?.color || 'var(--border-hover)'
 }
 
 function statusLabel(value: PlanStatus): string {
@@ -612,7 +612,7 @@ onMounted(() => {
   border: 1px solid var(--color-success-soft);
   background: var(--color-success-soft);
   color: var(--color-success);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
 }
 
@@ -638,21 +638,24 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 14px 8px;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 12px;
-  background: white;
+  padding: 16px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xs);
 }
 
 .stat-num {
   font-size: 22px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
   font-size: 12px;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
 }
 
 .stat-idea .stat-num { color: var(--color-info); }
@@ -679,7 +682,8 @@ onMounted(() => {
 .month-text {
   font-size: 15px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
   min-width: 100px;
   text-align: center;
 }
@@ -699,8 +703,8 @@ onMounted(() => {
 
 .view-toggle {
   display: flex;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -708,9 +712,15 @@ onMounted(() => {
   padding: 6px 14px;
   font-size: 13px;
   border: none;
-  background: white;
-  color: var(--text-sub, #666);
+  background: var(--bg-card);
+  color: var(--text-sub);
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.view-toggle-btn:hover:not(.active) {
+  background: var(--gray-1);
+  color: var(--text-main);
 }
 
 .view-toggle-btn.active {
@@ -762,24 +772,25 @@ onMounted(() => {
   text-align: center;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   padding: 6px 0;
 }
 
 .day-cell {
   min-height: 88px;
-  border: 1px solid var(--border-color, #f0f0f0);
-  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   cursor: pointer;
-  transition: border-color 0.15s;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
 .day-cell:hover {
-  border-color: var(--border-hover, #d0d0d0);
+  border-color: var(--border-hover);
+  background: var(--gray-0);
 }
 
 .day-cell.other-month {
@@ -795,7 +806,7 @@ onMounted(() => {
 .day-num {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
 }
 
 .day-cell.today .day-num {
@@ -816,13 +827,14 @@ onMounted(() => {
   width: 100%;
   padding: 2px 6px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
   line-height: 1.5;
   text-align: left;
   cursor: pointer;
   background: var(--color-info-soft);
   color: var(--color-info);
+  transition: filter var(--transition-fast);
 }
 
 .plan-chip:hover {
@@ -832,7 +844,7 @@ onMounted(() => {
 .chip-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
 }
 
@@ -851,7 +863,7 @@ onMounted(() => {
 .calendar-hint {
   margin: 12px 0 0;
   font-size: 12px;
-  color: var(--text-placeholder, #bbb);
+  color: var(--text-placeholder);
   text-align: center;
 }
 
@@ -877,21 +889,23 @@ onMounted(() => {
   flex-shrink: 0;
   min-width: 64px;
   padding: 6px 8px;
-  border-radius: 10px;
-  background: var(--bg-soft, #fafafa);
-  border: 1px solid var(--border-color, #f0f0f0);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  border: 1px solid var(--border-color);
 }
 
 .date-day {
   font-size: 20px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
   line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 .date-month {
   font-size: 11px;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
 }
 
 .plan-row-main {
@@ -905,7 +919,8 @@ onMounted(() => {
 .plan-row-title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -924,15 +939,16 @@ onMounted(() => {
   gap: 5px;
   flex-shrink: 0;
   font-size: 12px;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
   padding: 2px 8px;
-  border-radius: 100px;
-  border: 1px solid var(--border-color, #eee);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--gray-0);
 }
 
 .plan-notes {
   font-size: 12px;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -947,7 +963,7 @@ onMounted(() => {
 
 .status-select {
   border: none;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   font-weight: 600;
   padding: 5px 10px;
   cursor: pointer;
@@ -956,14 +972,15 @@ onMounted(() => {
 .btn-mini {
   padding: 6px 12px;
   font-size: 13px;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .btn-mini:hover {
-  border-color: var(--border-hover, #e0e0e0);
+  border-color: var(--border-hover);
+  background: var(--gray-0);
 }
 
 .btn-mini.btn-danger {
@@ -998,7 +1015,9 @@ onMounted(() => {
 .plan-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -1007,14 +1026,14 @@ onMounted(() => {
 }
 
 .plan-modal {
-  background: white;
-  border-radius: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 520px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 .plan-modal-head {
@@ -1028,7 +1047,8 @@ onMounted(() => {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .close-btn {
@@ -1036,8 +1056,15 @@ onMounted(() => {
   background: transparent;
   font-size: 22px;
   line-height: 1;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.close-btn:hover {
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 .plan-modal-body {
@@ -1053,12 +1080,12 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px 20px;
-  border-top: 1px solid var(--border-color, #eee);
+  border-top: 1px solid var(--border-color);
   margin-top: 8px;
 }
 
 .plan-modal-foot .btn {
-  border: 1px solid var(--border-color, #eee);
+  border: 1px solid var(--border-color);
 }
 
 .plan-modal-foot .btn-primary {
@@ -1075,7 +1102,7 @@ onMounted(() => {
 .form-field label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 .form-field .required {
@@ -1103,12 +1130,12 @@ onMounted(() => {
 .status-radio {
   padding: 6px 14px;
   border: 1px solid transparent;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   opacity: 0.55;
-  transition: opacity 0.15s, box-shadow 0.15s;
+  transition: opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .status-radio.selected {
@@ -1194,7 +1221,7 @@ onMounted(() => {
   .plan-modal {
     max-width: none;
     max-height: 92vh;
-    border-radius: 14px 14px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 }
 </style>

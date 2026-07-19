@@ -78,16 +78,16 @@ async function copyDiagnostics() {
 
 <style scoped>
 .error-card {
-  border: 1px solid #fecaca;
-  background: #fff7f7;
-  border-radius: 8px;
-  padding: 14px;
-  color: #7f1d1d;
+  border: 1px solid rgba(222, 59, 59, 0.25);
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  color: var(--color-danger);
 }
 
 .error-main {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   align-items: flex-start;
 }
 
@@ -95,11 +95,11 @@ async function copyDiagnostics() {
   flex: 0 0 auto;
   width: 22px;
   height: 22px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #dc2626;
+  background: var(--color-danger);
   color: #fff;
   font-weight: 700;
   font-size: 14px;
@@ -114,7 +114,7 @@ async function copyDiagnostics() {
 .error-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -122,16 +122,17 @@ async function copyDiagnostics() {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #7f1d1d;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-danger);
 }
 
 .error-code {
-  font-family: Monaco, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: #991b1b;
-  background: #fee2e2;
+  color: var(--color-danger);
+  background: rgba(222, 59, 59, 0.12);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .error-detail,
@@ -139,20 +140,27 @@ async function copyDiagnostics() {
   margin: 6px 0 0;
   font-size: 13px;
   line-height: 1.55;
+  color: var(--text-sub);
 }
 
 .error-suggestion {
-  color: #991b1b;
+  color: var(--color-danger);
 }
 
 .error-close {
   border: none;
   background: transparent;
-  color: #991b1b;
+  color: var(--color-danger);
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
+  border-radius: var(--radius-xs);
+  transition: opacity var(--transition-fast);
+}
+
+.error-close:hover {
+  opacity: 0.7;
 }
 
 .error-details {
@@ -163,19 +171,20 @@ async function copyDiagnostics() {
 .error-details summary {
   cursor: pointer;
   font-size: 12px;
-  color: #991b1b;
+  color: var(--color-danger);
   user-select: none;
 }
 
 .error-details pre {
   white-space: pre-wrap;
   word-break: break-word;
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   padding: 10px;
-  border-radius: 6px;
-  background: #fff;
-  border: 1px solid #fecaca;
-  color: #3f1d1d;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid rgba(222, 59, 59, 0.2);
+  color: var(--text-sub);
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.45;
   max-height: 220px;
@@ -183,29 +192,39 @@ async function copyDiagnostics() {
 }
 
 .copy-btn {
-  border: 1px solid #fecaca;
-  background: #fff;
-  color: #991b1b;
-  border-radius: 6px;
+  border: 1px solid rgba(222, 59, 59, 0.25);
+  background: var(--bg-card);
+  color: var(--color-danger);
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 12px;
+  font-family: inherit;
   cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.copy-btn:hover {
+  background: var(--gray-0);
+  border-color: rgba(222, 59, 59, 0.4);
 }
 
 .retry-btn {
   margin-top: 10px;
   border: none;
-  background: var(--color-danger, #ef4444);
+  background: var(--color-danger);
   color: #fff;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 16px;
   font-size: 13px;
   font-weight: 600;
+  font-family: inherit;
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
 .retry-btn:hover {
-  opacity: 0.85;
+  background: var(--color-danger);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 </style>

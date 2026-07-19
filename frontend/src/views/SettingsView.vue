@@ -37,7 +37,7 @@
             <h2 class="section-title">文本生成配置</h2>
             <p class="section-desc">用于生成小红书图文大纲</p>
           </div>
-          <button class="btn btn-small" @click="openAddTextModal">
+          <button class="btn btn-secondary btn-small" @click="openAddTextModal">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -64,7 +64,7 @@
             <h2 class="section-title">图片生成配置</h2>
             <p class="section-desc">用于生成小红书配图</p>
           </div>
-          <button class="btn btn-small" @click="openAddImageModal">
+          <button class="btn btn-secondary btn-small" @click="openAddImageModal">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -207,19 +207,20 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 
 .section-title {
   font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 4px;
-  color: #1a1a1a;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  margin-bottom: var(--space-1);
+  color: var(--text-main);
 }
 
 .section-desc {
   font-size: 14px;
-  color: #666;
+  color: var(--text-sub);
   margin: 0;
 }
 
@@ -227,28 +228,33 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid var(--color-success-soft, #bbf7d0);
-  background: var(--color-success-soft, #f0fdf4);
-  color: var(--color-success, #166534);
-  border-radius: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(31, 169, 92, 0.25);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  border-radius: var(--radius-md);
   font-size: 14px;
 }
 
 .success-card button {
   border: none;
   background: transparent;
-  color: var(--color-success, #166534);
+  color: var(--color-success);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.success-card button:hover {
+  opacity: 0.7;
 }
 
 /* 按钮样式 */
 .btn-small {
-  padding: 6px 12px;
+  padding: 6px 14px;
   font-size: 13px;
   display: inline-flex;
   align-items: center;
@@ -261,8 +267,8 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 20px;
-  color: #666;
+  padding: var(--space-8) var(--space-5);
+  color: var(--text-sub);
 }
 
 /* 移动端适配 */

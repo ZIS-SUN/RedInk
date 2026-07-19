@@ -5,12 +5,15 @@
 }
 
 body {
-  /* 系统字体栈（含中文回退），避免外链 Google Fonts 阻塞渲染 */
-  font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Apple 式系统字体栈（含中文回退），禁止外链字体 */
+  font-family: var(--font-sans);
   background-color: var(--bg-body);
   color: var(--text-main);
   -webkit-font-smoothing: antialiased;
-  line-height: 1.6;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-size: var(--font-size-body);
+  line-height: 1.65;
 }
 
 /* 键盘可访问性：所有元素在键盘聚焦时显示可见焦点环 */
@@ -22,6 +25,11 @@ body {
 /* 鼠标点击不显示焦点环，仅键盘导航时显示 */
 :focus:not(:focus-visible) {
   outline: none;
+}
+
+::selection {
+  background: var(--primary-fade);
+  color: var(--text-main);
 }
 
 #app {
@@ -39,19 +47,19 @@ body {
   left: 0;
   top: 0;
   border-right: 1px solid var(--border-color);
-  padding: 32px 24px;
+  padding: var(--space-6) var(--space-4) var(--space-5);
   display: flex;
   flex-direction: column;
   z-index: 100;
-  transition: all 0.3s ease;
+  transition: all var(--transition-slow);
 }
 
 .layout-main {
   margin-left: var(--sidebar-width);
   flex: 1;
-  padding: 40px 60px;
+  padding: var(--space-7) var(--space-8);
   min-height: 100vh;
-  background: linear-gradient(135deg, #FAFAFA 0%, #F4F5F7 100%);
+  background: var(--bg-body);
   display: flex;
   flex-direction: column;
 }
@@ -60,13 +68,13 @@ body {
 .logo-area {
   display: flex;
   align-items: center;
-  margin-bottom: 48px;
-  padding-left: 0;
+  margin-bottom: var(--space-7);
+  padding: 0 var(--space-2);
 }
 
 .logo-icon {
   width: 100%;
-  max-width: 200px;
+  max-width: 180px;
   height: auto;
   object-fit: contain;
 }
@@ -79,30 +87,47 @@ body {
 .nav-menu {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px 18px;
+  gap: var(--space-3);
+  padding: 11px 14px;
   border-radius: var(--radius-md);
   color: var(--text-sub);
   text-decoration: none;
   font-weight: 500;
-  transition: all 0.2s ease;
   font-size: 15px;
+  letter-spacing: var(--tracking-tight);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.nav-item svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: opacity var(--transition-fast);
 }
 
 .nav-item:hover {
-  background: #F9FAFB;
-  color: var(--primary);
+  background: var(--gray-2);
+  color: var(--text-main);
 }
 
+.nav-item:hover svg {
+  opacity: 1;
+}
+
+/* 选中态：柔和 pill 高亮，而非大红块 */
 .nav-item.active {
   background: var(--primary-light);
   color: var(--primary);
+  font-weight: 600;
+}
+
+.nav-item.active svg {
+  opacity: 1;
 }
 
 /* 导航文案：桌面显示完整文案，移动端底部 tab 显示短文案 */
@@ -113,37 +138,46 @@ body {
 /* 侧边栏底部用户信息 */
 .sidebar-user {
   margin-top: auto;
-  padding-top: 20px;
+  padding: var(--space-4) var(--space-2) 0;
   border-top: 1px solid var(--border-color);
 }
 
 .sidebar-user-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast);
+}
+
+.sidebar-user-inner:hover {
+  background: var(--gray-2);
 }
 
 .sidebar-user-avatar {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary) 0%, #ff6b6b 100%);
+  border-radius: var(--radius-full);
+  background: linear-gradient(150deg, var(--primary) 0%, var(--primary-active) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
   font-weight: 600;
   font-size: 14px;
+  box-shadow: var(--shadow-xs);
 }
 
 .sidebar-user-name {
   font-size: 14px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
 }
 
 .sidebar-user-id {
   font-size: 12px;
-  color: var(--text-sub);
+  color: var(--text-secondary);
 }
 
 /* 通用容器 */
@@ -155,44 +189,46 @@ body {
 
 /* 标题排版 */
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: var(--space-7);
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .page-title {
-  font-size: 36px;
-  font-weight: 800;
+  font-size: var(--font-size-title);
+  font-weight: 700;
   color: var(--text-main);
-  margin-bottom: 12px;
-  letter-spacing: -1px;
+  margin-bottom: var(--space-3);
+  letter-spacing: var(--tracking-tighter);
+  line-height: 1.25;
 }
 
 .page-subtitle {
-  font-size: 18px;
+  font-size: var(--font-size-subtitle);
   color: var(--text-sub);
   max-width: 600px;
   margin: 0 auto;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .section-title {
   font-size: 20px;
-  font-weight: 700;
-  margin-bottom: 20px;
+  font-weight: 650;
+  margin-bottom: var(--space-5);
   color: var(--text-main);
+  letter-spacing: var(--tracking-tight);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 /* 全局页脚 */
 .global-footer {
-  margin-top: 80px;
-  padding: 32px 0 24px;
+  margin-top: var(--space-8);
+  padding: var(--space-6) 0 var(--space-5);
   border-top: 1px solid var(--border-color);
   background: transparent;
 }
@@ -201,20 +237,20 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .footer-tip {
   font-size: 14px;
   color: var(--text-sub);
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .footer-tip a {
   color: var(--primary);
   text-decoration: none;
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .footer-tip a:hover {
@@ -232,7 +268,7 @@ body {
   color: var(--primary);
   text-decoration: none;
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .footer-text a:hover {
@@ -241,14 +277,14 @@ body {
 }
 
 .footer-license {
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   color: var(--text-placeholder);
 }
 
 .footer-license a {
-  color: var(--text-sub);
+  color: var(--text-secondary);
   text-decoration: none;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .footer-license a:hover {
@@ -269,12 +305,16 @@ body {
     flex-direction: row;
     border-right: none;
     border-top: 1px solid var(--border-color);
-    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
+    /* 毛玻璃底部 tab（不支持 backdrop-filter 时回退为半透明暖白） */
+    background: rgba(252, 251, 249, 0.88);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    backdrop-filter: saturate(180%) blur(20px);
+    box-shadow: 0 -1px 0 rgba(33, 30, 27, 0.03), 0 -8px 24px rgba(33, 30, 27, 0.05);
     /* 适配 iPhone 底部安全区 */
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
-  /* 移动端隐藏 Logo 与用户信息，只保留 3 个导航项 */
+  /* 移动端隐藏 Logo 与用户信息，只保留导航项 */
   .layout-sidebar .logo-area,
   .layout-sidebar .sidebar-user {
     display: none;
@@ -293,6 +333,7 @@ body {
     gap: 2px;
     padding: 6px 4px;
     font-size: 11px;
+    letter-spacing: 0;
     border-radius: 0;
   }
 
@@ -314,15 +355,15 @@ body {
 
   .layout-main {
     margin-left: 0;
-    padding: 16px;
+    padding: var(--space-4);
     /* 给底部 tab bar 留出空间 */
     padding-bottom: calc(var(--mobile-tabbar-height) + env(safe-area-inset-bottom, 0px) + 16px);
   }
 
   .page-title {
     font-size: 24px;
-    letter-spacing: -0.5px;
-    margin-bottom: 8px;
+    letter-spacing: var(--tracking-tight);
+    margin-bottom: var(--space-2);
   }
 
   .page-subtitle {
@@ -330,7 +371,7 @@ body {
   }
 
   .global-footer {
-    margin-top: 40px;
+    margin-top: var(--space-7);
   }
 }
 

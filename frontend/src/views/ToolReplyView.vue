@@ -11,7 +11,7 @@
     </div>
 
     <!-- 输入区 -->
-    <div class="input-card">
+    <div class="card input-card">
       <label class="field-label" for="reply-comments">粉丝评论（每行一条，最多 20 条）</label>
       <textarea
         id="reply-comments"
@@ -52,11 +52,11 @@
 
       <button
         type="button"
-        class="generate-btn"
+        class="btn btn-primary generate-btn"
         :disabled="loading || parsedComments.length === 0"
         @click="handleGenerate"
       >
-        <span v-if="loading" class="btn-spinner" aria-hidden="true"></span>
+        <span v-if="loading" class="spinner-sm" aria-hidden="true"></span>
         {{ loading ? '正在生成神回复…' : '生成神回复' }}
       </button>
     </div>
@@ -233,7 +233,7 @@ async function handleCopy(text: string) {
 .tool-header {
   text-align: center;
   padding: 28px 16px 8px;
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn 0.5s var(--ease-out);
 }
 
 .brand-pill {
@@ -242,8 +242,8 @@ async function handleCopy(text: string) {
   padding: 6px 16px;
   background: var(--primary-fade);
   color: var(--primary);
-  border-radius: 100px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-caption);
   font-weight: 600;
   margin-bottom: 16px;
   letter-spacing: 0.5px;
@@ -252,6 +252,7 @@ async function handleCopy(text: string) {
 .page-title {
   font-size: 28px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tighter);
   color: var(--text-main);
   margin: 0 0 10px;
 }
@@ -263,13 +264,11 @@ async function handleCopy(text: string) {
   line-height: 1.6;
 }
 
-/* ── 输入卡片 ───────────────────── */
+/* ── 输入卡片（基于全局 .card，内距走 --space-6） ───────────────────── */
 .input-card {
-  background: var(--bg-card);
-  border-radius: 20px;
-  padding: 24px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
-  animation: fadeIn 0.5s ease-out;
+  padding: var(--space-6);
+  margin-bottom: 0;
+  animation: fadeIn 0.5s var(--ease-out);
 }
 
 .field-label {
@@ -284,7 +283,7 @@ async function handleCopy(text: string) {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   padding: 12px 14px;
   font-size: 15px;
   font-family: inherit;
@@ -292,14 +291,16 @@ async function handleCopy(text: string) {
   line-height: 1.6;
   resize: vertical;
   min-height: 130px;
-  transition: border-color 0.2s;
-  background: var(--bg-body);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    background var(--transition-fast);
+  background: var(--gray-1);
 }
 
 .comments-input:focus {
   outline: none;
   border-color: var(--primary);
   background: var(--bg-card);
+  box-shadow: var(--shadow-focus);
 }
 
 .comments-hint {
@@ -324,25 +325,29 @@ async function handleCopy(text: string) {
 
 .option-chip {
   padding: 7px 16px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
   font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .option-chip:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
 }
 
 .option-chip.active {
-  background: var(--primary);
+  background: var(--primary-light);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--primary);
   font-weight: 600;
 }
 
@@ -378,50 +383,21 @@ async function handleCopy(text: string) {
   color: var(--text-sub);
 }
 
+/* 生成按钮基于全局 .btn btn-primary，仅覆盖布局 */
 .generate-btn {
   margin-top: 22px;
   width: 100%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 13px 24px;
-  border: none;
-  border-radius: 14px;
-  background: linear-gradient(135deg, var(--primary) 0%, #FF5C72 100%);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s, transform 0.15s;
-}
-
-.generate-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.generate-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.btn-spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.4);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
 }
 
 /* ── 置顶引导评论 ───────────────── */
 .pinned-card {
-  background: linear-gradient(135deg, var(--primary-fade) 0%, rgba(255, 92, 114, 0.06) 100%);
+  background: var(--primary-light);
   border: 1px solid var(--primary);
-  border-radius: 16px;
-  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) 18px;
   margin-bottom: 20px;
-  animation: fadeIn 0.4s ease-out;
+  box-shadow: var(--shadow-xs);
+  animation: fadeIn 0.4s var(--ease-out);
 }
 
 .pinned-head {
@@ -436,7 +412,7 @@ async function handleCopy(text: string) {
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   background: var(--primary);
   color: #fff;
   font-size: 12.5px;
@@ -454,7 +430,7 @@ async function handleCopy(text: string) {
 /* ── 结果区 ─────────────────────── */
 .result-section {
   margin-top: 28px;
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.4s var(--ease-out);
 }
 
 .result-toolbar {
@@ -479,14 +455,17 @@ async function handleCopy(text: string) {
 .reply-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 16px 18px;
-  transition: box-shadow 0.2s, border-color 0.2s;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) 18px;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base),
+    transform var(--transition-base);
 }
 
 .reply-card:hover {
   border-color: var(--border-hover);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .comment-row {
@@ -501,11 +480,11 @@ async function handleCopy(text: string) {
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-body);
+  background: var(--gray-2);
   color: var(--text-sub);
   font-size: 12px;
   font-weight: 600;
@@ -537,7 +516,7 @@ async function handleCopy(text: string) {
   flex-shrink: 0;
   margin-top: 2px;
   padding: 2px 10px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   background: var(--primary-fade);
   color: var(--primary);
   font-size: 12px;
@@ -564,20 +543,22 @@ async function handleCopy(text: string) {
 .copy-btn {
   flex-shrink: 0;
   padding: 5px 14px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast);
   white-space: nowrap;
 }
 
 .copy-btn:hover {
-  border-color: var(--primary);
-  color: var(--primary);
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
 }
 
 .copy-btn.copied {
@@ -614,7 +595,7 @@ async function handleCopy(text: string) {
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 32px));
   z-index: 1000;
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.3s var(--ease-out);
 }
 
 /* ── 移动端适配 ─────────────────── */
@@ -637,7 +618,7 @@ async function handleCopy(text: string) {
 
   .input-card {
     padding: 18px 16px;
-    border-radius: 16px;
+    border-radius: var(--radius-lg);
   }
 
   .option-chip {
@@ -681,9 +662,5 @@ async function handleCopy(text: string) {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 </style>

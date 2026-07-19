@@ -28,7 +28,7 @@
           查看结果
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left: 6px;"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
         </button>
-        <button class="btn" @click="router.push('/outline')" style="border:1px solid var(--border-color)">
+        <button class="btn btn-secondary" @click="router.push('/outline')">
           返回大纲
         </button>
       </div>
@@ -281,20 +281,20 @@ onUnmounted(cleanupGenerationRunner)
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-2);
   max-width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: var(--space-4);
   padding: 8px 14px;
-  border-radius: var(--radius-sm, 8px);
-  font-size: 13px;
-  color: var(--color-info, #3b82f6);
-  background: var(--color-info-soft, #dbeafe);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-caption);
+  color: var(--color-info);
+  background: var(--color-info-soft);
 }
 
 .style-hint.inactive {
-  color: var(--text-sub, #666);
-  background: var(--bg-card, #fff);
-  border: 1px solid var(--border-color, #eee);
+  color: var(--text-sub);
+  background: var(--gray-1);
+  border: 1px solid var(--border-color);
 }
 
 .style-hint-colors {
@@ -305,12 +305,12 @@ onUnmounted(cleanupGenerationRunner)
 .style-hint-color {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(33, 30, 27, 0.1);
 }
 
 .style-hint-link {
-  color: var(--primary, #ff2442);
+  color: var(--primary);
   font-weight: 600;
   text-decoration: none;
 }
@@ -324,10 +324,10 @@ onUnmounted(cleanupGenerationRunner)
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--color-success-soft, #f6ffed);
-  color: var(--color-success, #52c41a);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-success-soft);
+  color: var(--color-success);
   font-size: 14px;
   font-weight: 500;
 }
@@ -357,12 +357,12 @@ onUnmounted(cleanupGenerationRunner)
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(33, 30, 27, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-fast);
 }
 
 .image-preview:hover .image-overlay {
@@ -381,18 +381,21 @@ onUnmounted(cleanupGenerationRunner)
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: white;
+  background: var(--bg-card);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
-  color: #333;
-  transition: all 0.2s;
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .overlay-btn:hover {
   background: var(--primary);
   color: white;
+  transform: translateY(-1px);
 }
 
 .overlay-btn:disabled {
@@ -402,7 +405,7 @@ onUnmounted(cleanupGenerationRunner)
 
 .image-placeholder {
   aspect-ratio: 3/4;
-  background: #f9f9f9;
+  background: var(--gray-1);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -413,14 +416,14 @@ onUnmounted(cleanupGenerationRunner)
 }
 
 .error-placeholder {
-  background: var(--color-danger-soft, #fff5f5);
+  background: var(--color-danger-soft);
 }
 
 .error-icon {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  background: var(--color-danger, #ff4d4f);
+  border-radius: var(--radius-full);
+  background: var(--color-danger);
   color: white;
   display: flex;
   align-items: center;
@@ -430,13 +433,13 @@ onUnmounted(cleanupGenerationRunner)
 }
 
 .status-text {
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   color: var(--text-sub);
 }
 
 .image-error-text {
   max-width: 85%;
-  color: var(--color-danger, #991b1b);
+  color: var(--color-danger);
   font-size: 12px;
   line-height: 1.45;
   display: -webkit-box;
@@ -446,19 +449,19 @@ onUnmounted(cleanupGenerationRunner)
 }
 
 .retry-btn {
-  margin-top: 8px;
+  margin-top: var(--space-2);
   padding: 6px 16px;
   background: var(--primary);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.2s;
+  transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
 .retry-btn:hover {
-  opacity: 0.9;
+  background: var(--primary-hover);
   transform: translateY(-1px);
 }
 
@@ -469,8 +472,8 @@ onUnmounted(cleanupGenerationRunner)
 }
 
 .image-footer {
-  padding: 12px;
-  border-top: 1px solid #f0f0f0;
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -488,41 +491,41 @@ onUnmounted(cleanupGenerationRunner)
 }
 
 .footer-regen-btn {
-  border: 1px solid var(--border-color, #eee);
-  background: white;
-  color: var(--text-sub, #666);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
   font-size: 11px;
   padding: 3px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
 }
 
 .footer-regen-btn:hover {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .status-badge {
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .status-badge.done {
-  background: var(--color-success-soft, #E6F7ED);
-  color: var(--color-success, #52C41A);
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 .status-badge.generating,
 .status-badge.retrying {
-  background: var(--color-info-soft, #E6F4FF);
-  color: var(--color-info, #1890FF);
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 .status-badge.error {
-  background: var(--color-danger-soft, #FFF1F0);
-  color: var(--color-danger, #FF4D4F);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 .spinner {
@@ -530,7 +533,7 @@ onUnmounted(cleanupGenerationRunner)
   height: 24px;
   border: 2px solid var(--primary);
   border-top-color: transparent;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   animation: spin 1s linear infinite;
 }
 

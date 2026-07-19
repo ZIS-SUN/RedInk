@@ -116,26 +116,29 @@ const formattedDate = computed(() => {
 <style scoped>
 /* 卡片容器 */
 .gallery-card {
-  background: white;
-  border-radius: 12px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--transition-base),
+              box-shadow var(--transition-base),
+              border-color var(--transition-base);
   position: relative;
   will-change: transform;
   contain: layout style paint;
 }
 
 .gallery-card:hover {
-  transform: translateY(-4px) translateZ(0);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+  transform: translateY(-3px) translateZ(0);
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-hover);
 }
 
 /* 封面区域 */
 .card-cover {
   aspect-ratio: 3/4;
-  background: #f7f7f7;
+  background: var(--gray-1);
   position: relative;
   overflow: hidden;
   cursor: pointer;
@@ -145,13 +148,13 @@ const formattedDate = computed(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.4s var(--ease-out);
   will-change: transform;
   backface-visibility: hidden;
 }
 
 .gallery-card:hover .card-cover img {
-  transform: scale(1.05) translateZ(0);
+  transform: scale(1.04) translateZ(0);
 }
 
 /* 封面占位符 */
@@ -162,23 +165,24 @@ const formattedDate = computed(() => {
   align-items: center;
   justify-content: center;
   font-size: 48px;
-  color: #e0e0e0;
+  color: var(--gray-4);
   font-weight: 800;
-  background: #fafafa;
+  background: var(--gray-1);
 }
 
 /* 悬浮遮罩层 */
 .card-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(33, 30, 27, 0.42);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--space-3);
   opacity: 0;
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: opacity var(--transition-base);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   pointer-events: none;
   will-change: opacity;
@@ -199,78 +203,88 @@ const formattedDate = computed(() => {
 /* 遮罩层按钮 */
 .overlay-btn {
   padding: 8px 24px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.18);
   color: white;
   font-size: 14px;
+  font-family: inherit;
+  font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.2s, color 0.2s, transform 0.1s;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-fast);
   will-change: transform;
 }
 
 .overlay-btn:hover {
   background: white;
-  color: var(--text-main, #1a1a1a);
+  color: var(--text-main);
   transform: translateY(-2px);
 }
 
 .overlay-btn.primary {
-  background: var(--primary, #ff2442);
-  border-color: var(--primary, #ff2442);
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .overlay-btn.primary:hover {
-  background: var(--primary-hover, #e61e3a);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
   color: white;
 }
 
-/* 状态标识 */
+/* 状态标识：语义 -soft 底 + 语义色文字 */
 .status-badge {
   position: absolute;
   top: 12px;
   left: 12px;
   padding: 4px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 600;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-sub);
+  -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+  box-shadow: var(--shadow-xs);
 }
 
 .status-badge.completed {
-  background: var(--color-success, rgba(82, 196, 26, 0.9));
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 .status-badge.draft {
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--gray-2);
+  color: var(--text-sub);
 }
 
 .status-badge.generating {
-  background: var(--color-info, rgba(24, 144, 255, 0.9));
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 /* 底部区域 */
 .card-footer {
-  padding: 16px;
+  padding: var(--space-4);
 }
 
 .card-title {
   font-size: 15px;
   font-weight: 600;
-  margin-bottom: 8px;
+  letter-spacing: var(--tracking-tight);
+  margin-bottom: var(--space-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--text-main, #1a1a1a);
+  color: var(--text-main);
 }
 
 .card-meta {
   display: flex;
   align-items: center;
   font-size: 12px;
-  color: var(--text-sub, #666);
+  color: var(--text-secondary);
 }
 
 .dot {
@@ -290,32 +304,35 @@ const formattedDate = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  border-radius: 100px;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
-  color: var(--text-sub, #666);
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
   font-size: 12px;
+  font-family: inherit;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .footer-edit-btn:hover {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
+  border-color: var(--border-hover);
+  color: var(--primary);
+  background: var(--primary-light);
 }
 
 .more-btn {
   background: none;
   border: none;
-  color: var(--text-placeholder, #ccc);
+  color: var(--text-placeholder);
   cursor: pointer;
   padding: 4px;
-  border-radius: 4px;
-  transition: background-color 0.2s, color 0.2s;
+  border-radius: var(--radius-xs);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .more-btn:hover {
-  background: var(--color-danger-soft, #fee);
-  color: var(--color-danger, #ff4d4f);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 </style>

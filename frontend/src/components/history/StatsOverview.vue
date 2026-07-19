@@ -75,24 +75,27 @@ defineProps<{
 .stats-overview {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  margin-bottom: 32px;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
 }
 
 /* 单个统计卡片 */
 .stat-box {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 20px 24px;
-  background: white;
-  border-radius: 12px;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
-  transition: all 0.2s ease;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-base), transform var(--transition-base),
+    border-color var(--transition-base);
 }
 
 .stat-box:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-hover);
   transform: translateY(-2px);
 }
 
@@ -100,7 +103,7 @@ defineProps<{
 .stat-icon-circle {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -108,31 +111,32 @@ defineProps<{
 }
 
 .stat-icon-circle.blue {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
+  background: var(--color-info-soft);
+  color: var(--color-info);
 }
 
 .stat-icon-circle.green {
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
+  background: var(--color-success-soft);
+  color: var(--color-success);
 }
 
 .stat-icon-circle.orange {
-  background: rgba(249, 115, 22, 0.1);
-  color: #f97316;
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
 }
 
 /* 统计内容 */
 .stat-content h4 {
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 500;
   color: var(--text-sub);
-  margin: 0 0 4px 0;
+  margin: 0 0 var(--space-1) 0;
 }
 
 .stat-content .number {
   font-size: 28px;
   font-weight: 700;
+  letter-spacing: var(--tracking-tighter);
   color: var(--text-main);
   line-height: 1;
 }

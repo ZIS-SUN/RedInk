@@ -221,29 +221,31 @@ async function handleGenerate() {
 /* Hero Section */
 .hero-section {
   text-align: center;
-  margin-bottom: 40px;
-  padding: 50px 60px;
-  animation: fadeIn 0.6s ease-out;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 24px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+  margin-bottom: var(--space-7);
+  padding: var(--space-7) var(--space-8);
+  animation: fadeIn 0.6s var(--ease-out);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .hero-content {
-  margin-bottom: 36px;
+  margin-bottom: var(--space-6);
 }
 
 .brand-pill {
   display: inline-block;
   padding: 6px 16px;
-  background: rgba(255, 36, 66, 0.08);
+  background: var(--primary-fade);
   color: var(--primary);
-  border-radius: 100px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-caption);
   font-weight: 600;
-  margin-bottom: 20px;
-  letter-spacing: 0.5px;
+  margin-bottom: var(--space-5);
+  letter-spacing: 0.02em;
 }
 
 /* 品牌人设选择器 */
@@ -264,44 +266,49 @@ async function handleGenerate() {
   padding: 8px 12px;
   font-size: 14px;
   color: var(--text-main);
-  background: var(--bg-body, #fff);
-  border: 1px solid var(--border-color, #e5e5e5);
-  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 0.2s ease;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.brand-select:hover,
+.brand-select:hover {
+  border-color: var(--border-hover);
+}
+
 .brand-select:focus {
   border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
   outline: none;
 }
 
 .platform-slogan {
-  font-size: 20px;
+  font-size: var(--font-size-subtitle);
   font-weight: 600;
-  color: var(--text-main);
-  margin-bottom: 24px;
+  color: var(--text-sub);
+  margin-bottom: var(--space-5);
   line-height: 1.6;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--tracking-tight);
 }
 
 .page-subtitle {
-  font-size: 16px;
+  font-size: var(--font-size-subtitle);
   color: var(--text-sub);
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 /* Page Footer */
 .page-footer {
   text-align: center;
-  padding: 24px 0 16px;
-  margin-top: 20px;
+  padding: var(--space-5) 0 var(--space-4);
+  margin-top: var(--space-5);
 }
 
 .footer-copyright {
-  font-size: 15px;
-  color: #333;
+  font-size: var(--font-size-body);
+  color: var(--text-sub);
   font-weight: 500;
   margin-bottom: 6px;
 }
@@ -317,13 +324,14 @@ async function handleGenerate() {
 }
 
 .footer-license {
-  font-size: 13px;
-  color: #999;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .footer-license a {
-  color: #666;
+  color: var(--text-sub);
   text-decoration: none;
+  transition: color var(--transition-fast);
 }
 
 .footer-license a:hover {
@@ -332,8 +340,8 @@ async function handleGenerate() {
 
 .footer-tip {
   font-size: 14px;
-  color: #666;
-  margin-bottom: 12px;
+  color: var(--text-sub);
+  margin-bottom: var(--space-3);
 }
 
 .footer-tip a {
@@ -348,12 +356,12 @@ async function handleGenerate() {
 
 .home-error {
   position: fixed;
-  bottom: 32px;
+  bottom: var(--space-6);
   left: 50%;
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 32px));
   z-index: 1000;
-  animation: slideUp 0.3s ease-out;
+  animation: slideUp 0.3s var(--ease-out);
 }
 
 /* Animations */
@@ -365,5 +373,20 @@ async function handleGenerate() {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-section,
+  .home-error {
+    animation: none;
+  }
+}
+
+/* 移动端：留白收敛，保持呼吸感不溢出 */
+@media (max-width: 640px) {
+  .hero-section {
+    padding: var(--space-6) var(--space-4);
+    margin-bottom: var(--space-6);
+  }
 }
 </style>

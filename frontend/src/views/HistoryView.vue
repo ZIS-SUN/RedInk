@@ -8,10 +8,9 @@
       </div>
       <div style="display: flex; gap: 10px;">
         <button
-          class="btn"
+          class="btn btn-secondary"
           @click="handleScanAll"
           :disabled="isScanning"
-          style="border: 1px solid var(--border-color);"
         >
           <svg v-if="!isScanning" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
           <div v-else class="spinner-small" style="margin-right: 6px;"></div>
@@ -174,7 +173,7 @@
           </div>
 
           <div class="plan-modal-foot">
-            <button type="button" class="btn" style="border: 1px solid var(--border-color, #eee);" @click="closePlanModal">取消</button>
+            <button type="button" class="btn btn-secondary" @click="closePlanModal">取消</button>
             <button type="button" class="btn btn-primary" :disabled="planSaving" @click="doAddToPlan">
               {{ planSaving ? '添加中...' : '加入日历' }}
             </button>
@@ -663,7 +662,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: var(--space-5);
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 0;
 }
@@ -677,17 +676,28 @@ onMounted(async () => {
 .search-mini input {
   width: 100%;
   padding: 8px 12px 8px 36px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   font-size: 14px;
-  background: white;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.search-mini input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.search-mini input:hover {
+  border-color: var(--border-hover);
 }
 
 .search-mini input:focus {
   border-color: var(--primary);
   outline: none;
-  box-shadow: 0 0 0 3px var(--primary-light);
+  box-shadow: var(--shadow-focus);
 }
 
 .search-mini .icon {
@@ -695,20 +705,20 @@ onMounted(async () => {
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: #ccc;
+  color: var(--text-placeholder);
 }
 
 .success-card {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid var(--color-success-soft, #bbf7d0);
-  background: var(--color-success-soft, #f0fdf4);
-  color: var(--color-success, #166534);
-  border-radius: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid rgba(31, 169, 92, 0.25);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  border-radius: var(--radius-md);
   font-size: 14px;
   white-space: pre-line;
 }
@@ -716,25 +726,31 @@ onMounted(async () => {
 .success-card button {
   border: none;
   background: transparent;
-  color: var(--color-success, #166534);
+  color: var(--color-success);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: opacity var(--transition-fast);
+}
+
+.success-card button:hover {
+  opacity: 0.7;
 }
 
 /* Gallery Grid */
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 24px;
-  margin-bottom: 40px;
+  gap: var(--space-5);
+  margin-bottom: var(--space-7);
 }
 
 /* 卡片 + 加入日历按钮 */
 .gallery-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .add-plan-btn {
@@ -743,56 +759,64 @@ onMounted(async () => {
   justify-content: center;
   gap: 6px;
   padding: 7px 12px;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 100px;
-  background: white;
-  color: var(--text-sub, #666);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-sub);
   font-size: 13px;
+  font-family: inherit;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .add-plan-btn:hover {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
-  background: var(--primary-light, #fff7f8);
+  border-color: var(--border-hover);
+  color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
 }
 
 /* 加入内容日历弹窗 */
 .plan-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: var(--space-5);
 }
 
 .plan-modal {
-  background: white;
-  border-radius: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 440px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 .plan-modal-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px 12px;
+  padding: var(--space-5) var(--space-5) var(--space-3);
 }
 
 .plan-modal-head h3 {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .close-btn {
@@ -800,23 +824,31 @@ onMounted(async () => {
   background: transparent;
   font-size: 22px;
   line-height: 1;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.close-btn:hover {
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 .plan-modal-body {
-  padding: 8px 24px;
+  padding: var(--space-2) var(--space-5);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 
 .plan-modal-record {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-main, #1a1a1a);
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -825,7 +857,7 @@ onMounted(async () => {
 .plan-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: var(--space-4);
 }
 
 .plan-form-field {
@@ -835,24 +867,24 @@ onMounted(async () => {
 }
 
 .plan-form-field label {
-  font-size: 13px;
+  font-size: var(--font-size-caption);
   font-weight: 600;
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 .plan-form-error {
   margin: 0;
-  font-size: 13px;
-  color: var(--color-danger, #ef4444);
+  font-size: var(--font-size-caption);
+  color: var(--color-danger);
 }
 
 .plan-modal-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  padding: 16px 24px 20px;
-  border-top: 1px solid var(--border-color, #eee);
-  margin-top: 8px;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  border-top: 1px solid var(--border-color);
+  margin-top: var(--space-2);
 }
 
 /* Pagination */
@@ -860,16 +892,28 @@ onMounted(async () => {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 16px;
-  margin-top: 40px;
+  gap: var(--space-4);
+  margin-top: var(--space-7);
 }
 
 .page-btn {
   padding: 8px 16px;
   border: 1px solid var(--border-color);
-  background: white;
-  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-family: inherit;
+  border-radius: var(--radius-md);
   cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .page-btn:disabled {
@@ -877,20 +921,31 @@ onMounted(async () => {
   cursor: not-allowed;
 }
 
+.page-indicator {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
 /* Empty State */
 .empty-state-large {
   text-align: center;
-  padding: 80px 0;
+  padding: var(--space-8) 0;
   color: var(--text-sub);
 }
 
 .empty-img {
-  font-size: 64px;
-  opacity: 0.5;
+  color: var(--gray-5);
+}
+
+.empty-state-large h3 {
+  margin-top: var(--space-4);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .empty-state-large .empty-tips {
-  margin-top: 10px;
+  margin-top: var(--space-2);
   color: var(--text-placeholder);
 }
 
@@ -928,7 +983,7 @@ onMounted(async () => {
   .plan-modal {
     max-width: none;
     max-height: 92vh;
-    border-radius: 14px 14px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 }
 </style>

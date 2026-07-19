@@ -556,7 +556,7 @@ onMounted(() => {
   border: 1px solid var(--color-success-soft);
   background: var(--color-success-soft);
   color: var(--color-success);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
 }
 
@@ -604,18 +604,20 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px 18px;
+  padding: 18px 20px;
 }
 
 .stat-label {
   font-size: 13px;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
 }
 
 .stat-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tighter);
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 汇总 / 趋势面板 */
@@ -627,19 +629,20 @@ onMounted(() => {
 }
 
 .panel {
-  padding: 18px 20px;
+  padding: 20px 22px;
 }
 
 .panel-title {
   margin: 0 0 12px;
   font-size: 15px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .panel-empty {
   font-size: 13px;
-  color: var(--text-placeholder, #bbb);
+  color: var(--text-placeholder);
   padding: 6px 0;
 }
 
@@ -648,8 +651,8 @@ onMounted(() => {
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--border-color, #eee);
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border-color);
   font-size: 13px;
 }
 
@@ -659,12 +662,12 @@ onMounted(() => {
 
 .summary-name {
   font-weight: 600;
-  color: var(--text-main, #333);
+  color: var(--text-main);
   flex-shrink: 0;
 }
 
 .summary-meta {
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
   text-align: right;
 }
 
@@ -685,35 +688,35 @@ onMounted(() => {
 .trend-month {
   flex-shrink: 0;
   width: 60px;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
 }
 
 .trend-bar-track {
   flex: 1;
   height: 10px;
-  background: var(--bg-soft, #f5f5f5);
-  border-radius: 100px;
+  background: var(--gray-1);
+  border-radius: var(--radius-full);
   overflow: hidden;
 }
 
 .trend-bar {
   height: 100%;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   background: var(--primary);
-  transition: width 0.3s ease;
+  transition: width 0.4s var(--ease-out);
 }
 
 .trend-value {
   flex-shrink: 0;
   min-width: 56px;
   text-align: right;
-  color: var(--text-main, #333);
+  color: var(--text-main);
   font-variant-numeric: tabular-nums;
 }
 
 /* AI 洞察面板 */
 .insight-panel {
-  padding: 18px 20px;
+  padding: 20px 22px;
   margin-bottom: 16px;
 }
 
@@ -728,7 +731,7 @@ onMounted(() => {
 .insight-subtitle {
   margin: 0;
   font-size: 13px;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
 }
 
 .insight-loading {
@@ -737,27 +740,28 @@ onMounted(() => {
   gap: 12px;
   padding: 20px 0 6px;
   font-size: 14px;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
 }
 
 .insight-body {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid var(--border-color, #eee);
+  border-top: 1px solid var(--border-color);
 }
 
 .insight-summary {
   margin: 0 0 12px;
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 .insight-section-title {
   margin: 14px 0 8px;
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .insight-list {
@@ -768,12 +772,12 @@ onMounted(() => {
   gap: 6px;
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 /* 记录列表 */
 .records-panel {
-  padding: 18px 20px;
+  padding: 20px 22px;
   margin-bottom: 40px;
 }
 
@@ -791,20 +795,20 @@ onMounted(() => {
 
 .records-table th,
 .records-table td {
-  padding: 9px 10px;
+  padding: 10px 12px;
   text-align: left;
-  border-bottom: 1px solid var(--border-color, #eee);
+  border-bottom: 1px solid var(--border-color);
   white-space: nowrap;
 }
 
 .records-table th {
   font-weight: 600;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
 .records-table td {
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 .records-table .num {
@@ -821,10 +825,10 @@ onMounted(() => {
 .platform-tag {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   font-size: 12px;
-  background: var(--primary-light);
-  color: var(--primary);
+  background: var(--gray-2);
+  color: var(--text-sub);
 }
 
 .actions-cell {
@@ -835,12 +839,14 @@ onMounted(() => {
 .btn-mini {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
 }
 
 .btn-mini:hover {
-  border-color: var(--border-hover, #e0e0e0);
+  border-color: var(--border-hover);
+  background: var(--gray-0);
 }
 
 .btn-mini.btn-danger {
@@ -856,7 +862,9 @@ onMounted(() => {
 .analytics-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -865,14 +873,14 @@ onMounted(() => {
 }
 
 .analytics-modal {
-  background: white;
-  border-radius: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 .analytics-modal-head {
@@ -886,7 +894,8 @@ onMounted(() => {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .close-btn {
@@ -894,8 +903,15 @@ onMounted(() => {
   background: transparent;
   font-size: 22px;
   line-height: 1;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.close-btn:hover {
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 .analytics-modal-body {
@@ -911,12 +927,12 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px 20px;
-  border-top: 1px solid var(--border-color, #eee);
+  border-top: 1px solid var(--border-color);
   margin-top: 8px;
 }
 
 .analytics-modal-foot .btn {
-  border: 1px solid var(--border-color, #eee);
+  border: 1px solid var(--border-color);
 }
 
 .analytics-modal-foot .btn-primary {
@@ -933,7 +949,7 @@ onMounted(() => {
 .form-field label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 .form-field .required {
@@ -995,7 +1011,7 @@ onMounted(() => {
   .analytics-modal {
     max-width: none;
     max-height: 92vh;
-    border-radius: 14px 14px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 }
 </style>

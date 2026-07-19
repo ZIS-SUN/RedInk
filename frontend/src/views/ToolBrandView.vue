@@ -417,7 +417,7 @@ onMounted(() => {
   border: 1px solid var(--color-success-soft);
   background: var(--color-success-soft);
   color: var(--color-success);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
 }
 
@@ -470,7 +470,7 @@ onMounted(() => {
 
 .brand-card.active {
   border: 1px solid var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-fade);
+  box-shadow: var(--shadow-focus);
 }
 
 .brand-card-head {
@@ -482,15 +482,16 @@ onMounted(() => {
 .color-dot {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   flex-shrink: 0;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--border-color);
 }
 
 .brand-name {
   font-size: 16px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
   margin: 0;
   flex: 1;
   overflow: hidden;
@@ -503,7 +504,7 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 100px;
+  border-radius: var(--radius-full);
   background: var(--primary-light);
   color: var(--primary);
 }
@@ -511,7 +512,7 @@ onMounted(() => {
 .brand-tagline {
   margin: 0;
   font-size: 14px;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
   line-height: 1.5;
 }
 
@@ -530,11 +531,11 @@ onMounted(() => {
 
 .meta-label {
   flex-shrink: 0;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
 }
 
 .meta-value {
-  color: var(--text-main, #333);
+  color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -551,18 +552,20 @@ onMounted(() => {
   gap: 8px;
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid var(--border-color, #eee);
+  border-top: 1px solid var(--border-color);
 }
 
 .btn-mini {
   padding: 6px 12px;
   font-size: 13px;
-  border: 1px solid var(--border-color, #eee);
-  background: white;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
 }
 
 .btn-mini:hover {
-  border-color: var(--border-hover, #e0e0e0);
+  border-color: var(--border-hover);
+  background: var(--gray-0);
 }
 
 .btn-mini.btn-danger {
@@ -585,7 +588,9 @@ onMounted(() => {
 .brand-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -594,14 +599,14 @@ onMounted(() => {
 }
 
 .brand-modal {
-  background: white;
-  border-radius: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 .brand-modal-head {
@@ -615,7 +620,8 @@ onMounted(() => {
   margin: 0;
   font-size: 17px;
   font-weight: 700;
-  color: var(--text-main, #1a1a1a);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .close-btn {
@@ -623,8 +629,15 @@ onMounted(() => {
   background: transparent;
   font-size: 22px;
   line-height: 1;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
   cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.close-btn:hover {
+  color: var(--text-main);
+  background: var(--gray-2);
 }
 
 .brand-modal-body {
@@ -640,12 +653,12 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 12px;
   padding: 16px 24px 20px;
-  border-top: 1px solid var(--border-color, #eee);
+  border-top: 1px solid var(--border-color);
   margin-top: 8px;
 }
 
 .brand-modal-foot .btn {
-  border: 1px solid var(--border-color, #eee);
+  border: 1px solid var(--border-color);
 }
 
 .brand-modal-foot .btn-primary {
@@ -662,7 +675,7 @@ onMounted(() => {
 .form-field label {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-main, #333);
+  color: var(--text-main);
 }
 
 .form-field .required {
@@ -671,7 +684,7 @@ onMounted(() => {
 
 .form-field .hint {
   font-weight: 400;
-  color: var(--text-secondary, #999);
+  color: var(--text-secondary);
 }
 
 .form-field textarea.input {
@@ -696,11 +709,16 @@ onMounted(() => {
   width: 42px;
   height: 38px;
   padding: 2px;
-  border: 1px solid var(--border-color, #eee);
-  border-radius: 8px;
-  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
   cursor: pointer;
   flex-shrink: 0;
+  transition: border-color var(--transition-fast);
+}
+
+.color-picker:hover {
+  border-color: var(--border-hover);
 }
 
 .form-error {
@@ -728,7 +746,7 @@ onMounted(() => {
   .brand-modal {
     max-width: none;
     max-height: 92vh;
-    border-radius: 14px 14px 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
 }
 </style>
