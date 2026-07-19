@@ -67,6 +67,29 @@
 
 ---
 
+## 🧰 Creator Toolbox
+
+Beyond the "one sentence → full post" main flow, the **Creator Tools** section in the sidebar offers a full suite of productivity tools for content creators, arranged along the creation workflow:
+
+| Stage | Tool | Description |
+|-------|------|-------------|
+| **Ideate** | Topic Inspiration | Enter your niche; AI generates topic ideas with angles, content formats, and estimated heat |
+| | Benchmark Breakdown | Paste a viral post to deconstruct why it worked (hook/structure/emotion/audience) and generate an original draft in the same pattern |
+| **Write** | Viral Titles | Generate candidate titles with attractiveness scores and viral-element tags |
+| | Multi-Platform Rewrite | Rewrite one piece of copy into Xiaohongshu / Douyin / WeChat / Bilibili / Weibo styles |
+| | Comment Assistant | Paste fan comments to generate high-engagement replies and a pinned guiding comment |
+| **Style & Visuals** | Brand Memory | Manage personal IP / brand profiles (tone, catchphrases, signature, banned words) for a consistent persona |
+| | Style Templates | Curated visual style library (with custom templates), applied to image generation in one click |
+| | Cover A/B | Generate multiple cover directions for one topic and compare estimated click appeal |
+| **Generate & Export** | Link to Post | Paste a URL or long text to auto-distill a multi-page outline and send it into the creation flow |
+| | Multi-Size Export | Adapt one image to 9:16 / 1:1 / 3:4 / WeChat banner / Bilibili cover and batch download |
+| **Plan & Review** | Content Calendar | Plan publishing cadence across platforms, manage plans and statuses, two-way linked with the creation flow / history |
+| | Analytics Review | Manually log published metrics, view performance stats, and get AI review insights |
+
+> Note: **Brand persona** and **visual style** flow through the entire main pipeline — once set, outlines, copy, titles, and image generation all apply them automatically. Copywriting tools require a configured text model; most visual/data tools (Style Templates, Multi-Size Export, Brand Memory, Content Calendar, Analytics) work without a model.
+
+---
+
 ## 🏗️ Tech Stack
 
 <table>
