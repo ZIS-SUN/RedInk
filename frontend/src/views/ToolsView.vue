@@ -152,6 +152,11 @@ const stages: Stage[] = [
   box-shadow: var(--shadow-md), 0 16px 40px rgba(239, 42, 69, 0.24);
 }
 
+.hero-card:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm), 0 8px 24px var(--primary-fade);
+}
+
 .hero-icon {
   flex-shrink: 0;
   width: 56px;
@@ -162,6 +167,13 @@ const stages: Stage[] = [
   justify-content: center;
   color: white;
   background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  transition: transform var(--transition-base), background var(--transition-base);
+}
+
+.hero-card:hover .hero-icon {
+  transform: scale(1.04);
+  background: rgba(255, 255, 255, 0.24);
 }
 
 .hero-body { flex: 1; min-width: 0; }
@@ -189,8 +201,10 @@ const stages: Stage[] = [
   transform: translateX(3px);
 }
 
-/* 阶段 */
+/* 阶段：首个阶段与 hero 稍近，后续阶段用大留白拉开节奏 */
 .stage { margin-top: var(--space-7); }
+
+.stage:first-of-type { margin-top: var(--space-6); }
 
 .stage-head {
   display: flex;
@@ -208,9 +222,11 @@ const stages: Stage[] = [
   color: var(--primary);
   font-size: 13px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: inset 0 0 0 1px var(--primary-fade);
 }
 
 .stage-title {
@@ -242,6 +258,12 @@ const stages: Stage[] = [
   color: inherit;
 }
 
+/* hover 上浮由全局 .card--interactive 提供，这里补 active 回落 */
+.tool-card:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
+}
+
 /* 图标底色统一走语义 -soft token，克制不喧哗 */
 .tool-icon {
   flex-shrink: 0;
@@ -251,6 +273,11 @@ const stages: Stage[] = [
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform var(--transition-base);
+}
+
+.tool-card:hover .tool-icon {
+  transform: scale(1.05);
 }
 
 .tool-icon.tone-primary {

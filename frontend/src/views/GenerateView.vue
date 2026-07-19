@@ -104,8 +104,8 @@
             </div>
           </div>
 
-          <!-- 生成中/重试中状态 -->
-          <div v-else-if="image.status === 'generating' || image.status === 'retrying'" class="image-placeholder">
+          <!-- 生成中/重试中状态：轻量骨架 shimmer 占位，让等待不空 -->
+          <div v-else-if="image.status === 'generating' || image.status === 'retrying'" class="image-placeholder shimmer">
             <div class="spinner"></div>
             <div class="status-text">{{ image.status === 'retrying' ? '重新生成中…' : '生成中...' }}</div>
           </div>
@@ -125,7 +125,7 @@
           </div>
 
           <!-- 等待中状态 -->
-          <div v-else class="image-placeholder">
+          <div v-else class="image-placeholder shimmer">
             <div class="status-text">等待生成…</div>
           </div>
 
@@ -284,8 +284,8 @@ onUnmounted(cleanupGenerationRunner)
   gap: var(--space-2);
   max-width: 100%;
   margin-bottom: var(--space-4);
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
   font-size: var(--font-size-caption);
   color: var(--color-info);
   background: var(--color-info-soft);
@@ -415,6 +415,40 @@ onUnmounted(cleanupGenerationRunner)
   min-height: 240px; /* 确保有最小高度 */
 }
 
+/* 骨架 shimmer：纯 CSS 高光扫过，让等待中的卡片有"正在工作"的呼吸感 */
+.image-placeholder.shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.image-placeholder.shimmer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.6) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: shimmer-sweep 2s var(--ease-out) infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-placeholder.shimmer::before {
+    animation: none;
+    display: none;
+  }
+}
+
 .error-placeholder {
   background: var(--color-danger-soft);
 }
@@ -498,12 +532,14 @@ onUnmounted(cleanupGenerationRunner)
   padding: 3px 8px;
   border-radius: var(--radius-xs);
   cursor: pointer;
-  transition: border-color var(--transition-fast), color var(--transition-fast);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .footer-regen-btn:hover {
   border-color: var(--primary);
   color: var(--primary);
+  background: var(--primary-fade);
 }
 
 .status-badge {

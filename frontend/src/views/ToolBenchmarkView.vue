@@ -43,13 +43,33 @@
       </div>
     </div>
 
+    <!-- 加载骨架 -->
+    <div v-if="loading" class="skeleton-section" aria-hidden="true">
+      <div class="card skeleton-card">
+        <div class="sk-row">
+          <span class="sk-line sk-badge"></span>
+          <span class="sk-line sk-btn"></span>
+        </div>
+        <template v-for="n in 3" :key="n">
+          <span class="sk-line sk-label"></span>
+          <span class="sk-line"></span>
+          <span class="sk-line sk-short"></span>
+        </template>
+      </div>
+    </div>
+
     <!-- 拆解结果区 -->
     <div v-if="analysis" class="results-section">
       <div class="card result-card">
         <div class="result-header">
           <span class="section-badge">拆解结果</span>
-          <button type="button" class="btn btn-secondary copy-btn" @click="copyAnalysis">
-            {{ copiedKey === 'analysis' ? '已复制' : '复制全部' }}
+          <button
+            type="button"
+            class="btn btn-secondary copy-btn"
+            :class="{ copied: copiedKey === 'analysis' }"
+            @click="copyAnalysis"
+          >
+            {{ copiedKey === 'analysis' ? '已复制 ✓' : '复制全部' }}
           </button>
         </div>
 
@@ -94,8 +114,13 @@
         <div class="analysis-item template-item">
           <div class="template-header">
             <h3 class="analysis-label">📋 可复用套路模板</h3>
-            <button type="button" class="btn btn-secondary copy-btn" @click="copyTemplate">
-              {{ copiedKey === 'template' ? '已复制' : '复制模板' }}
+            <button
+              type="button"
+              class="btn btn-secondary copy-btn"
+              :class="{ copied: copiedKey === 'template' }"
+              @click="copyTemplate"
+            >
+              {{ copiedKey === 'template' ? '已复制 ✓' : '复制模板' }}
             </button>
           </div>
           <p class="analysis-text template-text">{{ analysis.reusable_template }}</p>
@@ -106,8 +131,13 @@
       <div v-if="draft" class="card result-card">
         <div class="result-header">
           <span class="section-badge draft-badge">仿写草稿</span>
-          <button type="button" class="btn btn-secondary copy-btn" @click="copyDraft">
-            {{ copiedKey === 'draft' ? '已复制' : '复制草稿' }}
+          <button
+            type="button"
+            class="btn btn-secondary copy-btn"
+            :class="{ copied: copiedKey === 'draft' }"
+            @click="copyDraft"
+          >
+            {{ copiedKey === 'draft' ? '已复制 ✓' : '复制草稿' }}
           </button>
         </div>
         <p class="draft-text">{{ draft }}</p>
@@ -117,8 +147,12 @@
 
     <!-- 空/初始态 -->
     <div v-else-if="!loading" class="empty-state">
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+      </div>
       <p class="empty-title">还没有拆解结果</p>
       <p class="empty-desc">把一篇你觉得好的爆款内容粘贴到上方，点「开始拆解」，AI 会告诉你它为什么火</p>
+      <p class="empty-example">拆解维度：钩子 · 结构 · 情绪 · 受众 · 爆点 · 可复用模板</p>
     </div>
 
     <ErrorCard
@@ -318,14 +352,56 @@ function copyDraft() {
   min-width: 180px;
 }
 
+/* 加载骨架（纯 CSS shimmer） */
+.skeleton-section {
+  margin-top: var(--space-5);
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.sk-line {
+  display: block;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--gray-2) 25%, var(--gray-1) 45%, var(--gray-2) 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-badge { width: 84px; height: 24px; }
+.sk-btn { width: 92px; height: 32px; border-radius: var(--radius-md); }
+.sk-label { width: 120px; height: 16px; margin-top: var(--space-2); }
+.sk-short { width: 55%; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* 结果区 */
 .results-section {
   margin-top: var(--space-5);
 }
 
 .result-card {
-  animation: fadeIn 0.4s var(--ease-out);
+  animation: fadeIn 0.4s var(--ease-out) both;
   margin-bottom: var(--space-4);
+}
+
+/* 仿写草稿卡片跟随拆解卡片错峰入场 */
+.result-card + .result-card {
+  animation-delay: 90ms;
 }
 
 .result-header {
@@ -355,6 +431,12 @@ function copyDraft() {
   padding: 8px 18px;
   font-size: 14px;
   white-space: nowrap;
+}
+
+.copy-btn.copied {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
 
 .analysis-item {
@@ -451,12 +533,26 @@ function copyDraft() {
 .empty-state {
   margin-top: var(--space-6);
   text-align: center;
-  padding: 0 16px;
+  padding: var(--space-4) 16px;
+  animation: fadeIn 0.4s var(--ease-out);
+}
+
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  margin-bottom: var(--space-4);
 }
 
 .empty-title {
   font-size: 15px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0 0 6px;
 }
@@ -466,6 +562,16 @@ function copyDraft() {
   color: var(--text-sub);
   line-height: 1.7;
   margin: 0;
+}
+
+.empty-example {
+  display: inline-block;
+  margin: var(--space-4) 0 0;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .benchmark-error {
@@ -486,6 +592,20 @@ function copyDraft() {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 降低动效偏好：关闭入场与 shimmer */
+@media (prefers-reduced-motion: reduce) {
+  .result-card,
+  .empty-state,
+  .benchmark-error {
+    animation: none;
+  }
+
+  .sk-line {
+    animation: none;
+    background: var(--gray-2);
+  }
 }
 
 /* 移动端适配 */

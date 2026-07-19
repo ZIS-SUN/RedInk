@@ -26,19 +26,28 @@
       <button type="button" @click="successMessage = ''" aria-label="关闭提示">×</button>
     </div>
 
-    <!-- 加载中 -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+    <!-- 加载中：轻量骨架占位 -->
+    <div v-if="loading" aria-hidden="true">
+      <div class="stats-grid">
+        <div v-for="i in 4" :key="i" class="card stat-card skeleton-block">
+          <span class="skeleton skeleton-line" style="width: 56%; height: 12px;"></span>
+          <span class="skeleton skeleton-line" style="width: 40%; height: 24px;"></span>
+        </div>
+      </div>
+      <div class="card records-panel skeleton-block">
+        <span class="skeleton skeleton-line" style="width: 30%;"></span>
+        <span v-for="i in 4" :key="i" class="skeleton skeleton-line" style="width: 100%;"></span>
+      </div>
     </div>
 
     <!-- 空状态 -->
     <div v-else-if="records.length === 0" class="empty-state-large">
-      <div class="empty-img">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+      <div class="empty-icon-wrap">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
       </div>
-      <h3>还没有表现数据</h3>
+      <h3 class="empty-title">还没有表现数据</h3>
       <p class="empty-tips">把已发布内容的曝光、点赞等数据录进来，就能看到统计和 AI 复盘建议</p>
-      <button type="button" class="btn btn-primary" style="margin-top: 16px;" @click="openCreateModal">立即录入</button>
+      <button type="button" class="btn btn-primary empty-cta" @click="openCreateModal">立即录入</button>
     </div>
 
     <template v-else>
@@ -569,27 +578,71 @@ onMounted(() => {
   cursor: pointer;
 }
 
-/* 加载 / 空状态 */
-.loading-state {
+/* 加载骨架 */
+.skeleton-block {
+  pointer-events: none;
   display: flex;
-  justify-content: center;
-  padding: 80px 0;
+  flex-direction: column;
+  gap: 12px;
 }
 
+.skeleton {
+  display: block;
+  background: var(--gray-2);
+  border-radius: var(--radius-xs);
+  animation: skeleton-pulse 1.4s var(--ease-out) infinite;
+}
+
+.skeleton-line {
+  height: 13px;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* 空状态 */
 .empty-state-large {
   text-align: center;
-  padding: 80px 0;
+  padding: var(--space-8) var(--space-5);
   color: var(--text-sub);
 }
 
-.empty-img {
-  opacity: 0.5;
-  margin-bottom: 12px;
+.empty-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  color: var(--gray-6);
+  margin-bottom: var(--space-4);
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .empty-tips {
-  margin-top: 10px;
-  color: var(--text-placeholder);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.empty-cta {
+  margin-top: var(--space-5);
 }
 
 /* 统计卡片 */
@@ -605,19 +658,27 @@ onMounted(() => {
   flex-direction: column;
   gap: 8px;
   padding: 18px 20px;
+  margin-bottom: 0;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-hover);
 }
 
 .stat-label {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-secondary);
 }
 
 .stat-value {
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: var(--tracking-tighter);
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
 }
 
 /* 汇总 / 趋势面板 */
@@ -630,6 +691,7 @@ onMounted(() => {
 
 .panel {
   padding: 20px 22px;
+  margin-bottom: 0;
 }
 
 .panel-title {
@@ -651,9 +713,14 @@ onMounted(() => {
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--border-color);
+  padding: 9px 0;
+  border-bottom: 1px solid var(--gray-2);
   font-size: 13px;
+}
+
+.summary-meta,
+.trend-value {
+  font-variant-numeric: tabular-nums;
 }
 
 .summary-row:last-child {
@@ -797,7 +864,7 @@ onMounted(() => {
 .records-table td {
   padding: 10px 12px;
   text-align: left;
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--gray-2);
   white-space: nowrap;
 }
 
@@ -805,10 +872,32 @@ onMounted(() => {
   font-weight: 600;
   color: var(--text-secondary);
   font-size: 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--gray-0);
+}
+
+.records-table th:first-child {
+  border-top-left-radius: var(--radius-xs);
+}
+
+.records-table th:last-child {
+  border-top-right-radius: var(--radius-xs);
 }
 
 .records-table td {
   color: var(--text-main);
+}
+
+.records-table tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.records-table tbody tr:hover {
+  background: var(--gray-0);
+}
+
+.records-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .records-table .num {
@@ -842,11 +931,17 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast), transform var(--transition-fast);
 }
 
 .btn-mini:hover {
   border-color: var(--border-hover);
   background: var(--gray-0);
+}
+
+.btn-mini:active {
+  transform: translateY(1px);
 }
 
 .btn-mini.btn-danger {
@@ -870,6 +965,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  animation: overlay-in 150ms var(--ease-out);
 }
 
 .analytics-modal {
@@ -881,6 +977,24 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: modal-in 200ms var(--ease-out);
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analytics-modal-overlay,
+  .analytics-modal {
+    animation: none;
+  }
 }
 
 .analytics-modal-head {

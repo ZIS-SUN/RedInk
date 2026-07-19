@@ -393,8 +393,8 @@ watch(
   flex-wrap: wrap;
   gap: var(--space-2);
   max-width: 100%;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
   font-size: var(--font-size-caption);
   color: var(--color-info);
   background: var(--color-info-soft);
@@ -526,7 +526,8 @@ watch(
 
 .card-controls {
   display: flex;
-  gap: var(--space-2);
+  align-items: center;
+  gap: var(--space-1);
   opacity: 0.85;
   transition: opacity var(--transition-fast);
 }
@@ -541,22 +542,28 @@ watch(
 
 .drag-handle {
   cursor: grab;
-  padding: 2px;
+  padding: 4px;
   color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
+.drag-handle:hover { color: var(--text-main); background: var(--gray-2); }
 .drag-handle:active { cursor: grabbing; }
 
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
-  padding: 2px;
+  padding: 4px;
   border-radius: var(--radius-xs);
-  transition: color var(--transition-fast);
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
-.icon-btn:hover:not(:disabled) { color: var(--text-main); }
-.icon-btn.danger:hover:not(:disabled) { color: var(--color-danger); }
+.icon-btn:hover:not(:disabled) { color: var(--text-main); background: var(--gray-2); }
+.icon-btn.danger:hover:not(:disabled) { color: var(--color-danger); background: var(--color-danger-soft); }
 .icon-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;

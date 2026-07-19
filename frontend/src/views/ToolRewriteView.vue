@@ -71,14 +71,34 @@
       </div>
     </div>
 
+    <!-- 加载骨架 -->
+    <div v-if="loading" class="skeleton-section" aria-hidden="true">
+      <div v-for="n in 2" :key="n" class="card skeleton-card">
+        <div class="sk-row">
+          <span class="sk-line sk-badge"></span>
+          <span class="sk-line sk-btn"></span>
+        </div>
+        <span class="sk-line sk-title"></span>
+        <span class="sk-line"></span>
+        <span class="sk-line"></span>
+        <span class="sk-line sk-short"></span>
+      </div>
+    </div>
+
     <!-- 结果区 -->
     <div v-if="results.length > 0" class="results-section">
-      <div v-for="item in results" :key="item.platform" class="card result-card">
+      <div
+        v-for="(item, index) in results"
+        :key="item.platform"
+        class="card result-card"
+        :style="{ '--i': index }"
+      >
         <div class="result-header">
           <span class="platform-badge">{{ platformLabel(item.platform) }}</span>
           <button
             type="button"
             class="btn btn-secondary copy-btn"
+            :class="{ copied: copiedPlatform === item.platform }"
             :aria-label="`复制${platformLabel(item.platform)}文案`"
             @click="copyResult(item)"
           >
@@ -95,7 +115,12 @@
 
     <!-- 空/初始态 -->
     <div v-else-if="!loading" class="empty-state">
-      <p>粘贴一段文案、勾选目标平台，点击「开始改写」，各平台版本会在这里逐一展示</p>
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+      </div>
+      <p class="empty-title">一稿多发，从这里开始</p>
+      <p class="empty-desc">粘贴一段文案、勾选目标平台，点击「开始改写」，各平台版本会在这里逐一展示</p>
+      <p class="empty-example">试试：把一篇小红书笔记，改写成抖音口播稿 + 公众号推文</p>
     </div>
 
     <ErrorCard
@@ -351,11 +376,23 @@ async function copyResult(item: RewriteResult) {
   transform: translateY(-1px);
 }
 
+.platform-chip:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
 .platform-chip.active {
   background: var(--primary-light);
   border-color: var(--primary);
   color: var(--primary);
   font-weight: 600;
+  box-shadow: var(--shadow-focus);
+}
+
+.platform-chip.active:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .submit-row {
@@ -368,13 +405,50 @@ async function copyResult(item: RewriteResult) {
   min-width: 180px;
 }
 
+/* 加载骨架（纯 CSS shimmer） */
+.skeleton-section {
+  margin-top: var(--space-5);
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sk-line {
+  display: block;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--gray-2) 25%, var(--gray-1) 45%, var(--gray-2) 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-badge { width: 72px; height: 24px; }
+.sk-btn { width: 88px; height: 30px; border-radius: var(--radius-md); }
+.sk-title { width: 55%; height: 18px; }
+.sk-short { width: 40%; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* 结果区 */
 .results-section {
   margin-top: var(--space-5);
 }
 
 .result-card {
-  animation: fadeIn 0.4s var(--ease-out);
+  animation: fadeIn 0.4s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
 }
 
 .result-header {
@@ -398,6 +472,12 @@ async function copyResult(item: RewriteResult) {
 .copy-btn {
   padding: 8px 18px;
   font-size: 14px;
+}
+
+.copy-btn.copied {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
 
 .result-title {
@@ -443,12 +523,44 @@ async function copyResult(item: RewriteResult) {
   margin-top: var(--space-5);
   text-align: center;
   padding: var(--space-7) var(--space-5);
-  color: var(--text-sub);
-  font-size: 14px;
+  animation: fadeIn 0.4s var(--ease-out);
 }
 
-.empty-state p {
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  margin-bottom: var(--space-4);
+}
+
+.empty-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.empty-desc {
   margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-sub);
+}
+
+.empty-example {
+  display: inline-block;
+  margin: var(--space-4) 0 0;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .rewrite-error {
@@ -469,6 +581,25 @@ async function copyResult(item: RewriteResult) {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 降低动效偏好：关闭入场与 shimmer 动画 */
+@media (prefers-reduced-motion: reduce) {
+  .result-card,
+  .empty-state,
+  .rewrite-error {
+    animation: none;
+  }
+
+  .sk-line {
+    animation: none;
+    background: var(--gray-2);
+  }
+
+  .platform-chip,
+  .platform-chip:hover {
+    transform: none;
+  }
 }
 
 /* 移动端适配 */

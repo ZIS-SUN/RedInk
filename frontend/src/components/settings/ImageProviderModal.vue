@@ -248,6 +248,7 @@ const previewUrl = computed(() => {
   justify-content: center;
   z-index: 1000;
   padding: var(--space-5);
+  animation: overlay-fade 0.2s var(--ease-out);
 }
 
 /* 模态框内容 */
@@ -261,6 +262,37 @@ const previewUrl = computed(() => {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: modal-pop 0.2s var(--ease-out);
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 移动端改为底部抽屉 */
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    max-width: none;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-up 0.25s var(--ease-out);
+  }
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* 头部 */
@@ -390,32 +422,51 @@ const previewUrl = computed(() => {
 
 .toggle-switch {
   width: 44px;
-  height: 24px;
+  height: 26px;
   background: var(--gray-4);
   border-radius: var(--radius-full);
   position: relative;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-base), box-shadow var(--transition-base);
   flex-shrink: 0;
+  box-shadow: inset 0 1px 2px rgba(33, 30, 27, 0.06);
+}
+
+.toggle-switch:hover {
+  background: var(--gray-5);
 }
 
 .toggle-switch.active {
   background: var(--primary);
+  box-shadow: none;
+}
+
+.toggle-switch.active:hover {
+  background: var(--primary-hover);
 }
 
 .toggle-slider {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   background: white;
   border-radius: var(--radius-full);
   position: absolute;
   top: 2px;
   left: 2px;
-  transition: transform var(--transition-fast);
+  transition: transform var(--transition-base), width var(--transition-base);
   box-shadow: 0 1px 3px rgba(33, 30, 27, 0.2);
 }
 
 .toggle-switch.active .toggle-slider {
-  transform: translateX(20px);
+  transform: translateX(18px);
+}
+
+/* Apple 式按压反馈：滑块被按住时轻微拉伸 */
+.toggle-switch:active .toggle-slider {
+  width: 26px;
+}
+
+.toggle-switch.active:active .toggle-slider {
+  transform: translateX(14px);
 }
 
 /* 底部 */
@@ -453,6 +504,11 @@ const previewUrl = computed(() => {
   border-color: var(--gray-5);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 
 .btn-primary {

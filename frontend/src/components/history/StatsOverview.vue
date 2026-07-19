@@ -108,6 +108,11 @@ defineProps<{
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: transform var(--transition-base);
+}
+
+.stat-box:hover .stat-icon-circle {
+  transform: scale(1.05);
 }
 
 .stat-icon-circle.blue {
@@ -137,6 +142,7 @@ defineProps<{
   font-size: 28px;
   font-weight: 700;
   letter-spacing: var(--tracking-tighter);
+  font-variant-numeric: tabular-nums;
   color: var(--text-main);
   line-height: 1;
 }

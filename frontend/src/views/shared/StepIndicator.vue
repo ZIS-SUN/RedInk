@@ -90,6 +90,10 @@ function goTo(idx: number) {
   background: var(--primary-fade);
 }
 
+.step-item.done:active {
+  background: var(--primary-light);
+}
+
 .step-item.active {
   color: var(--text-main);
 }
@@ -103,10 +107,12 @@ function goTo(idx: number) {
   justify-content: center;
   font-size: 12px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   background: var(--gray-2);
   color: var(--text-sub);
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-base), color var(--transition-base),
+    box-shadow var(--transition-base);
 }
 
 .step-item.done .step-dot {
@@ -114,10 +120,11 @@ function goTo(idx: number) {
   color: var(--color-success);
 }
 
+/* 当前步骤：主色实心 + 柔和光环，视线锚点更明确 */
 .step-item.active .step-dot {
   background: var(--primary);
   color: white;
-  box-shadow: 0 2px 8px var(--primary-fade);
+  box-shadow: 0 0 0 4px var(--primary-fade), 0 2px 8px var(--primary-fade);
 }
 
 .step-label {

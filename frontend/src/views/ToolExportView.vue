@@ -193,6 +193,9 @@
         <span v-if="exporting">导出中 {{ progressText }}…</span>
         <span v-else>批量导出下载</span>
       </button>
+      <div v-if="exporting" class="export-progress" aria-hidden="true">
+        <div class="export-progress-bar"></div>
+      </div>
     </div>
     <p v-if="exportDoneMessage" class="export-done" :class="{ 'has-error': failedCount > 0 }" role="status" aria-live="polite">
       {{ exportDoneMessage }}
@@ -637,7 +640,17 @@ onBeforeUnmount(() => {
   cursor: pointer;
   aspect-ratio: 3/4;
   background: var(--gray-1);
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.thumb-item:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.thumb-item:active {
+  transform: translateY(0);
 }
 
 .thumb-item img {
@@ -753,17 +766,29 @@ onBeforeUnmount(() => {
   border: 2px solid var(--border-color);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .preset-item:hover {
   border-color: var(--border-hover);
   background: var(--gray-0);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.preset-item:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 
 .preset-item.selected {
   border-color: var(--primary);
   background: var(--primary-fade);
+}
+
+.preset-size {
+  font-variant-numeric: tabular-nums;
 }
 
 .preset-label {
@@ -893,6 +918,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   display: block;
+  box-shadow: var(--shadow-xs);
   background:
     repeating-conic-gradient(#f0f0f0 0% 25%, white 0% 50%) 0 0 / 16px 16px;
 }
@@ -911,6 +937,44 @@ onBeforeUnmount(() => {
   gap: 16px;
   flex-wrap: wrap;
   margin-top: 8px;
+  padding: var(--space-4) var(--space-5);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.export-progress {
+  width: 100%;
+  height: 4px;
+  background: var(--gray-2);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+
+.export-progress-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36%;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  animation: export-progress-slide 1.2s var(--ease-out) infinite;
+}
+
+@keyframes export-progress-slide {
+  from { left: -36%; }
+  to { left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .export-progress-bar {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
 }
 
 .export-summary {

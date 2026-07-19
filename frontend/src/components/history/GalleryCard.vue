@@ -135,6 +135,11 @@ const formattedDate = computed(() => {
   box-shadow: var(--shadow-hover);
 }
 
+.gallery-card:active {
+  transform: translateY(-1px) translateZ(0);
+  box-shadow: var(--shadow-sm);
+}
+
 /* 封面区域 */
 .card-cover {
   aspect-ratio: 3/4;
@@ -233,7 +238,7 @@ const formattedDate = computed(() => {
   color: white;
 }
 
-/* 状态标识：语义 -soft 底 + 语义色文字 */
+/* 状态标识：语义 -soft 底 + 语义色文字，细白描边使徽章浮于任意封面之上 */
 .status-badge {
   position: absolute;
   top: 12px;
@@ -242,11 +247,12 @@ const formattedDate = computed(() => {
   border-radius: var(--radius-full);
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   background: rgba(255, 255, 255, 0.92);
   color: var(--text-sub);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--shadow-xs), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
 }
 
 .status-badge.completed {
@@ -312,13 +318,14 @@ const formattedDate = computed(() => {
   font-family: inherit;
   cursor: pointer;
   transition: border-color var(--transition-fast), color var(--transition-fast),
-    background var(--transition-fast);
+    background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .footer-edit-btn:hover {
   border-color: var(--border-hover);
   color: var(--primary);
   background: var(--primary-light);
+  box-shadow: var(--shadow-xs);
 }
 
 .more-btn {

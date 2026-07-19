@@ -64,13 +64,27 @@
       </button>
     </div>
 
+    <!-- 生成中：大纲骨架占位 -->
+    <div v-if="loading && pages.length === 0" class="preview-grid" aria-hidden="true">
+      <div v-for="i in 3" :key="i" class="card preview-card skeleton-card">
+        <div class="preview-card-top">
+          <span class="skeleton skeleton-line" style="width: 56px;"></span>
+          <span class="skeleton skeleton-line" style="width: 36px;"></span>
+        </div>
+        <span class="skeleton skeleton-line" style="width: 90%;"></span>
+        <span class="skeleton skeleton-line" style="width: 76%;"></span>
+        <span class="skeleton skeleton-line" style="width: 84%;"></span>
+        <span class="skeleton skeleton-line" style="width: 52%;"></span>
+      </div>
+    </div>
+
     <!-- 初始态：使用说明占位 -->
-    <div v-if="pages.length === 0 && !loading" class="card empty-guide">
+    <div v-else-if="pages.length === 0" class="card empty-guide">
       <h2 class="empty-guide-title">如何使用</h2>
       <ol class="empty-guide-steps">
-        <li>选择「网页链接」或「粘贴长文」，填入你想转换的内容</li>
-        <li>点击「生成图文大纲」，AI 会自动提炼成多页图文卡大纲</li>
-        <li>在预览区直接编辑每页文案，确认后发送到创作流程继续生成图片</li>
+        <li><span class="step-num">1</span>选择「网页链接」或「粘贴长文」，填入你想转换的内容</li>
+        <li><span class="step-num">2</span>点击「生成图文大纲」，AI 会自动提炼成多页图文卡大纲</li>
+        <li><span class="step-num">3</span>在预览区直接编辑每页文案，确认后发送到创作流程继续生成图片</li>
       </ol>
     </div>
 
@@ -347,6 +361,38 @@ function sendToCreation() {
   to { transform: rotate(360deg); }
 }
 
+/* 加载骨架 */
+.skeleton-card {
+  pointer-events: none;
+  gap: 12px;
+}
+
+.skeleton {
+  display: block;
+  background: var(--gray-2);
+  border-radius: var(--radius-xs);
+  animation: skeleton-pulse 1.4s var(--ease-out) infinite;
+}
+
+.skeleton-line {
+  height: 13px;
+}
+
+.skeleton-card .preview-card-top .skeleton {
+  margin-bottom: 0;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 /* 初始态使用说明 */
 .empty-guide {
   background: var(--bg-card);
@@ -360,15 +406,40 @@ function sendToCreation() {
   font-weight: 700;
   letter-spacing: var(--tracking-tight);
   color: var(--text-main);
-  margin: 0 0 12px;
+  margin: 0 0 14px;
 }
 
 .empty-guide-steps {
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   font-size: 14px;
   color: var(--text-sub);
-  line-height: 2;
+  line-height: 1.7;
+}
+
+.empty-guide-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 预览区 */
@@ -442,6 +513,14 @@ function sendToCreation() {
   background: var(--bg-card);
   box-shadow: var(--shadow-xs);
   min-height: 280px;
+  margin-bottom: 0;
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+}
+
+.preview-card:hover,
+.preview-card:focus-within {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-hover);
 }
 
 .preview-card-top {
@@ -475,12 +554,19 @@ function sendToCreation() {
   border: none;
   cursor: pointer;
   color: var(--text-secondary);
-  padding: 2px;
+  padding: 4px;
   margin-left: auto;
-  transition: color var(--transition-fast);
+  border-radius: var(--radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 
-.icon-btn.danger:hover { color: var(--color-danger); }
+.icon-btn.danger:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
 
 .preview-textarea {
   flex: 1;

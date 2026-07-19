@@ -132,7 +132,7 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   padding: 14px var(--space-4);
   border-bottom: 1px solid var(--border-color);
   align-items: center;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .table-row:last-child {
@@ -143,14 +143,19 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   background: var(--gray-0);
 }
 
+/* 当前激活行：主色微染 + 左侧细条强调，扫视时一眼可辨 */
 .table-row.active {
   background: var(--primary-fade);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 /* 激活按钮 */
 .btn-activate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 4px 10px;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-full);
   font-size: 12px;
   font-weight: 500;
   font-family: inherit;
@@ -159,21 +164,31 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   color: var(--text-sub);
   cursor: pointer;
   transition: border-color var(--transition-fast), color var(--transition-fast),
-    background var(--transition-fast);
+    background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .btn-activate:hover:not(:disabled) {
   border-color: var(--border-hover);
   color: var(--primary);
   background: var(--primary-light);
+  box-shadow: var(--shadow-xs);
 }
 
-/* 激活状态：语义 -soft 底 + 语义色文字 */
+/* 激活状态：语义 -soft 底 + 语义色文字 + 状态小圆点 */
 .btn-activate.active {
   background: var(--color-success-soft);
   border-color: rgba(31, 169, 92, 0.3);
   color: var(--color-success);
   cursor: default;
+}
+
+.btn-activate.active::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+  flex-shrink: 0;
 }
 
 /* 服务商名称 */
@@ -225,7 +240,8 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   align-items: center;
   justify-content: center;
   transition: border-color var(--transition-fast), color var(--transition-fast),
-    background var(--transition-fast), box-shadow var(--transition-fast);
+    background var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .btn-icon:hover {
@@ -233,6 +249,12 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   color: var(--primary);
   background: var(--primary-fade);
   box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.btn-icon:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .btn-icon.danger:hover {
@@ -241,16 +263,16 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   background: var(--color-danger-soft);
 }
 
-/* 响应式 */
+/* 响应式：移动端改为横向滚动，保留全部列信息不丢失 */
 @media (max-width: 768px) {
-  .table-header,
-  .table-row {
-    grid-template-columns: 70px 1fr 100px;
+  .provider-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  .col-model,
-  .col-apikey {
-    display: none;
+  .table-header,
+  .table-row {
+    min-width: 620px;
   }
 }
 </style>

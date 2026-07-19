@@ -46,6 +46,22 @@
       </button>
     </div>
 
+    <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
+    <div v-if="loading && directions.length === 0" class="skeleton-grid" aria-hidden="true">
+      <div v-for="n in 3" :key="n" class="skeleton-card">
+        <div class="sk-row">
+          <span class="sk-line sk-label"></span>
+        </div>
+        <div class="sk-score-row">
+          <span class="sk-line sk-score"></span>
+          <span class="sk-line sk-bar"></span>
+        </div>
+        <span class="sk-line sk-title"></span>
+        <span class="sk-line"></span>
+        <span class="sk-line sk-short"></span>
+      </div>
+    </div>
+
     <!-- 结果对比区 -->
     <div v-if="directions.length > 0" class="directions-grid">
       <div
@@ -53,6 +69,7 @@
         :key="index"
         class="direction-card"
         :class="{ 'direction-card-best': index === bestIndex }"
+        :style="{ '--i': index }"
       >
         <div class="card-top">
           <span class="direction-label">方向 {{ String.fromCharCode(65 + index) }}</span>
@@ -92,6 +109,7 @@
           <button
             type="button"
             class="copy-btn"
+            :class="{ copied: copiedKey === copyKeyOf(index, 'text') }"
             :aria-label="`复制方向 ${String.fromCharCode(65 + index)} 的文案`"
             @click="copyText(copyKeyOf(index, 'text'), buildCopyText(direction))"
           >
@@ -100,6 +118,7 @@
           <button
             type="button"
             class="copy-btn copy-btn-secondary"
+            :class="{ copied: copiedKey === copyKeyOf(index, 'visual') }"
             :aria-label="`复制方向 ${String.fromCharCode(65 + index)} 的视觉概念`"
             @click="copyText(copyKeyOf(index, 'visual'), direction.visual_concept)"
           >
@@ -111,7 +130,12 @@
 
     <!-- 空状态 -->
     <div v-else-if="!loading" class="empty-state">
-      <p>生成后，各方向将在这里并排展示，方便对比评分与创意角度</p>
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      </div>
+      <p class="empty-title">封面方向会在这里并排对比</p>
+      <p class="empty-desc">输入主题，AI 会一次生成多个差异化方向，标注预估点击力与视觉概念，帮你选出最能打的那一个</p>
+      <p class="empty-example">试试：新手化妆避坑指南</p>
     </div>
 
     <ErrorCard
@@ -287,12 +311,61 @@ async function handleGenerate() {
   cursor: not-allowed;
 }
 
+/* 加载骨架（纯 CSS shimmer） */
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-xs);
+}
+
+.sk-line {
+  display: block;
+  height: 13px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--gray-2) 25%, var(--gray-1) 45%, var(--gray-2) 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-label { width: 64px; }
+
+.sk-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sk-score {
+  width: 52px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+}
+
+.sk-bar { flex: 1; height: 6px; }
+.sk-title { width: 70%; height: 18px; }
+.sk-short { width: 45%; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* 方向对比网格 */
 .directions-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
-  animation: fadeIn 0.5s var(--ease-out);
 }
 
 .direction-card {
@@ -305,6 +378,8 @@ async function handleGenerate() {
   box-shadow: var(--shadow-xs);
   transition: box-shadow var(--transition-base), transform var(--transition-base),
     border-color var(--transition-base);
+  animation: fadeIn 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 80ms);
 }
 
 .direction-card:hover {
@@ -457,6 +532,16 @@ async function handleGenerate() {
   transform: translateY(-1px);
 }
 
+.copy-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.copy-btn.copied {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
 .copy-btn-secondary {
   color: var(--text-sub);
   background: var(--gray-2);
@@ -466,12 +551,54 @@ async function handleGenerate() {
   color: var(--text-main);
 }
 
+.copy-btn-secondary.copied {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
 /* 空状态 */
 .empty-state {
   text-align: center;
   padding: 48px 20px;
-  color: var(--text-sub);
+  animation: fadeIn 0.4s var(--ease-out);
+}
+
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  margin-bottom: var(--space-4);
+}
+
+.empty-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.empty-desc {
+  margin: 0 auto;
+  max-width: 480px;
   font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-sub);
+}
+
+.empty-example {
+  display: inline-block;
+  margin: var(--space-4) 0 0;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .cover-error {
@@ -523,5 +650,30 @@ async function handleGenerate() {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 降低动效偏好：关闭入场、stagger 与 shimmer */
+@media (prefers-reduced-motion: reduce) {
+  .cover-header,
+  .direction-card,
+  .empty-state,
+  .cover-error {
+    animation: none;
+  }
+
+  .sk-line {
+    animation: none;
+    background: var(--gray-2);
+  }
+
+  .direction-card:hover,
+  .copy-btn,
+  .copy-btn:hover {
+    transform: none;
+  }
+
+  .score-bar-fill {
+    transition: none;
+  }
 }
 </style>

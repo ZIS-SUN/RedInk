@@ -493,6 +493,11 @@ async function copyPrompt(prompt: string, key: string) {
 .active-style-empty {
   color: var(--text-secondary);
   font-size: 14px;
+  border-style: dashed;
+  border-color: var(--border-hover);
+  background: var(--gray-0);
+  box-shadow: none;
+  justify-content: center;
 }
 
 .active-style-swatches {
@@ -610,14 +615,32 @@ async function copyPrompt(prompt: string, key: string) {
   border-color: var(--border-hover);
 }
 
+.style-card:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
+}
+
 .style-card.applied {
   border-color: var(--primary);
   box-shadow: var(--shadow-focus);
 }
 
+.style-card.applied:hover {
+  border-color: var(--primary);
+}
+
 .style-cover {
   position: relative;
   height: 140px;
+  overflow: hidden;
+}
+
+.style-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 -1px 0 rgba(33, 30, 27, 0.06);
+  pointer-events: none;
 }
 
 .applied-badge {
@@ -630,6 +653,8 @@ async function copyPrompt(prompt: string, key: string) {
   color: white;
   background: var(--primary);
   border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  z-index: 1;
 }
 
 .category-badge {
@@ -692,6 +717,7 @@ async function copyPrompt(prompt: string, key: string) {
   border-radius: var(--radius-full);
   border: 1px solid var(--border-color);
   flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
 }
 
 .swatch-lg {
@@ -715,8 +741,12 @@ async function copyPrompt(prompt: string, key: string) {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast), transform var(--transition-fast);
   white-space: nowrap;
+}
+
+.card-btn:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .card-btn:hover {
@@ -781,6 +811,7 @@ async function copyPrompt(prompt: string, key: string) {
   justify-content: center;
   z-index: 1000;
   padding: var(--space-4);
+  animation: maskIn 150ms var(--ease-out);
 }
 
 .preview-modal {
@@ -791,12 +822,24 @@ async function copyPrompt(prompt: string, key: string) {
   background: var(--bg-card);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  animation: modalIn 0.25s var(--ease-out);
+  animation: modalIn 200ms var(--ease-out);
+}
+
+@keyframes maskIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes modalIn {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-mask,
+  .preview-modal {
+    animation: none;
+  }
 }
 
 .preview-close {
@@ -871,7 +914,7 @@ async function copyPrompt(prompt: string, key: string) {
 .color-hex {
   font-size: 12px;
   color: var(--text-sub);
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .scene-tags {

@@ -78,9 +78,9 @@ async function copyDiagnostics() {
 
 <style scoped>
 .error-card {
-  border: 1px solid rgba(222, 59, 59, 0.25);
+  border: 1px solid rgba(222, 59, 59, 0.2);
   background: var(--color-danger-soft);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   padding: var(--space-4);
   color: var(--color-danger);
 }
@@ -173,6 +173,12 @@ async function copyDiagnostics() {
   font-size: 12px;
   color: var(--color-danger);
   user-select: none;
+  opacity: 0.75;
+  transition: opacity var(--transition-fast);
+}
+
+.error-details summary:hover {
+  opacity: 1;
 }
 
 .error-details pre {
@@ -219,12 +225,17 @@ async function copyDiagnostics() {
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: background var(--transition-fast), transform var(--transition-fast);
+  transition: background var(--transition-fast), transform var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .retry-btn:hover {
-  background: var(--color-danger);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+
+.retry-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 </style>

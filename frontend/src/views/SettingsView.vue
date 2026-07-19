@@ -207,6 +207,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: var(--space-4);
   margin-bottom: var(--space-5);
 }
 
@@ -219,8 +220,8 @@ onMounted(() => {
 }
 
 .section-desc {
-  font-size: 14px;
-  color: var(--text-sub);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
   margin: 0;
 }
 
@@ -259,16 +260,28 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
-/* 加载状态 */
+/* 加载状态：spinner 在浅色画布上用灰槽 + 主色高亮，保证可见 */
 .loading-container {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: var(--space-3);
   padding: var(--space-8) var(--space-5);
-  color: var(--text-sub);
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.loading-container .spinner {
+  border-color: var(--gray-3);
+  border-top-color: var(--primary);
+}
+
+.loading-container p {
+  margin: 0;
 }
 
 /* 移动端适配 */

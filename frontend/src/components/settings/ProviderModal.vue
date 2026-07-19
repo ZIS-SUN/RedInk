@@ -230,6 +230,7 @@ const previewUrl = computed(() => {
   justify-content: center;
   z-index: 1000;
   padding: var(--space-5);
+  animation: overlay-fade 0.2s var(--ease-out);
 }
 
 /* 模态框内容 */
@@ -243,6 +244,37 @@ const previewUrl = computed(() => {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: modal-pop 0.2s var(--ease-out);
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 移动端改为底部抽屉 */
+@media (max-width: 640px) {
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-content {
+    max-width: none;
+    max-height: 92vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-up 0.25s var(--ease-out);
+  }
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* 头部 */
@@ -397,6 +429,11 @@ const previewUrl = computed(() => {
   border-color: var(--gray-5);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 
 .btn-primary {

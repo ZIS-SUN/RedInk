@@ -6,7 +6,7 @@
       <div>
         <h1 class="page-title">我的创作</h1>
       </div>
-      <div style="display: flex; gap: 10px;">
+      <div class="header-actions">
         <button
           class="btn btn-secondary"
           @click="handleScanAll"
@@ -77,17 +77,27 @@
       </div>
     </div>
 
-    <!-- Content Area -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+    <!-- Content Area：加载中用轻量骨架占位，避免整页 spinner 跳动 -->
+    <div v-if="loading" class="gallery-grid" aria-hidden="true">
+      <div v-for="i in 8" :key="i" class="skeleton-card">
+        <div class="skeleton-cover"></div>
+        <div class="skeleton-lines">
+          <div class="skeleton-line"></div>
+          <div class="skeleton-line short"></div>
+        </div>
+      </div>
     </div>
 
     <div v-else-if="records.length === 0" class="empty-state-large">
       <div class="empty-img">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
       </div>
       <h3>暂无相关记录</h3>
-      <p class="empty-tips">去创建一个新的作品吧</p>
+      <p class="empty-tips">第一篇图文只需要一句话，从主题开始吧</p>
+      <button class="btn btn-primary empty-cta" @click="router.push('/')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        新建图文
+      </button>
     </div>
 
     <div v-else class="gallery-grid">
@@ -657,6 +667,50 @@ onMounted(async () => {
   }
 }
 
+.header-actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+/* 加载骨架：与真实卡片同构（3:4 封面 + 两行文字），减少布局跳动 */
+.skeleton-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+}
+
+.skeleton-cover {
+  aspect-ratio: 3/4;
+  background: var(--gray-2);
+}
+
+.skeleton-lines {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+}
+
+.skeleton-line.short { width: 55%; }
+
+.skeleton-cover,
+.skeleton-line {
+  animation: skeleton-pulse 1.4s var(--ease-out) infinite;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* Toolbar */
 .toolbar-wrapper {
   display: flex;
@@ -791,6 +845,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   padding: var(--space-5);
+  animation: overlay-fade 0.2s var(--ease-out);
 }
 
 .plan-modal {
@@ -802,6 +857,17 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: modal-pop 0.2s var(--ease-out);
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .plan-modal-head {
@@ -897,12 +963,14 @@ onMounted(async () => {
 }
 
 .page-btn {
-  padding: 8px 16px;
+  padding: 8px 18px;
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   color: var(--text-sub);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
   font-family: inherit;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   cursor: pointer;
   box-shadow: var(--shadow-xs);
   transition: border-color var(--transition-fast), color var(--transition-fast),
@@ -916,6 +984,11 @@ onMounted(async () => {
   transform: translateY(-1px);
 }
 
+.page-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
+}
+
 .page-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -923,22 +996,34 @@ onMounted(async () => {
 
 .page-indicator {
   font-size: var(--font-size-caption);
+  font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
 }
 
-/* Empty State */
+/* Empty State：图标 + 一句引导 + 主 CTA */
 .empty-state-large {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
-  padding: var(--space-8) 0;
+  padding: var(--space-8) var(--space-5);
   color: var(--text-sub);
 }
 
 .empty-img {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gray-2);
   color: var(--gray-5);
 }
 
 .empty-state-large h3 {
-  margin-top: var(--space-4);
+  margin: var(--space-5) 0 0;
+  font-size: var(--font-size-subtitle);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--text-main);
@@ -946,7 +1031,12 @@ onMounted(async () => {
 
 .empty-state-large .empty-tips {
   margin-top: var(--space-2);
-  color: var(--text-placeholder);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.empty-cta {
+  margin-top: var(--space-5);
 }
 
 /* 移动端适配 */
@@ -980,10 +1070,17 @@ onMounted(async () => {
     align-items: flex-end;
   }
 
+  /* 移动端改为底部抽屉，入场从下方滑入 */
   .plan-modal {
     max-width: none;
     max-height: 92vh;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-up 0.25s var(--ease-out);
   }
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

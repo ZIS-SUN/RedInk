@@ -129,13 +129,12 @@ onMounted(() => {
   }
 }
 
-/* 单个展示项 */
+/* 单个展示项：背景层去掉阴影，避免与前景卡片抢层次 */
 .showcase-item {
   width: 100%;
   aspect-ratio: 3 / 4;
   border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
 }
 
 .showcase-item img {
@@ -145,7 +144,8 @@ onMounted(() => {
   display: block;
 }
 
-/* 毛玻璃遮罩层：向暖象牙白画布（--bg-body #F7F6F3）调和，压低背景存在感 */
+/* 毛玻璃遮罩层：向暖象牙白画布（--bg-body #F7F6F3）调和，
+ * 提高遮罩浓度 + 略强模糊，让背景明显"退后"、不与前景抢注意力 */
 .showcase-overlay {
   position: absolute;
   top: 0;
@@ -154,12 +154,12 @@ onMounted(() => {
   bottom: 0;
   background: linear-gradient(
     to bottom,
-    rgba(247, 246, 243, 0.82) 0%,
-    rgba(247, 246, 243, 0.76) 30%,
-    rgba(247, 246, 243, 0.72) 100%
+    rgba(247, 246, 243, 0.92) 0%,
+    rgba(247, 246, 243, 0.86) 30%,
+    rgba(247, 246, 243, 0.82) 100%
   );
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
 }
 
 /* 用户偏好减少动态效果时暂停背景滚动 */

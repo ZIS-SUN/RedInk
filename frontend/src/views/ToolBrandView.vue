@@ -26,19 +26,27 @@
       <button type="button" @click="successMessage = ''" aria-label="关闭提示">×</button>
     </div>
 
-    <!-- 加载中 -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+    <!-- 加载中：轻量骨架占位 -->
+    <div v-if="loading" class="brand-grid" aria-hidden="true">
+      <div v-for="i in 3" :key="i" class="card brand-card skeleton-card">
+        <div class="skeleton-head">
+          <span class="skeleton skeleton-dot"></span>
+          <span class="skeleton skeleton-line" style="width: 42%;"></span>
+        </div>
+        <span class="skeleton skeleton-line" style="width: 86%;"></span>
+        <span class="skeleton skeleton-line" style="width: 64%;"></span>
+        <span class="skeleton skeleton-line" style="width: 52%;"></span>
+      </div>
     </div>
 
     <!-- 空状态 -->
     <div v-else-if="brands.length === 0" class="empty-state-large">
-      <div class="empty-img">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      <div class="empty-icon-wrap">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
       </div>
-      <h3>还没有品牌档案</h3>
+      <h3 class="empty-title">还没有品牌档案</h3>
       <p class="empty-tips">创建一个档案，记录你的人设定位、语气风格和常用话术</p>
-      <button type="button" class="btn btn-primary" style="margin-top: 16px;" @click="openCreateModal">立即创建</button>
+      <button type="button" class="btn btn-primary empty-cta" @click="openCreateModal">立即创建</button>
     </div>
 
     <!-- 档案列表 -->
@@ -430,27 +438,81 @@ onMounted(() => {
   cursor: pointer;
 }
 
-/* 加载 / 空状态 */
-.loading-state {
-  display: flex;
-  justify-content: center;
-  padding: 80px 0;
+/* 加载骨架 */
+.skeleton-card {
+  pointer-events: none;
 }
 
+.skeleton {
+  display: block;
+  background: var(--gray-2);
+  border-radius: var(--radius-xs);
+  animation: skeleton-pulse 1.4s var(--ease-out) infinite;
+}
+
+.skeleton-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skeleton-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.skeleton-line {
+  height: 13px;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* 空状态 */
 .empty-state-large {
   text-align: center;
-  padding: 80px 0;
+  padding: var(--space-8) var(--space-5);
   color: var(--text-sub);
 }
 
-.empty-img {
-  opacity: 0.5;
-  margin-bottom: 12px;
+.empty-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  color: var(--gray-6);
+  margin-bottom: var(--space-4);
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .empty-tips {
-  margin-top: 10px;
-  color: var(--text-placeholder);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.empty-cta {
+  margin-top: var(--space-5);
 }
 
 /* 档案列表 */
@@ -466,11 +528,27 @@ onMounted(() => {
   flex-direction: column;
   gap: 12px;
   padding: 20px;
+  margin-bottom: 0;
+}
+
+.brand-card:hover {
+  box-shadow: var(--shadow-hover);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+}
+
+.brand-card:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-sm);
 }
 
 .brand-card.active {
   border: 1px solid var(--primary);
   box-shadow: var(--shadow-focus);
+}
+
+.brand-card.active:hover {
+  border-color: var(--primary);
 }
 
 .brand-card-head {
@@ -485,6 +563,7 @@ onMounted(() => {
   border-radius: var(--radius-full);
   flex-shrink: 0;
   border: 1px solid var(--border-color);
+  box-shadow: inset 0 0 0 2px var(--bg-card);
 }
 
 .brand-name {
@@ -561,11 +640,17 @@ onMounted(() => {
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast), transform var(--transition-fast);
 }
 
 .btn-mini:hover {
   border-color: var(--border-hover);
   background: var(--gray-0);
+}
+
+.btn-mini:active {
+  transform: translateY(1px);
 }
 
 .btn-mini.btn-danger {
@@ -596,6 +681,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  animation: overlay-in 150ms var(--ease-out);
 }
 
 .brand-modal {
@@ -607,6 +693,24 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: modal-in 200ms var(--ease-out);
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-modal-overlay,
+  .brand-modal {
+    animation: none;
+  }
 }
 
 .brand-modal-head {

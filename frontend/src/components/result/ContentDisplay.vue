@@ -392,13 +392,21 @@ async function copyTag(tag: string, index: number) {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .copy-btn:hover {
   background: var(--bg-card);
   color: var(--text-main);
   border-color: var(--border-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-xs);
+}
+
+.copy-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .copy-btn.copied {
@@ -427,12 +435,13 @@ async function copyTag(tag: string, index: number) {
   background: var(--gray-1);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
   position: relative;
 }
 
 .title-item:hover {
   background: var(--gray-2);
+  box-shadow: var(--shadow-xs);
 }
 
 .title-badge {
@@ -501,12 +510,20 @@ async function copyTag(tag: string, index: number) {
   background: var(--primary-light);
   border-radius: var(--radius-full);
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .tag-item:hover {
   background: var(--primary);
   color: white;
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.tag-item:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .tag-item.copied {

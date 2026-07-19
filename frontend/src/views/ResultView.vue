@@ -68,9 +68,11 @@
                 {{ regeneratingIndex === image.index ? '重新生成中…' : '重新生成' }}
               </button>
               <button
-                style="border: none; background: none; color: var(--primary); cursor: pointer; font-size: 12px;"
+                class="action-link action-link--primary"
+                title="下载此图"
                 @click="downloadOne(image)"
               >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 下载
               </button>
             </div>
@@ -95,6 +97,16 @@
 </template>
 
 <style scoped>
+/* 成品展示卡：比过程页更大的圆角与静置阴影，突出"成品感" */
+.image-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+.image-card:hover {
+  box-shadow: var(--shadow-hover);
+}
+
 /* 确保图片预览区域正确填充 */
 .image-card > div:first-child {
   flex: 1;
@@ -136,6 +148,16 @@
 .action-link:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* 主操作（下载）：品牌色常显，形成操作层级 */
+.action-link--primary {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.action-link--primary:hover:not(:disabled) {
+  color: var(--primary-hover);
 }
 
 /* 移动端适配 */

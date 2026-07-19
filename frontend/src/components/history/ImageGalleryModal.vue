@@ -194,6 +194,7 @@ const formattedDate = computed(() => {
   align-items: center;
   justify-content: center;
   padding: var(--space-7);
+  animation: overlay-fade 0.2s var(--ease-out);
 }
 
 /* 模态框主体 */
@@ -207,6 +208,17 @@ const formattedDate = computed(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: modal-pop 0.2s var(--ease-out);
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 /* 头部区域 */
@@ -324,6 +336,11 @@ const formattedDate = computed(() => {
   border-color: var(--gray-5);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
+}
+
+.download-btn:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 
 .close-icon {
@@ -510,10 +527,22 @@ const formattedDate = computed(() => {
   color: var(--primary-hover);
 }
 
-/* 响应式 */
+/* 响应式：移动端改为底部抽屉，最大化利用屏幕 */
 @media (max-width: 768px) {
   .modal-fullscreen {
-    padding: var(--space-5);
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal-body {
+    max-width: none;
+    height: 94vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-up 0.25s var(--ease-out);
+  }
+
+  .modal-header {
+    padding: var(--space-4) var(--space-5);
   }
 
   .modal-gallery-grid {
@@ -521,5 +550,10 @@ const formattedDate = computed(() => {
     gap: var(--space-3);
     padding: var(--space-3);
   }
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

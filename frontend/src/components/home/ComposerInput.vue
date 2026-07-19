@@ -210,10 +210,10 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 组合框容器：首页第一视觉焦点，干净的白卡 + 柔和多层阴影 */
+/* 组合框容器：首页第一视觉焦点，干净的白卡 + 柔和多层阴影 + 大而柔的圆角 */
 .composer-container {
   background: var(--bg-card);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   padding: var(--space-4) var(--space-5);
   box-shadow: var(--shadow-md);
   border: 1px solid var(--border-color);
@@ -280,7 +280,13 @@ defineExpose({
   height: 60px;
   border-radius: var(--radius-sm);
   overflow: hidden;
+  box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.uploaded-image-item:hover {
   box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .uploaded-image-item img {
@@ -350,12 +356,20 @@ defineExpose({
   border: none;
   cursor: pointer;
   color: var(--text-sub);
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .tool-btn:hover {
   background: var(--gray-3);
   color: var(--text-main);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-xs);
+}
+
+.tool-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .tool-btn.active {

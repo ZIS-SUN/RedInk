@@ -41,12 +41,9 @@
       <RouterView v-slot="{ Component, route }">
         <component :is="Component" />
 
-        <!-- 全局页脚版权信息（首页除外） -->
+        <!-- 全局页脚版权信息（首页除外）：仅保留中性的品牌与协议信息 -->
         <footer v-if="route.path !== '/'" class="global-footer">
           <div class="footer-content">
-            <div class="footer-tip">
-              配置不成功？访问 <a href="https://redink.top" target="_blank" rel="noopener noreferrer">redink.top</a> 官方站点即刻体验
-            </div>
             <div class="footer-text">
               © 2025 <a href="https://github.com/HisMax/RedInk" target="_blank" rel="noopener noreferrer">RedInk</a> by 默子 (Histone)
             </div>
@@ -70,3 +67,69 @@ onMounted(() => {
   setupAutoSave()
 })
 </script>
+
+<style scoped>
+/* ==========================================================
+ * 应用外壳精修（在 base.css 全局样式之上做克制的覆写）
+ * ========================================================== */
+
+/* 侧边栏：logo 与导航项左缘对齐（统一 12px 内缩进） */
+.logo-area {
+  padding: 0 var(--space-3);
+}
+
+.nav-item {
+  padding: 11px var(--space-3);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+/* 选中 pill：柔和底色之上加一层极浅描边 + 静置阴影，更有"实体感" */
+.nav-item.active {
+  box-shadow: var(--shadow-xs), inset 0 0 0 1px var(--primary-fade);
+}
+
+/* 用户区：与导航项左缘对齐，hover 反馈与导航一致 */
+.sidebar-user {
+  padding-top: var(--space-4);
+}
+
+.sidebar-user-inner {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* 页脚：仅品牌与协议信息，视觉上更安静克制 */
+.global-footer {
+  padding: var(--space-5) 0 var(--space-4);
+}
+
+.footer-content {
+  gap: var(--space-1);
+}
+
+.footer-text {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.footer-text a {
+  color: var(--text-sub);
+  font-weight: 500;
+}
+
+.footer-text a:hover {
+  color: var(--primary);
+}
+
+/* 移动端底部 tab bar：还原全宽点击区，去掉桌面态的 pill 修饰 */
+@media (max-width: 768px) {
+  .nav-item {
+    padding: 6px 4px;
+  }
+
+  .nav-item.active {
+    box-shadow: none;
+  }
+}
+</style>

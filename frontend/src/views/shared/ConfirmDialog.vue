@@ -58,11 +58,12 @@ defineEmits<{
   align-items: center;
   justify-content: center;
   padding: var(--space-5);
+  animation: confirm-fade 0.2s var(--ease-out);
 }
 
 .confirm-dialog {
   background: var(--bg-card);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   padding: var(--space-6) var(--space-5) var(--space-5);
   width: 100%;
   max-width: 380px;
@@ -71,8 +72,13 @@ defineEmits<{
   animation: confirm-pop 0.2s var(--ease-out);
 }
 
+@keyframes confirm-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes confirm-pop {
-  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
@@ -138,6 +144,13 @@ defineEmits<{
 .confirm-btn.cancel:hover {
   background: var(--gray-0);
   border-color: var(--gray-5);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.confirm-btn.cancel:active {
+  transform: translateY(0);
+  box-shadow: var(--shadow-xs);
 }
 
 .confirm-btn.confirm {
@@ -150,6 +163,7 @@ defineEmits<{
 .confirm-btn.confirm:hover {
   background: var(--primary-hover);
   transform: translateY(-1px);
+  box-shadow: var(--shadow-sm), 0 6px 16px var(--primary-fade);
 }
 
 .confirm-btn.confirm:active {

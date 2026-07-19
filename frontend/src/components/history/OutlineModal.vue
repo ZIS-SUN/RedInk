@@ -74,6 +74,7 @@ function getPageTypeName(type: string): string {
   align-items: center;
   justify-content: center;
   padding: var(--space-7);
+  animation: overlay-fade 0.2s var(--ease-out);
 }
 
 /* 模态框内容容器 */
@@ -87,6 +88,17 @@ function getPageTypeName(type: string): string {
   flex-direction: column;
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+  animation: modal-pop 0.2s var(--ease-out);
+}
+
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.97) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 /* 模态框头部 */
@@ -223,14 +235,18 @@ function getPageTypeName(type: string): string {
   font-family: var(--font-sans);
 }
 
-/* 响应式布局 */
+/* 响应式布局：移动端改为底部抽屉 */
 @media (max-width: 768px) {
   .outline-modal-overlay {
-    padding: var(--space-5);
+    padding: 0;
+    align-items: flex-end;
   }
 
   .outline-modal-content {
+    max-width: none;
     max-height: 90vh;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    animation: sheet-up 0.25s var(--ease-out);
   }
 
   .outline-modal-header {
@@ -240,5 +256,10 @@ function getPageTypeName(type: string): string {
   .outline-modal-body {
     padding: var(--space-4) var(--space-5);
   }
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

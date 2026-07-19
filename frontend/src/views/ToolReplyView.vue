@@ -61,6 +61,24 @@
       </button>
     </div>
 
+    <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
+    <div v-if="loading && replies.length === 0" class="skeleton-section" aria-hidden="true">
+      <div v-for="n in 2" :key="n" class="skeleton-card">
+        <div class="sk-comment-row">
+          <span class="sk-avatar"></span>
+          <span class="sk-line sk-comment"></span>
+        </div>
+        <div class="sk-suggestion">
+          <span class="sk-line sk-index"></span>
+          <span class="sk-line sk-text"></span>
+        </div>
+        <div class="sk-suggestion">
+          <span class="sk-line sk-index"></span>
+          <span class="sk-line sk-text sk-text-short"></span>
+        </div>
+      </div>
+    </div>
+
     <!-- 结果区 -->
     <div v-if="replies.length > 0" class="result-section">
       <!-- 置顶引导评论 -->
@@ -87,7 +105,12 @@
       </div>
 
       <div class="reply-list">
-        <div v-for="(item, i) in replies" :key="`${i}-${item.comment}`" class="reply-card">
+        <div
+          v-for="(item, i) in replies"
+          :key="`${i}-${item.comment}`"
+          class="reply-card"
+          :style="{ '--i': i }"
+        >
           <div class="comment-row">
             <span class="comment-avatar">粉</span>
             <p class="comment-text">{{ item.comment }}</p>
@@ -117,8 +140,12 @@
 
     <!-- 空/初始态 -->
     <div v-else-if="!loading" class="empty-state">
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
+      </div>
       <p class="empty-title">{{ hasGenerated ? '没有生成有效的回复建议' : '还没有回复建议' }}</p>
       <p class="empty-desc">{{ hasGenerated ? '换个说法或换个语气，重新生成试试吧' : '把粉丝评论粘贴到上方（一行一条），选好语气后点「生成神回复」' }}</p>
+      <p v-if="!hasGenerated" class="empty-example">每条评论都会给出多个可复制的回复建议</p>
     </div>
 
     <ErrorCard
@@ -344,11 +371,23 @@ async function handleCopy(text: string) {
   transform: translateY(-1px);
 }
 
+.option-chip:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
 .option-chip.active {
   background: var(--primary-light);
   border-color: var(--primary);
   color: var(--primary);
   font-weight: 600;
+  box-shadow: var(--shadow-focus);
+}
+
+.option-chip.active:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .tone-hint {
@@ -427,6 +466,75 @@ async function handleCopy(text: string) {
   word-break: break-word;
 }
 
+/* ── 加载骨架（纯 CSS shimmer） ───── */
+.skeleton-section {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) 18px;
+  box-shadow: var(--shadow-xs);
+}
+
+.sk-line,
+.sk-avatar {
+  display: block;
+  background: linear-gradient(90deg, var(--gray-2) 25%, var(--gray-1) 45%, var(--gray-2) 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-line {
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.sk-comment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.sk-avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+}
+
+.sk-comment { width: 55%; }
+
+.sk-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sk-index {
+  flex-shrink: 0;
+  width: 56px;
+  height: 20px;
+}
+
+.sk-text { flex: 1; max-width: 78%; }
+.sk-text-short { max-width: 56%; }
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* ── 结果区 ─────────────────────── */
 .result-section {
   margin-top: 28px;
@@ -460,6 +568,8 @@ async function handleCopy(text: string) {
   box-shadow: var(--shadow-xs);
   transition: box-shadow var(--transition-base), border-color var(--transition-base),
     transform var(--transition-base);
+  animation: fadeIn 0.4s var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 8) * 50ms);
 }
 
 .reply-card:hover {
@@ -551,7 +661,8 @@ async function handleCopy(text: string) {
   font-weight: 500;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast), box-shadow var(--transition-fast);
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
   white-space: nowrap;
 }
 
@@ -559,6 +670,12 @@ async function handleCopy(text: string) {
   border-color: var(--border-hover);
   color: var(--text-main);
   box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.copy-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .copy-btn.copied {
@@ -571,12 +688,26 @@ async function handleCopy(text: string) {
 .empty-state {
   margin-top: 32px;
   text-align: center;
-  padding: 0 16px;
+  padding: var(--space-5) 16px;
+  animation: fadeIn 0.4s var(--ease-out);
+}
+
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  margin-bottom: var(--space-4);
 }
 
 .empty-title {
   font-size: 15px;
   font-weight: 600;
+  letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin: 0 0 6px;
 }
@@ -586,6 +717,16 @@ async function handleCopy(text: string) {
   color: var(--text-sub);
   line-height: 1.7;
   margin: 0;
+}
+
+.empty-example {
+  display: inline-block;
+  margin: var(--space-4) 0 0;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .reply-error {
@@ -662,5 +803,32 @@ async function handleCopy(text: string) {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 降低动效偏好：关闭入场、stagger 与 shimmer */
+@media (prefers-reduced-motion: reduce) {
+  .tool-header,
+  .input-card,
+  .result-section,
+  .pinned-card,
+  .reply-card,
+  .empty-state,
+  .reply-error {
+    animation: none;
+  }
+
+  .sk-line,
+  .sk-avatar {
+    animation: none;
+    background: var(--gray-2);
+  }
+
+  .option-chip,
+  .option-chip:hover,
+  .copy-btn,
+  .copy-btn:hover,
+  .reply-card:hover {
+    transform: none;
+  }
 }
 </style>

@@ -84,6 +84,18 @@
       </button>
     </div>
 
+    <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
+    <div v-if="loading && titles.length === 0" class="skeleton-section" aria-hidden="true">
+      <div v-for="n in 3" :key="n" class="skeleton-card">
+        <span class="sk-circle"></span>
+        <span class="sk-lines">
+          <span class="sk-line sk-wide"></span>
+          <span class="sk-line sk-narrow"></span>
+        </span>
+        <span class="sk-ring"></span>
+      </div>
+    </div>
+
     <!-- 结果区 -->
     <div v-if="titles.length > 0" class="result-section">
       <div class="result-toolbar">
@@ -106,6 +118,7 @@
           v-for="(item, i) in displayTitles"
           :key="item.text"
           class="title-card"
+          :style="{ '--i': i }"
         >
           <div class="card-rank" :class="rankClass(i)">{{ i + 1 }}</div>
           <div class="card-body">
@@ -139,12 +152,21 @@
 
     <!-- 空态 -->
     <div v-else-if="!loading && hasGenerated" class="empty-state">
-      没有生成有效的标题，换个说法再试试吧
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </div>
+      <p class="empty-title">没有生成有效的标题</p>
+      <p class="empty-desc">换个说法再试试吧</p>
     </div>
 
     <!-- 初始引导态 -->
     <div v-else-if="!loading" class="empty-state">
-      输入主题、选好平台和风格，点击「生成爆款标题」，候选标题会带爆款要素与评分在这里展示
+      <div class="empty-icon" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+      </div>
+      <p class="empty-title">候选标题会在这里展示</p>
+      <p class="empty-desc">输入主题、选好平台和风格，点击「生成爆款标题」，每条标题都会标注爆款要素与吸引力评分</p>
+      <p class="empty-example">试试：打工人早八如何 10 分钟搞定营养早餐</p>
     </div>
 
     <ErrorCard
@@ -392,11 +414,23 @@ async function handleCopy(text: string) {
   transform: translateY(-1px);
 }
 
+.option-chip:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
 .option-chip.active {
   background: var(--primary-light);
   border-color: var(--primary);
   color: var(--primary);
   font-weight: 600;
+  box-shadow: var(--shadow-focus);
+}
+
+.option-chip.active:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .style-hint {
@@ -445,6 +479,68 @@ async function handleCopy(text: string) {
 .generate-btn {
   margin-top: 22px;
   width: 100%;
+}
+
+/* ── 加载骨架（纯 CSS shimmer） ───── */
+.skeleton-section {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) 18px;
+  box-shadow: var(--shadow-xs);
+}
+
+.sk-line,
+.sk-circle,
+.sk-ring {
+  display: block;
+  background: linear-gradient(90deg, var(--gray-2) 25%, var(--gray-1) 45%, var(--gray-2) 65%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sk-circle {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+}
+
+.sk-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sk-line {
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.sk-wide { width: 72%; }
+.sk-narrow { width: 40%; height: 12px; }
+
+.sk-ring {
+  flex-shrink: 0;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
 }
 
 /* ── 结果区 ─────────────────────── */
@@ -512,6 +608,8 @@ async function handleCopy(text: string) {
   box-shadow: var(--shadow-xs);
   transition: box-shadow var(--transition-base), border-color var(--transition-base),
     transform var(--transition-base);
+  animation: fadeIn 0.4s var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 8) * 50ms);
 }
 
 .title-card:hover {
@@ -641,7 +739,8 @@ async function handleCopy(text: string) {
   font-weight: 500;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast), box-shadow var(--transition-fast);
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
   white-space: nowrap;
 }
 
@@ -649,6 +748,12 @@ async function handleCopy(text: string) {
   border-color: var(--border-hover);
   color: var(--text-main);
   box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.copy-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .copy-btn.copied {
@@ -666,8 +771,45 @@ async function handleCopy(text: string) {
 .empty-state {
   margin-top: 32px;
   text-align: center;
+  padding: var(--space-6) 16px;
+  animation: fadeIn 0.4s var(--ease-out);
+}
+
+.empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  margin-bottom: var(--space-4);
+}
+
+.empty-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.empty-desc {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.7;
   color: var(--text-sub);
-  font-size: 14px;
+}
+
+.empty-example {
+  display: inline-block;
+  margin: var(--space-4) 0 0;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .title-error {
@@ -746,5 +888,36 @@ async function handleCopy(text: string) {
 @keyframes slideUp {
   from { opacity: 0; transform: translateX(-50%) translateY(20px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* 降低动效偏好：关闭入场、stagger 与 shimmer */
+@media (prefers-reduced-motion: reduce) {
+  .tool-header,
+  .input-card,
+  .result-section,
+  .title-card,
+  .empty-state,
+  .title-error {
+    animation: none;
+  }
+
+  .sk-line,
+  .sk-circle,
+  .sk-ring {
+    animation: none;
+    background: var(--gray-2);
+  }
+
+  .card-move {
+    transition: none;
+  }
+
+  .option-chip,
+  .option-chip:hover,
+  .copy-btn,
+  .copy-btn:hover,
+  .title-card:hover {
+    transform: none;
+  }
 }
 </style>

@@ -81,9 +81,10 @@
       </div>
     </div>
 
-    <!-- 加载中 -->
-    <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+    <!-- 加载中：轻量骨架占位 -->
+    <div v-if="loading" class="card skeleton-panel" aria-hidden="true">
+      <span class="skeleton skeleton-line" style="width: 26%;"></span>
+      <span v-for="i in 5" :key="i" class="skeleton skeleton-line" style="width: 100%; height: 40px;"></span>
     </div>
 
     <template v-else>
@@ -123,12 +124,12 @@
       <!-- 列表视图 -->
       <template v-else>
         <div v-if="plans.length === 0" class="empty-state-large">
-          <div class="empty-img">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          <div class="empty-icon-wrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
           </div>
-          <h3>{{ monthDisplay }} 还没有计划</h3>
+          <h3 class="empty-title">{{ monthDisplay }} 还没有计划</h3>
           <p class="empty-tips">添加一条内容计划，开始规划你的发布节奏</p>
-          <button type="button" class="btn btn-primary" style="margin-top: 16px;" @click="openCreateModal()">立即添加</button>
+          <button type="button" class="btn btn-primary empty-cta" @click="openCreateModal()">立即添加</button>
         </div>
 
         <div v-else class="plan-list">
@@ -643,12 +644,18 @@ onMounted(() => {
   border-radius: var(--radius-md);
   background: var(--bg-card);
   box-shadow: var(--shadow-xs);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-hover);
 }
 
 .stat-num {
   font-size: 22px;
   font-weight: 700;
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: var(--tracking-tighter);
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
 }
@@ -729,27 +736,72 @@ onMounted(() => {
   font-weight: 600;
 }
 
-/* 加载 / 空状态 */
-.loading-state {
+/* 加载骨架 */
+.skeleton-panel {
   display: flex;
-  justify-content: center;
-  padding: 80px 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  pointer-events: none;
 }
 
+.skeleton {
+  display: block;
+  background: var(--gray-2);
+  border-radius: var(--radius-xs);
+  animation: skeleton-pulse 1.4s var(--ease-out) infinite;
+}
+
+.skeleton-line {
+  height: 13px;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* 空状态 */
 .empty-state-large {
   text-align: center;
-  padding: 80px 0;
+  padding: var(--space-8) var(--space-5);
   color: var(--text-sub);
 }
 
-.empty-img {
-  opacity: 0.5;
-  margin-bottom: 12px;
+.empty-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  color: var(--gray-6);
+  margin-bottom: var(--space-4);
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
 }
 
 .empty-tips {
-  margin-top: 10px;
-  color: var(--text-placeholder);
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.empty-cta {
+  margin-top: var(--space-5);
 }
 
 /* 月历视图 */
@@ -778,19 +830,21 @@ onMounted(() => {
 
 .day-cell {
   min-height: 88px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--gray-2);
   border-radius: var(--radius-sm);
   padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   cursor: pointer;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .day-cell:hover {
   border-color: var(--border-hover);
   background: var(--gray-0);
+  box-shadow: var(--shadow-xs);
 }
 
 .day-cell.other-month {
@@ -798,19 +852,35 @@ onMounted(() => {
   cursor: default;
 }
 
+.day-cell.other-month:hover {
+  border-color: var(--gray-2);
+  background: transparent;
+  box-shadow: none;
+}
+
 .day-cell.today {
   border-color: var(--primary);
-  background: var(--primary-light);
+  background: var(--primary-fade);
+  box-shadow: inset 0 0 0 1px var(--primary);
 }
 
 .day-num {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-sub);
+  min-width: 20px;
+  line-height: 20px;
 }
 
 .day-cell.today .day-num {
-  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: white;
 }
 
 .day-plans {
@@ -834,11 +904,16 @@ onMounted(() => {
   cursor: pointer;
   background: var(--color-info-soft);
   color: var(--color-info);
-  transition: filter var(--transition-fast);
+  transition: filter var(--transition-fast), transform var(--transition-fast);
 }
 
 .plan-chip:hover {
   filter: brightness(0.96);
+  transform: translateY(-1px);
+}
+
+.plan-chip:active {
+  transform: translateY(0);
 }
 
 .chip-dot {
@@ -846,6 +921,7 @@ onMounted(() => {
   height: 7px;
   border-radius: var(--radius-full);
   flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
 }
 
 .chip-title {
@@ -880,6 +956,13 @@ onMounted(() => {
   align-items: center;
   gap: 16px;
   padding: 14px 18px;
+  margin-bottom: 0;
+}
+
+.plan-row:hover {
+  box-shadow: var(--shadow-hover);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
 }
 
 .plan-row-date {
@@ -976,11 +1059,17 @@ onMounted(() => {
   background: var(--bg-card);
   cursor: pointer;
   border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    color var(--transition-fast), transform var(--transition-fast);
 }
 
 .btn-mini:hover {
   border-color: var(--border-hover);
   background: var(--gray-0);
+}
+
+.btn-mini:active {
+  transform: translateY(1px);
 }
 
 .btn-mini.btn-danger {
@@ -1023,6 +1112,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  animation: overlay-in 150ms var(--ease-out);
 }
 
 .plan-modal {
@@ -1034,6 +1124,24 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-lg);
+  animation: modal-in 200ms var(--ease-out);
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-modal-overlay,
+  .plan-modal {
+    animation: none;
+  }
 }
 
 .plan-modal-head {

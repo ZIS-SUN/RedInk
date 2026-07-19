@@ -43,11 +43,8 @@
       </div>
     </div>
 
-    <!-- 版权信息 -->
+    <!-- 版权信息：中性、安静，不打扰创作 -->
     <div class="page-footer">
-      <div class="footer-tip">
-        配置不成功？访问 <a href="https://redink.top" target="_blank" rel="noopener noreferrer">redink.top</a> 官方站点即刻体验
-      </div>
       <div class="footer-copyright">
         © 2025 <a href="https://github.com/HisMax/RedInk" target="_blank" rel="noopener noreferrer">RedInk</a> by 默子 (Histone)
       </div>
@@ -237,14 +234,15 @@ async function handleGenerate() {
 }
 
 .brand-pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   padding: 6px 16px;
   background: var(--primary-fade);
   color: var(--primary);
   border-radius: var(--radius-full);
   font-size: var(--font-size-caption);
   font-weight: 600;
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-4);
   letter-spacing: 0.02em;
 }
 
@@ -253,8 +251,8 @@ async function handleGenerate() {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-top: 16px;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
 }
 
 .brand-select-label {
@@ -284,11 +282,12 @@ async function handleGenerate() {
   outline: none;
 }
 
+/* 标语作为标题上方的 kicker：更轻更安静，让大标题成为绝对主角 */
 .platform-slogan {
-  font-size: var(--font-size-subtitle);
-  font-weight: 600;
-  color: var(--text-sub);
-  margin-bottom: var(--space-5);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-4);
   line-height: 1.6;
   letter-spacing: var(--tracking-tight);
 }
@@ -299,7 +298,7 @@ async function handleGenerate() {
   margin-top: var(--space-3);
 }
 
-/* Page Footer */
+/* Page Footer：安静的品牌落款 */
 .page-footer {
   text-align: center;
   padding: var(--space-5) 0 var(--space-4);
@@ -307,51 +306,36 @@ async function handleGenerate() {
 }
 
 .footer-copyright {
-  font-size: var(--font-size-body);
-  color: var(--text-sub);
-  font-weight: 500;
-  margin-bottom: 6px;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
 }
 
 .footer-copyright a {
-  color: var(--primary);
+  color: var(--text-sub);
   text-decoration: none;
-  font-weight: 600;
+  font-weight: 500;
+  transition: color var(--transition-fast);
 }
 
 .footer-copyright a:hover {
+  color: var(--primary);
   text-decoration: underline;
 }
 
 .footer-license {
   font-size: var(--font-size-caption);
-  color: var(--text-secondary);
+  color: var(--text-placeholder);
 }
 
 .footer-license a {
-  color: var(--text-sub);
+  color: var(--text-secondary);
   text-decoration: none;
   transition: color var(--transition-fast);
 }
 
 .footer-license a:hover {
   color: var(--primary);
-}
-
-.footer-tip {
-  font-size: 14px;
-  color: var(--text-sub);
-  margin-bottom: var(--space-3);
-}
-
-.footer-tip a {
-  color: var(--primary);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.footer-tip a:hover {
-  text-decoration: underline;
 }
 
 .home-error {
