@@ -79,6 +79,8 @@ class HistoryService:
         避免其他读者读到半截文件。
         """
         dir_name = os.path.dirname(path) or "."
+        # 目录可能在运行期被删除，写入前确保其存在，避免 500
+        os.makedirs(dir_name, exist_ok=True)
         fd, tmp_path = tempfile.mkstemp(
             prefix=".tmp_", suffix=".json", dir=dir_name
         )
