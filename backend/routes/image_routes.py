@@ -10,10 +10,11 @@
 """
 
 import os
+import re
 import json
 import base64
 import logging
-from flask import Blueprint, request, jsonify, Response, send_file
+from flask import Blueprint, request, jsonify, Response, send_from_directory
 from backend.errors import ensure_app_error
 from backend.services.image import get_image_service
 from .utils import (
@@ -25,6 +26,10 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 任务 ID 仅允许 UUID 风格字符，文件名仅允许安全的图片名（可含 thumb_ 前缀）
+_TASK_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]+$')
+_IMAGE_FILENAME_PATTERN = re.compile(r'^[A-Za-z0-9_.-]+\.(png|jpg|jpeg|webp)$', re.IGNORECASE)
 
 
 def create_image_blueprint():
@@ -59,6 +64,7 @@ def create_image_blueprint():
             force = bool(data.get('force', False))
             full_outline = data.get('full_outline', '')
             user_topic = data.get('user_topic', '')
+            style_prompt = data.get('style_prompt', '') or ''
 
             # 解析 base64 格式的用户参考图片
             user_images = _parse_base64_images(data.get('user_images', []))
@@ -89,7 +95,8 @@ def create_image_blueprint():
                     user_images=user_images if user_images else None,
                     user_topic=user_topic,
                     record_id=record_id,
-                    force=force
+                    force=force,
+                    style_prompt=style_prompt
                 ):
                     event_type = event["event"]
                     event_data = _normalize_sse_error(
@@ -140,34 +147,55 @@ def create_image_blueprint():
         try:
             logger.debug(f"获取图片: {task_id}/{filename}")
 
-            # 检查是否请求缩略图
-            thumbnail = request.args.get('thumbnail', 'true').lower() == 'true'
-
-            # 构建 history 目录路径
-            history_root = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "history"
-            )
-
-            if thumbnail:
-                # 尝试返回缩略图
-                thumb_filename = f"thumb_{filename}"
-                thumb_filepath = os.path.join(history_root, task_id, thumb_filename)
-
-                if os.path.exists(thumb_filepath):
-                    return send_file(thumb_filepath, mimetype='image/png')
-
-            # 返回原图
-            filepath = os.path.join(history_root, task_id, filename)
-
-            if not os.path.exists(filepath):
+            # 校验路径参数，防止路径遍历（如 task_id=..）
+            if not _TASK_ID_PATTERN.match(task_id) or not _IMAGE_FILENAME_PATTERN.match(filename):
                 return api_error_response(
                     "图片不存在",
                     status=404,
                     context={"endpoint": "/api/images", "task_id": task_id, "filename": filename},
                 )
 
-            return send_file(filepath, mimetype='image/png')
+            # 检查是否请求缩略图
+            thumbnail = request.args.get('thumbnail', 'true').lower() == 'true'
+
+            # 构建 history 目录路径
+            history_root = os.path.realpath(os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "history"
+            ))
+
+            def _safe_send(target_filename: str):
+                """经 realpath 二次确认目标仍在 history_root 内后再发送"""
+                filepath = os.path.realpath(
+                    os.path.join(history_root, task_id, target_filename)
+                )
+                if not filepath.startswith(history_root + os.sep):
+                    return None
+                if not os.path.isfile(filepath):
+                    return None
+                # send_from_directory 内部使用 safe_join，双重保险
+                return send_from_directory(
+                    history_root,
+                    os.path.join(task_id, target_filename),
+                    mimetype='image/png'
+                )
+
+            if thumbnail:
+                # 尝试返回缩略图
+                response = _safe_send(f"thumb_{filename}")
+                if response is not None:
+                    return response
+
+            # 返回原图
+            response = _safe_send(filename)
+            if response is None:
+                return api_error_response(
+                    "图片不存在",
+                    status=404,
+                    context={"endpoint": "/api/images", "task_id": task_id, "filename": filename},
+                )
+
+            return response
 
         except Exception as e:
             log_error('/images', e)
@@ -195,6 +223,7 @@ def create_image_blueprint():
             page = data.get('page')
             use_reference = data.get('use_reference', True)
             record_id = data.get('record_id')
+            style_prompt = data.get('style_prompt', '') or ''
 
             log_request('/retry', {
                 'task_id': task_id,
@@ -216,6 +245,7 @@ def create_image_blueprint():
                 page,
                 use_reference,
                 record_id=record_id,
+                style_prompt=style_prompt,
             )
 
             if result["success"]:
@@ -251,6 +281,7 @@ def create_image_blueprint():
             task_id = data.get('task_id')
             pages = data.get('pages')
             record_id = data.get('record_id')
+            style_prompt = data.get('style_prompt', '') or ''
 
             log_request('/retry-failed', {
                 'task_id': task_id,
@@ -270,7 +301,9 @@ def create_image_blueprint():
 
             def generate():
                 """SSE 事件生成器"""
-                for event in image_service.retry_failed_images(task_id, pages, record_id=record_id):
+                for event in image_service.retry_failed_images(
+                    task_id, pages, record_id=record_id, style_prompt=style_prompt
+                ):
                     event_type = event["event"]
                     event_data = _normalize_sse_error(
                         event_type,
@@ -322,6 +355,7 @@ def create_image_blueprint():
             full_outline = data.get('full_outline', '')
             user_topic = data.get('user_topic', '')
             record_id = data.get('record_id')
+            style_prompt = data.get('style_prompt', '') or ''
 
             log_request('/regenerate', {
                 'task_id': task_id,
@@ -342,7 +376,8 @@ def create_image_blueprint():
                 task_id, page, use_reference,
                 full_outline=full_outline,
                 user_topic=user_topic,
-                record_id=record_id
+                record_id=record_id,
+                style_prompt=style_prompt
             )
 
             if result["success"]:

@@ -224,6 +224,9 @@ class GenAIClient:
                     if hasattr(part, 'inline_data') and part.inline_data:
                         image_data = part.inline_data.data
                         break
+            # 拿到第一张有效图后停止消费流，避免后续 chunk 覆盖已获取的图片
+            if image_data is not None:
+                break
 
         if not image_data:
             raise ValueError(

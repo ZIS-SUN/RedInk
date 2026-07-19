@@ -1,23 +1,37 @@
+"""
+爆款标题生成服务
+
+根据主题/文案草稿、平台与风格倾向，一次生成 10-15 个爆款候选标题，
+每个标题标注命中的爆款要素并给出 0-100 的吸引力评分。
+"""
+
+import json
 import logging
 import os
 import re
-import base64
 import yaml
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 from backend.utils.text_client import get_text_chat_client
 from backend.services.rewrite import build_brand_constraint
 
 logger = logging.getLogger(__name__)
 
+# 生成的候选标题数量范围
+TITLE_COUNT = 12
+MIN_TITLES = 10
+MAX_TITLES = 15
 
-class OutlineService:
+
+class TitleService:
+    """爆款标题生成服务"""
+
     def __init__(self):
-        logger.debug("初始化 OutlineService...")
+        logger.debug("初始化 TitleService...")
         self.text_config = self._load_text_config()
         self.client = self._get_client()
         self.prompt_template = self._load_prompt_template()
-        logger.info(f"OutlineService 初始化完成，使用服务商: {self.text_config.get('active_provider')}")
+        logger.info(f"TitleService 初始化完成，使用服务商: {self.text_config.get('active_provider')}")
 
     def _load_text_config(self) -> dict:
         """加载文本生成配置"""
@@ -39,7 +53,6 @@ class OutlineService:
                 )
 
         logger.warning("text_providers.yaml 不存在，使用默认配置")
-        # 默认配置
         return {
             'active_provider': 'google_gemini',
             'providers': {
@@ -88,61 +101,109 @@ class OutlineService:
         return get_text_chat_client(provider_config)
 
     def _load_prompt_template(self) -> str:
+        """加载提示词模板"""
         prompt_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "prompts",
-            "outline_prompt.txt"
+            "title_prompt.txt"
         )
         with open(prompt_path, "r", encoding="utf-8") as f:
             return f.read()
 
-    def _parse_outline(self, outline_text: str) -> List[Dict[str, Any]]:
-        # 按 <page> 分割页面（兼容旧的 --- 分隔符）
-        if '<page>' in outline_text:
-            pages_raw = re.split(r'<page>', outline_text, flags=re.IGNORECASE)
-        else:
-            # 向后兼容：如果没有 <page> 则使用 ---
-            pages_raw = outline_text.split("---")
+    def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
+        """解析 AI 返回的 JSON 响应"""
+        # 尝试直接解析
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            pass
 
-        pages = []
+        # 尝试从 markdown 代码块中提取
+        json_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', response_text)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
 
-        for index, page_text in enumerate(pages_raw):
-            page_text = page_text.strip()
-            if not page_text:
+        # 尝试找到 JSON 对象的开始和结束
+        start_idx = response_text.find('{')
+        end_idx = response_text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            try:
+                return json.loads(response_text[start_idx:end_idx + 1])
+            except json.JSONDecodeError:
+                pass
+
+        logger.error(f"无法解析 JSON 响应: {response_text[:200]}...")
+        raise ValueError("AI 返回的内容格式不正确，无法解析")
+
+    def _normalize_titles(self, raw_titles: Any) -> list:
+        """清洗 AI 返回的标题列表：过滤非法项、收敛 score/elements 类型"""
+        titles = []
+        if not isinstance(raw_titles, list):
+            return titles
+
+        for item in raw_titles[:MAX_TITLES]:
+            if isinstance(item, str):
+                item = {"text": item}
+            if not isinstance(item, dict):
                 continue
 
-            page_type = "content"
-            type_match = re.match(r"\[(\S+)\]", page_text)
-            if type_match:
-                type_cn = type_match.group(1)
-                type_mapping = {
-                    "封面": "cover",
-                    "内容": "content",
-                    "总结": "summary",
-                }
-                page_type = type_mapping.get(type_cn, "content")
+            text = str(item.get('text', '')).strip()
+            if not text:
+                continue
 
-            pages.append({
-                "index": index,
-                "type": page_type,
-                "content": page_text
+            try:
+                score = int(round(float(item.get('score', 0))))
+            except (TypeError, ValueError):
+                score = 0
+            score = max(0, min(100, score))
+
+            elements = item.get('elements', [])
+            if isinstance(elements, str):
+                elements = [e.strip() for e in re.split(r'[,，、]', elements) if e.strip()]
+            if not isinstance(elements, list):
+                elements = []
+            elements = [str(e).strip() for e in elements if str(e).strip()]
+
+            titles.append({
+                "text": text,
+                "score": score,
+                "elements": elements
             })
 
-        return pages
+        return titles
 
-    def generate_outline(
+    def generate_titles(
         self,
         topic: str,
-        images: Optional[List[bytes]] = None,
+        platform: str,
+        style: str,
         brand: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        try:
-            logger.info(f"开始生成大纲: topic={topic[:50]}..., images={len(images) if images else 0}")
-            prompt = self.prompt_template.format(topic=topic)
+        """
+        生成爆款候选标题
 
-            if images and len(images) > 0:
-                prompt += f"\n\n注意：用户提供了 {len(images)} 张参考图片，请在生成大纲时考虑这些图片的内容和风格。这些图片可能是产品图、个人照片或场景图，请根据图片内容来优化大纲，使生成的内容与图片相关联。"
-                logger.debug(f"添加了 {len(images)} 张参考图片到提示词")
+        参数：
+            topic: 用户输入的主题/文案草稿
+            platform: 目标平台（如：小红书、抖音）
+            style: 风格倾向（如：悬念型、数字型）
+            brand: 品牌档案字典（可选），提供时会把品牌人设约束注入 prompt
+
+        返回：
+            {"success": True, "titles": [{"text", "score", "elements"}, ...]}
+        """
+        try:
+            logger.info(f"开始生成爆款标题: topic={topic[:50]}..., platform={platform}, style={style}")
+
+            # 构建提示词
+            prompt = self.prompt_template.format(
+                topic=topic,
+                platform=platform,
+                style=style,
+                count=TITLE_COUNT
+            )
 
             # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
             brand_constraint = build_brand_constraint(brand)
@@ -157,78 +218,69 @@ class OutlineService:
 
             model = provider_config.get('model', 'gemini-2.0-flash-exp')
             temperature = provider_config.get('temperature', 1.0)
-            max_output_tokens = provider_config.get('max_output_tokens', 8000)
+            max_output_tokens = provider_config.get('max_output_tokens', 4000)
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
-            outline_text = self.client.generate_text(
+            response_text = self.client.generate_text(
                 prompt=prompt,
                 model=model,
                 temperature=temperature,
-                max_output_tokens=max_output_tokens,
-                images=images
+                max_output_tokens=max_output_tokens
             )
 
-            logger.debug(f"API 返回文本长度: {len(outline_text)} 字符")
-            pages = self._parse_outline(outline_text)
-            logger.info(f"大纲解析完成，共 {len(pages)} 页")
+            logger.debug(f"API 返回文本长度: {len(response_text)} 字符")
+
+            # 解析并清洗 JSON 响应
+            title_data = self._parse_json_response(response_text)
+            titles = self._normalize_titles(title_data.get('titles', []))
+
+            if not titles:
+                raise ValueError("AI 未返回任何有效标题，请重试")
+
+            if len(titles) < MIN_TITLES:
+                logger.warning(f"AI 返回标题数量偏少: {len(titles)} 个（期望 {MIN_TITLES}-{MAX_TITLES} 个）")
+
+            logger.info(f"爆款标题生成完成: {len(titles)} 个候选")
 
             return {
                 "success": True,
-                "outline": outline_text,
-                "pages": pages,
-                "has_images": images is not None and len(images) > 0
+                "titles": titles
             }
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"大纲生成失败: {error_msg}")
+            logger.error(f"爆款标题生成失败: {error_msg}")
 
             # 根据错误类型提供更详细的错误信息
             if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower() or "401" in error_msg:
                 detailed_error = (
                     f"API 认证失败。\n"
                     f"错误详情: {error_msg}\n"
-                    "可能原因：\n"
-                    "1. API Key 无效或已过期\n"
-                    "2. API Key 没有访问该模型的权限\n"
+                    "可能原因：API Key 无效或已过期\n"
                     "解决方案：在系统设置页面检查并更新 API Key"
                 )
             elif "model" in error_msg.lower() or "404" in error_msg:
                 detailed_error = (
                     f"模型访问失败。\n"
                     f"错误详情: {error_msg}\n"
-                    "可能原因：\n"
-                    "1. 模型名称不正确\n"
-                    "2. 没有访问该模型的权限\n"
                     "解决方案：在系统设置页面检查模型名称配置"
                 )
             elif "timeout" in error_msg.lower() or "连接" in error_msg:
                 detailed_error = (
                     f"网络连接失败。\n"
                     f"错误详情: {error_msg}\n"
-                    "可能原因：\n"
-                    "1. 网络连接不稳定\n"
-                    "2. API 服务暂时不可用\n"
-                    "3. Base URL 配置错误\n"
                     "解决方案：检查网络连接，稍后重试"
                 )
             elif "rate" in error_msg.lower() or "429" in error_msg or "quota" in error_msg.lower():
                 detailed_error = (
                     f"API 配额限制。\n"
                     f"错误详情: {error_msg}\n"
-                    "可能原因：\n"
-                    "1. API 调用次数超限\n"
-                    "2. 账户配额用尽\n"
                     "解决方案：等待配额重置，或升级 API 套餐"
                 )
             else:
                 detailed_error = (
-                    f"大纲生成失败。\n"
+                    f"爆款标题生成失败。\n"
                     f"错误详情: {error_msg}\n"
-                    "可能原因：\n"
-                    "1. Text API 配置错误或密钥无效\n"
-                    "2. 网络连接问题\n"
-                    "3. 模型无法访问或不存在\n"
                     "建议：检查配置文件 text_providers.yaml"
                 )
 
@@ -238,9 +290,9 @@ class OutlineService:
             }
 
 
-def get_outline_service() -> OutlineService:
+def get_title_service() -> TitleService:
     """
-    获取大纲生成服务实例
+    获取爆款标题生成服务实例
     每次调用都创建新实例以确保配置是最新的
     """
-    return OutlineService()
+    return TitleService()

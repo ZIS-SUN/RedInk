@@ -54,7 +54,13 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 # 创建数据目录
 RUN mkdir -p output history
 
+# 创建非特权用户并降权运行（安全加固）
+RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 # 设置环境变量
+# FLASK_HOST=0.0.0.0 仅在容器内对外监听，实际暴露范围由 compose 端口映射控制，
+# 建议同时设置 REDINK_ACCESS_TOKEN 启用访问鉴权
 ENV FLASK_DEBUG=False
 ENV FLASK_HOST=0.0.0.0
 ENV FLASK_PORT=12398

@@ -1,5 +1,6 @@
 """OpenAI-compatible 图片接口 HTTP 客户端。"""
 import logging
+import threading
 import time
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional
@@ -22,9 +23,23 @@ class ImageApiClient:
         timeout: int = 300,
     ):
         self.policy = policy
-        self.session = session or requests.Session()
+        # requests.Session 不保证线程安全，本客户端会被多个并发线程共享。
+        # 显式注入的 session（如测试用 fake）按原样使用；否则每个线程持有独立 Session，
+        # 各线程内仍能复用连接池。
+        self._injected_session = session
+        self._thread_local = threading.local()
         self.timeout = timeout
         self.extractor = ImageResponseExtractor(self.download_image)
+
+    @property
+    def session(self) -> requests.Session:
+        if self._injected_session is not None:
+            return self._injected_session
+        sess = getattr(self._thread_local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            self._thread_local.session = sess
+        return sess
 
     def generate_via_images(self, payload: Dict[str, Any]) -> bytes:
         result = self._post_json(payload, label="Image API")

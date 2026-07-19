@@ -28,6 +28,16 @@ def create_api_blueprint():
     from .history_routes import create_history_blueprint
     from .config_routes import create_config_blueprint
     from .content_routes import create_content_blueprint
+    from .rewrite_routes import create_rewrite_blueprint
+    from .title_routes import create_title_blueprint
+    from .brand_routes import create_brand_blueprint
+    from .link_routes import create_link_blueprint
+    from .topic_routes import create_topic_blueprint
+    from .calendar_routes import create_calendar_blueprint
+    from .cover_routes import create_cover_blueprint
+    from .analytics_routes import create_analytics_blueprint
+    from .benchmark_routes import create_benchmark_blueprint
+    from .reply_routes import create_reply_blueprint
 
     # 创建主 API 蓝图
     api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -38,6 +48,17 @@ def create_api_blueprint():
     api_bp.register_blueprint(create_history_blueprint())
     api_bp.register_blueprint(create_config_blueprint())
     api_bp.register_blueprint(create_content_blueprint())
+    # 自媒体工具（第二阶段新增）
+    api_bp.register_blueprint(create_rewrite_blueprint())
+    api_bp.register_blueprint(create_title_blueprint())
+    api_bp.register_blueprint(create_brand_blueprint())
+    api_bp.register_blueprint(create_link_blueprint())
+    api_bp.register_blueprint(create_topic_blueprint())
+    api_bp.register_blueprint(create_calendar_blueprint())
+    api_bp.register_blueprint(create_cover_blueprint())
+    api_bp.register_blueprint(create_analytics_blueprint())
+    api_bp.register_blueprint(create_benchmark_blueprint())
+    api_bp.register_blueprint(create_reply_blueprint())
 
     return api_bp
 

@@ -59,6 +59,15 @@ history/*
 /image_providers.yaml
 /text_providers.yaml
 
+# Brand kits (user brand/IP profiles, local data)
+/brand_kits/
+
+# Content calendar (user publishing plans, local data)
+/content_calendar/
+
+# Analytics data (user manually-entered performance metrics, local data)
+/analytics_data/
+
 # Logs
 *.log
 logs/

@@ -422,6 +422,9 @@ class GoogleGenAIGenerator(ImageGeneratorBase):
                         image_data = part.inline_data.data
                         logger.debug(f"  收到图片数据: {len(image_data)} bytes")
                         break
+            # 拿到第一张有效图后停止消费流，避免后续 chunk 覆盖已获取的图片
+            if image_data is not None:
+                break
 
         if not image_data:
             logger.error("API 返回为空，未生成图片")

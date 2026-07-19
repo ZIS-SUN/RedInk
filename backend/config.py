@@ -1,4 +1,5 @@
 import logging
+import os
 import yaml
 from pathlib import Path
 
@@ -6,9 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class Config:
-    DEBUG = True
-    HOST = '0.0.0.0'
-    PORT = 12398
+    # 安全默认：debug 关闭、仅监听本机；部署时通过环境变量覆盖
+    DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
+    HOST = os.getenv("FLASK_HOST", "127.0.0.1")
+    PORT = int(os.getenv("FLASK_PORT", "12398"))
     CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:3000']
     OUTPUT_DIR = 'output'
 

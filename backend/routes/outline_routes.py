@@ -10,6 +10,7 @@ import base64
 import logging
 from flask import Blueprint, request, jsonify
 from backend.services.outline import get_outline_service
+from backend.services.brand import get_brand_service
 from .utils import (
     api_error_response,
     log_request,
@@ -39,6 +40,9 @@ def create_outline_blueprint():
            - topic: 主题文本
            - images: base64 编码的图片数组（可选）
 
+        两种格式均支持可选字段 brand_id（品牌档案 ID），
+        提供且有效时会把品牌人设约束注入生成 prompt。
+
         返回：
         - success: 是否成功
         - outline: 原始大纲文本
@@ -48,7 +52,7 @@ def create_outline_blueprint():
 
         try:
             # 解析请求数据
-            topic, images = _parse_outline_request()
+            topic, images, brand_id = _parse_outline_request()
 
             log_request('/outline', {'topic': topic, 'images': images})
 
@@ -60,10 +64,15 @@ def create_outline_blueprint():
                     context={"endpoint": "/api/outline"},
                 )
 
+            # 按 brand_id 取品牌档案（取不到/异常一律置 None，静默忽略）
+            brand = _load_brand(brand_id)
+
             # 调用大纲生成服务
             logger.info(f"🔄 开始生成大纲，主题: {topic[:50]}...")
             outline_service = get_outline_service()
-            result = outline_service.generate_outline(topic, images if images else None)
+            result = outline_service.generate_outline(
+                topic, images if images else None, brand=brand
+            )
 
             # 记录结果
             elapsed = time.time() - start_time
@@ -86,6 +95,17 @@ def create_outline_blueprint():
     return outline_bp
 
 
+def _load_brand(brand_id):
+    """按 brand_id 取品牌档案，取不到或异常时返回 None（静默忽略）。"""
+    if not brand_id or not isinstance(brand_id, str):
+        return None
+    try:
+        return get_brand_service().get_brand(brand_id)
+    except Exception as e:
+        logger.warning(f"获取品牌档案失败，忽略 brand_id={brand_id}: {e}")
+        return None
+
+
 def _parse_outline_request():
     """
     解析大纲生成请求
@@ -95,11 +115,12 @@ def _parse_outline_request():
     2. application/json - 用于 base64 图片
 
     返回：
-        tuple: (topic, images) - 主题和图片列表
+        tuple: (topic, images, brand_id) - 主题、图片列表和品牌档案 ID（可能为 None）
     """
     # 检查是否是 multipart/form-data（带图片文件）
     if request.content_type and 'multipart/form-data' in request.content_type:
         topic = request.form.get('topic')
+        brand_id = request.form.get('brand_id')
         images = []
 
         # 获取上传的图片文件
@@ -110,11 +131,12 @@ def _parse_outline_request():
                     image_data = file.read()
                     images.append(image_data)
 
-        return topic, images
+        return topic, images, brand_id
 
     # JSON 请求（无图片或 base64 图片）
     data = request.get_json()
     topic = data.get('topic')
+    brand_id = data.get('brand_id')
     images = []
 
     # 支持 base64 格式的图片
@@ -126,4 +148,4 @@ def _parse_outline_request():
                 img_b64 = img_b64.split(',')[1]
             images.append(base64.b64decode(img_b64))
 
-    return topic, images
+    return topic, images, brand_id

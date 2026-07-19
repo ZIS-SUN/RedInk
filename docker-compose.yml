@@ -4,6 +4,15 @@ services:
     container_name: redink
     ports:
       - "12398:12398"
+    environment:
+      # 生产安全默认：关闭 debug；容器内监听 0.0.0.0（对外暴露由上面的端口映射控制）
+      - FLASK_DEBUG=False
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=12398
+      # 可选：部署级访问令牌鉴权。设置后所有 API 请求（健康检查除外）
+      # 必须携带 "Authorization: Bearer <token>" 或 "X-Access-Token: <token>" 请求头。
+      # 公网部署时强烈建议启用，请替换为随机强密钥：
+      # - REDINK_ACCESS_TOKEN=change-me-to-a-random-secret
     volumes:
       # 持久化数据目录
       - ./history:/app/history

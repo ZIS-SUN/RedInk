@@ -8,6 +8,14 @@ from typing import List, Optional, Union
 from .image_compressor import compress_image
 
 
+class ApiRateLimitError(Exception):
+    """API 限流/配额错误（HTTP 429），携带状态码供重试逻辑判定"""
+
+    def __init__(self, message: str, status_code: int = 429):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def retry_on_429(max_retries=3, base_delay=2):
     """429 错误自动重试装饰器"""
     def decorator(func):
@@ -18,7 +26,13 @@ def retry_on_429(max_retries=3, base_delay=2):
                     return func(*args, **kwargs)
                 except Exception as e:
                     error_str = str(e)
-                    if "429" in error_str or "rate" in error_str.lower():
+                    is_rate_limited = (
+                        getattr(e, 'status_code', None) == 429
+                        or "429" in error_str
+                        or "rate" in error_str.lower()
+                        or "resource_exhausted" in error_str.lower()
+                    )
+                    if is_rate_limited:
                         if attempt < max_retries - 1:
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
                             print(f"[重试] 遇到限流，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
@@ -204,8 +218,8 @@ class TextChatClient:
                     f"\n【请求地址】{self.chat_endpoint}"
                 )
             elif status_code == 429:
-                raise Exception(
-                    "⏳ API 配额或速率限制\n\n"
+                raise ApiRateLimitError(
+                    "⏳ API 配额或速率限制 (429 rate limit)\n\n"
                     "【说明】\n"
                     "请求频率过高或配额已用尽。\n\n"
                     "【解决方案】\n"

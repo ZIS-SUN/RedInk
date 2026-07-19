@@ -99,8 +99,11 @@ def create_history_blueprint():
         - total_pages: 总页数
         """
         try:
-            page = int(request.args.get('page', 1))
-            page_size = int(request.args.get('page_size', 20))
+            # 参数校验：非数字回落默认值，越界值收敛到合法范围（防止除零/负页码）
+            page = _parse_positive_int(request.args.get('page'), default=1, minimum=1)
+            page_size = _parse_positive_int(
+                request.args.get('page_size'), default=20, minimum=1, maximum=100
+            )
             status = request.args.get('status')
 
             history_service = get_history_service()
@@ -453,6 +456,31 @@ def create_history_blueprint():
     return history_bp
 
 
+def _parse_positive_int(value, default: int, minimum: int, maximum: int = None) -> int:
+    """
+    解析分页参数：非法值回落默认值，越界值收敛到 [minimum, maximum] 范围
+
+    Args:
+        value: 原始查询参数（可能为 None 或非数字字符串）
+        default: 解析失败时的默认值
+        minimum: 允许的最小值
+        maximum: 允许的最大值（None 表示不限）
+
+    Returns:
+        int: 合法的整数值
+    """
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return default
+
+    if result < minimum:
+        return minimum
+    if maximum is not None and result > maximum:
+        return maximum
+    return result
+
+
 def _create_images_zip(task_dir: str) -> io.BytesIO:
     """
     创建包含所有图片的 ZIP 文件
@@ -499,10 +527,10 @@ def _sanitize_filename(title: str) -> str:
     Returns:
         str: 安全的文件名
     """
-    # 只保留字母、数字、空格、连字符和下划线
+    # 只保留字母、数字、空格、连字符、下划线和中文字符
     safe_title = "".join(
         c for c in title
-        if c.isalnum() or c in (' ', '-', '_', '\u4e00-\u9fff')
+        if c.isalnum() or c in (' ', '-', '_') or '\u4e00' <= c <= '\u9fff'
     ).strip()
 
     return safe_title if safe_title else 'images'

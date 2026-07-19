@@ -7,6 +7,8 @@
 
 import os
 import json
+import tempfile
+import threading
 import uuid
 import logging
 from datetime import datetime
@@ -17,6 +19,13 @@ from enum import Enum
 from backend.services.history_image_merger import HistoryImageMerger
 
 logger = logging.getLogger(__name__)
+
+# 守护实例锁的惰性创建（HistoryService 可能通过 __new__ 构造，绕过 __init__）
+_LOCK_INIT_GUARD = threading.Lock()
+
+
+class IndexCorruptedError(RuntimeError):
+    """索引文件损坏（存在但无法解析）时抛出，避免用空索引覆盖真实数据。"""
 
 
 class RecordStatus:
@@ -46,15 +55,53 @@ class HistoryService:
         self.index_file = os.path.join(self.history_dir, "index.json")
         self._init_index()
 
+    @property
+    def _lock(self) -> "threading.RLock":
+        """
+        实例级可重入锁（惰性创建）。
+
+        使用惰性创建是因为部分调用方（含测试）通过 __new__ 构造实例，
+        不会经过 __init__。
+        """
+        lock = self.__dict__.get("_lock_obj")
+        if lock is None:
+            with _LOCK_INIT_GUARD:
+                lock = self.__dict__.get("_lock_obj")
+                if lock is None:
+                    lock = threading.RLock()
+                    self.__dict__["_lock_obj"] = lock
+        return lock
+
+    @staticmethod
+    def _atomic_write_json(path: str, data: Dict) -> None:
+        """
+        原子写 JSON 文件：先写同目录临时文件，再 os.replace() 覆盖，
+        避免其他读者读到半截文件。
+        """
+        dir_name = os.path.dirname(path) or "."
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".tmp_", suffix=".json", dir=dir_name
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+
     def _init_index(self) -> None:
         """
         初始化索引文件
 
         如果索引文件不存在，则创建一个空索引
         """
-        if not os.path.exists(self.index_file):
-            with open(self.index_file, "w", encoding="utf-8") as f:
-                json.dump({"records": []}, f, ensure_ascii=False, indent=2)
+        with self._lock:
+            if not os.path.exists(self.index_file):
+                self._atomic_write_json(self.index_file, {"records": []})
 
     def _load_index(self) -> Dict:
         """
@@ -62,22 +109,39 @@ class HistoryService:
 
         Returns:
             Dict: 索引数据，包含 records 列表
+
+        Raises:
+            IndexCorruptedError: 索引文件存在但无法解析时抛出，
+                绝不静默返回空索引（避免调用方把空索引写回覆盖真实数据）。
         """
-        try:
-            with open(self.index_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"records": []}
+        with self._lock:
+            if not os.path.exists(self.index_file):
+                return {"records": []}
+            try:
+                with open(self.index_file, "r", encoding="utf-8") as f:
+                    index = json.load(f)
+            except Exception as e:
+                logger.error("索引文件解析失败，保留原文件不覆盖: %s (%s)", self.index_file, e)
+                raise IndexCorruptedError(
+                    f"历史索引文件损坏，已保留原文件: {self.index_file}"
+                ) from e
+
+            if not isinstance(index, dict) or not isinstance(index.get("records"), list):
+                logger.error("索引文件结构异常，保留原文件不覆盖: %s", self.index_file)
+                raise IndexCorruptedError(
+                    f"历史索引文件结构异常，已保留原文件: {self.index_file}"
+                )
+            return index
 
     def _save_index(self, index: Dict) -> None:
         """
-        保存索引文件
+        保存索引文件（原子写）
 
         Args:
             index: 索引数据
         """
-        with open(self.index_file, "w", encoding="utf-8") as f:
-            json.dump(index, f, ensure_ascii=False, indent=2)
+        with self._lock:
+            self._atomic_write_json(self.index_file, index)
 
     def _get_record_path(self, record_id: str) -> str:
         """
@@ -132,24 +196,24 @@ class HistoryService:
             "thumbnail": None  # 初始无缩略图
         }
 
-        # 保存完整记录到独立文件
-        record_path = self._get_record_path(record_id)
-        with open(record_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+        with self._lock:
+            # 保存完整记录到独立文件（原子写）
+            record_path = self._get_record_path(record_id)
+            self._atomic_write_json(record_path, record)
 
-        # 更新索引（用于快速列表查询）
-        index = self._load_index()
-        index["records"].insert(0, {
-            "id": record_id,
-            "title": topic,
-            "created_at": now,
-            "updated_at": now,
-            "status": RecordStatus.DRAFT,  # 索引中也记录状态
-            "thumbnail": None,
-            "page_count": len(outline.get("pages", [])),  # 预期页数
-            "task_id": task_id
-        })
-        self._save_index(index)
+            # 更新索引（用于快速列表查询）
+            index = self._load_index()
+            index["records"].insert(0, {
+                "id": record_id,
+                "title": topic,
+                "created_at": now,
+                "updated_at": now,
+                "status": RecordStatus.DRAFT,  # 索引中也记录状态
+                "thumbnail": None,
+                "page_count": len(outline.get("pages", [])),  # 预期页数
+                "task_id": task_id
+            })
+            self._save_index(index)
 
         return record_id
 
@@ -236,60 +300,60 @@ class HistoryService:
             partial -> generating: 继续生成剩余图片
             partial -> completed: 剩余图片生成完成
         """
-        # 获取现有记录
-        record = self.get_record(record_id)
-        if not record:
-            return False
+        with self._lock:
+            # 获取现有记录
+            record = self.get_record(record_id)
+            if not record:
+                return False
 
-        # 更新时间戳
-        now = datetime.now().isoformat()
-        record["updated_at"] = now
+            # 更新时间戳
+            now = datetime.now().isoformat()
+            record["updated_at"] = now
 
-        # 更新大纲内容（支持修改大纲）
-        if outline is not None:
-            record["outline"] = outline
+            # 更新大纲内容（支持修改大纲）
+            if outline is not None:
+                record["outline"] = outline
 
-        # 更新图片信息
-        if images is not None:
-            record["images"] = self._merge_safe_images(record.get("images"), images)
+            # 更新图片信息
+            if images is not None:
+                record["images"] = self._merge_safe_images(record.get("images"), images)
 
-        # 更新状态（状态流转）
-        if status is not None:
-            record["status"] = self._protect_status(record.get("status"), status, record)
+            # 更新状态（状态流转）
+            if status is not None:
+                record["status"] = self._protect_status(record.get("status"), status, record)
 
-        # 更新缩略图
-        if thumbnail is not None:
-            record["thumbnail"] = thumbnail
+            # 更新缩略图
+            if thumbnail is not None:
+                record["thumbnail"] = thumbnail
 
-        # 保存完整记录
-        record_path = self._get_record_path(record_id)
-        with open(record_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+            # 保存完整记录（原子写）
+            record_path = self._get_record_path(record_id)
+            self._atomic_write_json(record_path, record)
 
-        # 同步更新索引
-        index = self._load_index()
-        for idx_record in index["records"]:
-            if idx_record["id"] == record_id:
-                idx_record["updated_at"] = now
+            # 同步更新索引
+            index = self._load_index()
+            for idx_record in index["records"]:
+                if idx_record["id"] == record_id:
+                    idx_record["updated_at"] = now
 
-                # 更新状态
-                idx_record["status"] = record.get("status", idx_record.get("status"))
+                    # 更新状态
+                    idx_record["status"] = record.get("status", idx_record.get("status"))
 
-                # 更新缩略图
-                idx_record["thumbnail"] = record.get("thumbnail")
+                    # 更新缩略图
+                    idx_record["thumbnail"] = record.get("thumbnail")
 
-                # 更新页数（如果大纲被修改）
-                if outline:
-                    idx_record["page_count"] = len(outline.get("pages", []))
+                    # 更新页数（如果大纲被修改）
+                    if outline:
+                        idx_record["page_count"] = len(outline.get("pages", []))
 
-                # 更新任务 ID
-                if record.get("images", {}).get("task_id"):
-                    idx_record["task_id"] = record.get("images", {}).get("task_id")
+                    # 更新任务 ID
+                    if record.get("images", {}).get("task_id"):
+                        idx_record["task_id"] = record.get("images", {}).get("task_id")
 
-                break
+                    break
 
-        self._save_index(index)
-        return True
+            self._save_index(index)
+            return True
 
     def merge_generated_image(
         self,
@@ -300,35 +364,40 @@ class HistoryService:
         total_count: Optional[int] = None
     ) -> bool:
         """按页面索引合并单张已生成图片。"""
-        record = self.get_record(record_id)
-        if not record:
-            return False
+        with self._lock:
+            record = self.get_record(record_id)
+            if not record:
+                return False
 
-        if total_count is None:
-            total_count = len(record.get("outline", {}).get("pages", []))
+            if total_count is None:
+                total_count = len(record.get("outline", {}).get("pages", []))
 
-        existing_images = record.get("images") or {}
-        generated = HistoryImageMerger.merge_generated(
-            existing_images.get("generated"),
-            page_index,
-            filename,
-            total_count,
-        )
-        status = HistoryImageMerger.compute_status(generated, total_count)
-        thumbnail = HistoryImageMerger.first_image(generated)
+            existing_images = record.get("images") or {}
+            generated = HistoryImageMerger.merge_generated(
+                existing_images.get("generated"),
+                page_index,
+                filename,
+                total_count,
+            )
+            status = HistoryImageMerger.compute_status(generated, total_count)
+            thumbnail = HistoryImageMerger.first_image(generated)
 
-        return self.update_record(
-            record_id,
-            images={
-                "task_id": task_id,
-                "generated": generated,
-            },
-            status=status,
-            thumbnail=thumbnail,
-        )
+            return self.update_record(
+                record_id,
+                images={
+                    "task_id": task_id,
+                    "generated": generated,
+                },
+                status=status,
+                thumbnail=thumbnail,
+            )
 
     def sync_record_images(self, record_id: str, record: Optional[Dict] = None) -> Dict[str, Any]:
         """从任务目录扫描图片并合并回历史记录。"""
+        with self._lock:
+            return self._sync_record_images_locked(record_id, record)
+
+    def _sync_record_images_locked(self, record_id: str, record: Optional[Dict] = None) -> Dict[str, Any]:
         if record is None:
             record = self.get_record(record_id)
         if not record:
@@ -424,35 +493,36 @@ class HistoryService:
         Returns:
             bool: 删除是否成功，记录不存在时返回 False
         """
-        record = self.get_record(record_id)
-        if not record:
-            return False
+        with self._lock:
+            record = self.get_record(record_id)
+            if not record:
+                return False
 
-        # 删除关联的任务图片目录
-        if record.get("images") and record["images"].get("task_id"):
-            task_id = record["images"]["task_id"]
-            task_dir = os.path.join(self.history_dir, task_id)
-            if os.path.exists(task_dir) and os.path.isdir(task_dir):
-                try:
-                    import shutil
-                    shutil.rmtree(task_dir)
-                    print(f"已删除任务目录: {task_dir}")
-                except Exception as e:
-                    print(f"删除任务目录失败: {task_dir}, {e}")
+            # 删除关联的任务图片目录
+            if record.get("images") and record["images"].get("task_id"):
+                task_id = record["images"]["task_id"]
+                task_dir = os.path.join(self.history_dir, task_id)
+                if os.path.exists(task_dir) and os.path.isdir(task_dir):
+                    try:
+                        import shutil
+                        shutil.rmtree(task_dir)
+                        print(f"已删除任务目录: {task_dir}")
+                    except Exception as e:
+                        print(f"删除任务目录失败: {task_dir}, {e}")
 
-        # 删除记录 JSON 文件
-        record_path = self._get_record_path(record_id)
-        try:
-            os.remove(record_path)
-        except Exception:
-            return False
+            # 删除记录 JSON 文件
+            record_path = self._get_record_path(record_id)
+            try:
+                os.remove(record_path)
+            except Exception:
+                return False
 
-        # 从索引中移除
-        index = self._load_index()
-        index["records"] = [r for r in index["records"] if r["id"] != record_id]
-        self._save_index(index)
+            # 从索引中移除
+            index = self._load_index()
+            index["records"] = [r for r in index["records"] if r["id"] != record_id]
+            self._save_index(index)
 
-        return True
+            return True
 
     def list_records(
         self,
@@ -594,37 +664,38 @@ class HistoryService:
                     break
 
             if record_id:
-                # 更新历史记录
-                record = self.get_record(record_id)
-                if record:
-                    expected_count = len(record.get("outline", {}).get("pages", []))
-                    existing_generated = record.get("images", {}).get("generated", [])
-                    merged_images = HistoryImageMerger.merge_many(
-                        existing_generated,
-                        files_by_index,
-                        expected_count,
-                    )
-                    status = HistoryImageMerger.compute_status(merged_images, expected_count)
+                # 更新历史记录（读改写在锁内，避免并发丢更新）
+                with self._lock:
+                    record = self.get_record(record_id)
+                    if record:
+                        expected_count = len(record.get("outline", {}).get("pages", []))
+                        existing_generated = record.get("images", {}).get("generated", [])
+                        merged_images = HistoryImageMerger.merge_many(
+                            existing_generated,
+                            files_by_index,
+                            expected_count,
+                        )
+                        status = HistoryImageMerger.compute_status(merged_images, expected_count)
 
-                    # 更新图片列表和状态
-                    self.update_record(
-                        record_id,
-                        images={
+                        # 更新图片列表和状态
+                        self.update_record(
+                            record_id,
+                            images={
+                                "task_id": task_id,
+                                "generated": merged_images
+                            },
+                            status=status,
+                            thumbnail=HistoryImageMerger.first_image(merged_images)
+                        )
+
+                        return {
+                            "success": True,
+                            "record_id": record_id,
                             "task_id": task_id,
-                            "generated": merged_images
-                        },
-                        status=status,
-                        thumbnail=HistoryImageMerger.first_image(merged_images)
-                    )
-
-                    return {
-                        "success": True,
-                        "record_id": record_id,
-                        "task_id": task_id,
-                        "images_count": len(image_files),
-                        "images": merged_images,
-                        "status": status
-                    }
+                            "images_count": len(image_files),
+                            "images": merged_images,
+                            "status": status
+                        }
 
             # 没有关联的记录，返回扫描结果
             return {

@@ -1,7 +1,9 @@
+import hmac
 import logging
+import os
 import sys
 from pathlib import Path
-from flask import Flask, send_from_directory
+from flask import Flask, request, send_from_directory
 from flask_cors import CORS
 from backend.config import Config
 from backend.routes import register_routes
@@ -59,9 +61,13 @@ def create_app():
         r"/api/*": {
             "origins": Config.CORS_ORIGINS,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type"],
+            # 允许携带访问令牌相关请求头（启用 REDINK_ACCESS_TOKEN 鉴权时需要）
+            "allow_headers": ["Content-Type", "Authorization", "X-Access-Token"],
         }
     })
+
+    # 可选的部署级访问令牌鉴权（未设置 REDINK_ACCESS_TOKEN 时不启用，本地开箱即用）
+    _register_access_token_auth(app, logger)
 
     # 注册所有 API 路由
     register_routes(app)
@@ -94,6 +100,53 @@ def create_app():
             }
 
     return app
+
+
+def _register_access_token_auth(app, logger):
+    """注册可选的部署级访问令牌鉴权。
+
+    设置环境变量 REDINK_ACCESS_TOKEN 后启用：所有 /api/* 请求（健康检查除外）
+    必须携带 `Authorization: Bearer <token>` 或 `X-Access-Token: <token>` 请求头，
+    否则返回 401。未设置该环境变量时完全不启用，保持本地开箱即用。
+    """
+    access_token = os.getenv('REDINK_ACCESS_TOKEN', '').strip()
+    if not access_token:
+        return
+
+    from backend.errors import AppError
+    from backend.routes.utils import api_error_response
+
+    logger.info("🔒 已启用访问令牌鉴权（REDINK_ACCESS_TOKEN）")
+
+    @app.before_request
+    def _check_access_token():
+        # 放行 CORS 预检请求，避免破坏跨域
+        if request.method == 'OPTIONS':
+            return None
+
+        # 只保护 API 接口；静态资源（前端页面）与健康检查直接放行
+        path = request.path
+        if not path.startswith('/api/') or path == '/api/health':
+            return None
+
+        supplied = ''
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            supplied = auth_header[len('Bearer '):].strip()
+        if not supplied:
+            supplied = request.headers.get('X-Access-Token', '').strip()
+
+        if supplied and hmac.compare_digest(supplied, access_token):
+            return None
+
+        return api_error_response(AppError(
+            code="UNAUTHORIZED",
+            title="访问未授权",
+            detail="缺少或无效的访问令牌",
+            suggestion="请在请求头携带 Authorization: Bearer <token> 或 X-Access-Token: <token>",
+            status=401,
+            retryable=False,
+        ))
 
 
 def _validate_config_on_startup(logger):
@@ -152,6 +205,9 @@ def _validate_config_on_startup(logger):
 
 if __name__ == '__main__':
     app = create_app()
+    # 注意：app.run() 使用 Flask 内置开发服务器，仅适合本地开发/自用部署。
+    # 生产环境建议改用 WSGI 服务器，例如：
+    #   uv run gunicorn -w 2 -b 0.0.0.0:12398 "backend.app:create_app()"
     app.run(
         host=Config.HOST,
         port=Config.PORT,

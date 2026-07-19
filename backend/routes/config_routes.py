@@ -7,9 +7,12 @@
 - 测试服务商连接
 """
 
+import ipaddress
 import logging
+import socket
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Optional
+from urllib.parse import urlparse
 import yaml
 from flask import Blueprint, request, jsonify
 from .utils import (
@@ -30,6 +33,88 @@ class LlmSmokeResult(NamedTuple):
 CONFIG_DIR = Path(__file__).parent.parent.parent
 IMAGE_CONFIG_PATH = CONFIG_DIR / 'image_providers.yaml'
 TEXT_CONFIG_PATH = CONFIG_DIR / 'text_providers.yaml'
+
+
+# 禁止访问的地址段（SSRF 防护）。
+# 注意：不使用 ip.is_private 一刀切，因为 Fake-IP 代理环境下
+# 所有域名会解析到 198.18.0.0/15（属 is_private），会误杀全部合法域名。
+_FORBIDDEN_NETWORKS = [
+    ipaddress.ip_network('127.0.0.0/8'),      # 环回
+    ipaddress.ip_network('10.0.0.0/8'),       # 私网 A
+    ipaddress.ip_network('172.16.0.0/12'),    # 私网 B
+    ipaddress.ip_network('192.168.0.0/16'),   # 私网 C
+    ipaddress.ip_network('169.254.0.0/16'),   # 链路本地
+    ipaddress.ip_network('100.64.0.0/10'),    # CGNAT
+    ipaddress.ip_network('::1/128'),          # IPv6 环回
+    ipaddress.ip_network('fe80::/10'),        # IPv6 链路本地
+    ipaddress.ip_network('fc00::/7'),         # IPv6 唯一本地
+]
+
+
+def _is_forbidden_ip(ip) -> bool:
+    """判断 IP 是否属于私网/环回/链路本地等禁止访问的地址段"""
+    if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+        return True
+    return any(ip in network for network in _FORBIDDEN_NETWORKS)
+
+
+def _validate_base_url(url: Optional[str]) -> Optional[str]:
+    """
+    校验 base_url 是否安全（防 SSRF）
+
+    仅允许 http/https 协议，拒绝指向私网/环回/链路本地地址的主机
+    （域名会先解析为 IP 再校验）。
+
+    Args:
+        url: 待校验的 base_url（空值视为使用默认地址，直接通过）
+
+    Returns:
+        Optional[str]: 不合法时返回错误描述，合法返回 None
+    """
+    if not url:
+        return None
+
+    try:
+        parsed = urlparse(str(url))
+    except ValueError:
+        return "base_url 格式不正确"
+
+    if parsed.scheme not in ('http', 'https'):
+        return "base_url 仅支持 http/https 协议"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return "base_url 缺少有效的主机名"
+
+    # 主机名本身就是 IP 的情况
+    try:
+        ip = ipaddress.ip_address(hostname.split('%')[0])
+    except ValueError:
+        ip = None
+
+    if ip is not None:
+        if _is_forbidden_ip(ip):
+            return "base_url 不允许指向私网、环回或保留地址"
+        return None
+
+    # 域名：解析为 IP 后逐个校验
+    # 解析失败时放行——此处不做可达性判断，后续真正的连接请求会以相同的解析器再次尝试并
+    # 自然失败；在此硬拒会误杀无网/自定义 DNS 环境下的合法域名。SSRF 的核心防护（IP 字面量
+    # 与可解析到内网的域名）仍然生效。
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return None
+
+    for info in addr_infos:
+        try:
+            resolved_ip = ipaddress.ip_address(str(info[4][0]).split('%')[0])
+        except ValueError:
+            return "base_url 解析结果异常"
+        if _is_forbidden_ip(resolved_ip):
+            return "base_url 解析到私网、环回或保留地址，已拒绝"
+
+    return None
 
 
 def create_config_blueprint():
@@ -97,7 +182,20 @@ def create_config_blueprint():
         - message: 结果消息
         """
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True) or {}
+
+            # 保存前校验所有 base_url，防止写入 SSRF 地址
+            for section in ('image_generation', 'text_generation'):
+                providers = (data.get(section) or {}).get('providers') or {}
+                for name, provider_config in providers.items():
+                    if not isinstance(provider_config, dict):
+                        continue
+                    error_msg = _validate_base_url(provider_config.get('base_url'))
+                    if error_msg:
+                        return api_error_response(
+                            validation_error(error_msg, "请填写合法的公网服务地址。"),
+                            context={"endpoint": "/api/config", "provider": name},
+                        )
 
             # 更新图片生成配置
             if 'image_generation' in data:
@@ -176,6 +274,14 @@ def create_config_blueprint():
                     context=_error_context(provider_type, provider_name, config),
                 )
 
+            # 测试连接前校验 base_url，防止 SSRF
+            base_url_error = _validate_base_url(config.get('base_url'))
+            if base_url_error:
+                return api_error_response(
+                    validation_error(base_url_error, "请填写合法的公网服务地址。"),
+                    context=_error_context(provider_type, provider_name, config),
+                )
+
             # 根据类型执行测试
             result = _test_provider_connection(provider_type, config)
             return jsonify(result), 200 if result['success'] else 400
@@ -232,8 +338,17 @@ def _update_provider_config(config_path: Path, new_data: dict):
         for name, new_provider_config in new_providers.items():
             # 如果新配置的 api_key 是空的，保留原有的
             if new_provider_config.get('api_key') in [True, False, '', None]:
-                if name in existing_providers and existing_providers[name].get('api_key'):
-                    new_provider_config['api_key'] = existing_providers[name]['api_key']
+                existing_provider = existing_providers.get(name, {})
+                old_base_url = existing_provider.get('base_url')
+                new_base_url = new_provider_config.get('base_url')
+                # 安全约束：修改 base_url 却未提供新 api_key 时，
+                # 不回填旧密钥，避免把已存密钥转发到新地址（密钥外发链）
+                base_url_changed = (
+                    'base_url' in new_provider_config
+                    and (new_base_url or None) != (old_base_url or None)
+                )
+                if not base_url_changed and existing_provider.get('api_key'):
+                    new_provider_config['api_key'] = existing_provider['api_key']
                 else:
                     new_provider_config.pop('api_key', None)
 
@@ -384,9 +499,10 @@ def _test_google_gemini(config: dict, test_prompt: str) -> dict:
             vertexai=False
         )
     else:
+        # 与实际生成路径保持一致：API Key 用户走非 Vertex AI 通道
         client = genai.Client(
             api_key=config['api_key'],
-            vertexai=True
+            vertexai=False
         )
 
     model = config.get('model') or 'gemini-2.0-flash-exp'
@@ -437,7 +553,9 @@ def _test_image_api(config: dict) -> dict:
             "message": "连接成功！仅代表连接稳定，不确定是否可以稳定支持图片生成"
         }
     else:
-        raise Exception(f"HTTP {response.status_code}: {response.text[:200]}")
+        # 不回显上游原始响应体，仅记录到服务端日志
+        logger.warning(f"图片 API 测试失败: HTTP {response.status_code}, 响应: {response.text[:200]}")
+        raise Exception(f"HTTP {response.status_code}: 连接测试失败，请检查 Base URL 和 API Key 配置。")
 
 
 def _test_openai_chat_completion(config: dict, test_prompt: str) -> LlmSmokeResult:
@@ -477,29 +595,28 @@ def _test_openai_chat_completion(config: dict, test_prompt: str) -> LlmSmokeResu
         )
 
     if response.status_code != 200:
-        raise Exception(f"HTTP {response.status_code}: {response.text[:500]}")
+        # 不回显上游原始响应体，仅记录到服务端日志
+        logger.warning(f"LLM 测试请求失败: HTTP {response.status_code}, 响应: {response.text[:500]}")
+        raise Exception(f"HTTP {response.status_code}: 上游服务返回错误，请检查 Base URL、模型名称和 API Key 配置。")
 
     try:
         result = response.json()
     except Exception as exc:
-        raise Exception(f"LLM 响应不是合法 JSON: {response.text[:500]}") from exc
+        logger.warning(f"LLM 响应不是合法 JSON: {response.text[:500]}")
+        raise Exception("LLM 响应不是合法 JSON，请检查 Base URL 和 endpoint_type 配置。") from exc
 
     smoke_result = _extract_chat_completion_text(result)
     if not smoke_result.text.strip() and smoke_result.source not in ["reasoning_tokens"]:
-        raise Exception(
-            "LLM 响应为空。\n"
-            f"响应数据: {str(result)[:500]}"
-        )
+        logger.warning(f"LLM 响应为空，响应数据: {str(result)[:500]}")
+        raise Exception("LLM 响应为空，请检查模型配置后重试。")
     return smoke_result
 
 
 def _extract_chat_completion_text(result: dict) -> LlmSmokeResult:
     choices = result.get('choices')
     if not isinstance(choices, list) or not choices:
-        raise Exception(
-            "LLM 响应格式异常：未找到 choices。\n"
-            f"响应数据: {str(result)[:500]}"
-        )
+        logger.warning(f"LLM 响应格式异常（未找到 choices），响应数据: {str(result)[:500]}")
+        raise Exception("LLM 响应格式异常：未找到 choices，请检查服务商是否兼容 OpenAI 接口。")
 
     choice = choices[0] if isinstance(choices[0], dict) else {}
     finish_reason = choice.get('finish_reason') or ""
@@ -525,10 +642,8 @@ def _extract_chat_completion_text(result: dict) -> LlmSmokeResult:
     if finish_reason == "length" and _extract_reasoning_token_count(result) > 0:
         return LlmSmokeResult("", "reasoning_tokens", finish_reason)
 
-    raise Exception(
-        "LLM 响应格式异常：未找到 message.content 或 reasoning_content。\n"
-        f"响应数据: {str(result)[:500]}"
-    )
+    logger.warning(f"LLM 响应格式异常（未找到 message.content），响应数据: {str(result)[:500]}")
+    raise Exception("LLM 响应格式异常：未找到 message.content 或 reasoning_content，请检查模型配置。")
 
 
 def _extract_reasoning_token_count(result: dict) -> int:

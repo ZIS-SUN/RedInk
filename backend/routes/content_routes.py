@@ -9,6 +9,7 @@ import time
 import logging
 from flask import Blueprint, request, jsonify
 from backend.services.content import get_content_service
+from backend.services.brand import get_brand_service
 from .utils import (
     api_error_response,
     log_request,
@@ -32,6 +33,7 @@ def create_content_blueprint():
         请求格式（application/json）：
         - topic: 主题文本
         - outline: 大纲内容
+        - brand_id: 品牌档案 ID（可选），提供且有效时会把品牌人设约束注入生成 prompt
 
         返回：
         - success: 是否成功
@@ -45,6 +47,7 @@ def create_content_blueprint():
             data = request.get_json()
             topic = data.get('topic', '')
             outline = data.get('outline', '')
+            brand_id = data.get('brand_id')
 
             log_request('/content', {'topic': topic[:50] if topic else '', 'outline_length': len(outline)})
 
@@ -63,10 +66,13 @@ def create_content_blueprint():
                     context={"endpoint": "/api/content"},
                 )
 
+            # 按 brand_id 取品牌档案（取不到/异常一律置 None，静默忽略）
+            brand = _load_brand(brand_id)
+
             # 调用内容生成服务
             logger.info(f"🔄 开始生成内容，主题: {topic[:50]}...")
             content_service = get_content_service()
-            result = content_service.generate_content(topic, outline)
+            result = content_service.generate_content(topic, outline, brand=brand)
 
             # 记录结果
             elapsed = time.time() - start_time
@@ -87,3 +93,14 @@ def create_content_blueprint():
             return api_error_response(e, context={"endpoint": "/api/content"})
 
     return content_bp
+
+
+def _load_brand(brand_id):
+    """按 brand_id 取品牌档案，取不到或异常时返回 None（静默忽略）。"""
+    if not brand_id or not isinstance(brand_id, str):
+        return None
+    try:
+        return get_brand_service().get_brand(brand_id)
+    except Exception as e:
+        logger.warning(f"获取品牌档案失败，忽略 brand_id={brand_id}: {e}")
+        return None

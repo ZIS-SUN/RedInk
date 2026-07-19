@@ -1,7 +1,9 @@
 """
-内容生成服务
+评论区互动助手服务
 
-生成小红书风格的标题、文案和标签
+创作者粘贴粉丝评论（可多条），选择回复语气，
+AI 为每条评论生成 2-3 个高互动的神回复建议（引导二次互动、涨粉、带节奏但不低俗），
+并可选生成一条置顶引导评论（引导点赞/关注/看主页）。
 """
 
 import json
@@ -10,22 +12,39 @@ import os
 import re
 import yaml
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List
+
 from backend.utils.text_client import get_text_chat_client
-from backend.services.rewrite import build_brand_constraint
 
 logger = logging.getLogger(__name__)
 
+# 单次最多处理的评论条数（防止 prompt 过长）
+MAX_COMMENTS = 20
 
-class ContentService:
-    """内容生成服务：生成标题、文案、标签"""
+# 每条评论的回复建议数量范围
+MIN_SUGGESTIONS = 2
+MAX_SUGGESTIONS = 3
+
+# 支持的回复语气及其说明（注入 prompt 用）
+TONE_HINTS = {
+    "热情": "高能量、有感染力，多用感叹和亲昵称呼，让粉丝感觉被热烈欢迎",
+    "专业": "干货感、可信赖，用简洁专业的表达展示功底，让人觉得博主很懂行",
+    "幽默": "有梗、会接梗、敢自嘲，轻松诙谐带动评论区氛围，但不低俗不冒犯",
+    "温暖": "共情、治愈、真诚，先接住对方情绪再温柔回应，让粉丝感觉被看见",
+}
+
+DEFAULT_TONE = "热情"
+
+
+class ReplyService:
+    """评论区互动助手服务：生成神回复建议与置顶引导评论"""
 
     def __init__(self):
-        logger.debug("初始化 ContentService...")
+        logger.debug("初始化 ReplyService...")
         self.text_config = self._load_text_config()
         self.client = self._get_client()
         self.prompt_template = self._load_prompt_template()
-        logger.info(f"ContentService 初始化完成，使用服务商: {self.text_config.get('active_provider')}")
+        logger.info(f"ReplyService 初始化完成，使用服务商: {self.text_config.get('active_provider')}")
 
     def _load_text_config(self) -> dict:
         """加载文本生成配置"""
@@ -99,7 +118,7 @@ class ContentService:
         prompt_path = os.path.join(
             os.path.dirname(os.path.dirname(__file__)),
             "prompts",
-            "content_prompt.txt"
+            "reply_prompt.txt"
         )
         with open(prompt_path, "r", encoding="utf-8") as f:
             return f.read()
@@ -132,37 +151,85 @@ class ContentService:
         logger.error(f"无法解析 JSON 响应: {response_text[:200]}...")
         raise ValueError("AI 返回的内容格式不正确，无法解析")
 
-    def generate_content(
+    def _normalize_replies(self, raw_replies: Any, comments: List[str]) -> List[Dict[str, Any]]:
+        """
+        清洗 AI 返回的回复列表：
+        - 过滤非法项，收敛 suggestions 类型为字符串列表（每条最多 MAX_SUGGESTIONS 个）
+        - comment 字段兜底回填为输入的原评论，保证与输入一一对应
+        """
+        replies: List[Dict[str, Any]] = []
+        if not isinstance(raw_replies, list):
+            raw_replies = []
+
+        for i, comment in enumerate(comments):
+            item = raw_replies[i] if i < len(raw_replies) else None
+            if not isinstance(item, dict):
+                item = {}
+
+            suggestions = item.get('suggestions', [])
+            if isinstance(suggestions, str):
+                suggestions = [suggestions]
+            if not isinstance(suggestions, list):
+                suggestions = []
+            suggestions = [str(s).strip() for s in suggestions if str(s).strip()]
+            suggestions = suggestions[:MAX_SUGGESTIONS]
+
+            # AI 返回的 comment 可能被改写或带序号，统一以输入原文为准
+            replies.append({
+                "comment": comment,
+                "suggestions": suggestions
+            })
+
+        return replies
+
+    def generate_replies(
         self,
-        topic: str,
-        outline: str,
-        brand: Optional[Dict] = None
+        comments: List[str],
+        tone: str = DEFAULT_TONE,
+        include_pinned: bool = False
     ) -> Dict[str, Any]:
         """
-        生成标题、文案和标签
+        为粉丝评论生成神回复建议
 
         参数：
-            topic: 用户输入的主题
-            outline: 大纲内容
-            brand: 品牌档案字典（可选），提供时会把品牌人设约束注入 prompt
+            comments: 粉丝评论列表（已去空行）
+            tone: 回复语气（热情/专业/幽默/温暖）
+            include_pinned: 是否同时生成一条置顶引导评论
 
         返回：
-            包含 titles, copywriting, tags 的字典
+            {
+                "success": True,
+                "replies": [{"comment": "原评论", "suggestions": ["回复1", "回复2"]}, ...],
+                "pinned_comment": "置顶引导评论（未要求时为空字符串）"
+            }
         """
         try:
-            logger.info(f"开始生成内容: topic={topic[:50]}...")
+            comments = [str(c).strip() for c in comments if str(c).strip()][:MAX_COMMENTS]
+            if not comments:
+                raise ValueError("评论列表为空，请至少输入一条粉丝评论")
+
+            if tone not in TONE_HINTS:
+                logger.warning(f"未知回复语气 [{tone}]，回退为默认语气 [{DEFAULT_TONE}]")
+                tone = DEFAULT_TONE
+
+            logger.info(
+                f"开始生成评论回复: {len(comments)} 条评论, tone={tone}, include_pinned={include_pinned}"
+            )
+
+            comments_text = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(comments))
+            pinned_requirement = (
+                "需要生成。请在 pinned_comment 字段输出一条符合要求的置顶引导评论。"
+                if include_pinned
+                else "本次不需要生成置顶引导评论，pinned_comment 字段输出空字符串 \"\"。"
+            )
 
             # 构建提示词
             prompt = self.prompt_template.format(
-                topic=topic,
-                outline=outline
+                tone=tone,
+                tone_hint=TONE_HINTS[tone],
+                comments=comments_text,
+                pinned_requirement=pinned_requirement
             )
-
-            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
-            brand_constraint = build_brand_constraint(brand)
-            if brand_constraint:
-                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
-                prompt += brand_constraint
 
             # 从配置中获取模型参数
             active_provider = self.text_config.get('active_provider', 'google_gemini')
@@ -183,34 +250,31 @@ class ContentService:
 
             logger.debug(f"API 返回文本长度: {len(response_text)} 字符")
 
-            # 解析 JSON 响应
-            content_data = self._parse_json_response(response_text)
+            # 解析并清洗 JSON 响应
+            reply_data = self._parse_json_response(response_text)
+            replies = self._normalize_replies(reply_data.get('replies', []), comments)
 
-            # 验证必要字段
-            titles = content_data.get('titles', [])
-            copywriting = content_data.get('copywriting', '')
-            tags = content_data.get('tags', [])
+            if not any(r["suggestions"] for r in replies):
+                raise ValueError("AI 未返回任何有效的回复建议，请重试")
 
-            # 确保 titles 是列表
-            if isinstance(titles, str):
-                titles = [titles]
+            pinned_comment = ""
+            if include_pinned:
+                pinned_comment = str(reply_data.get('pinned_comment', '') or '').strip()
 
-            # 确保 tags 是列表
-            if isinstance(tags, str):
-                tags = [t.strip() for t in tags.split(',')]
-
-            logger.info(f"内容生成完成: {len(titles)} 个标题, {len(tags)} 个标签")
+            logger.info(
+                f"评论回复生成完成: {len(replies)} 条评论, "
+                f"置顶引导评论: {'有' if pinned_comment else '无'}"
+            )
 
             return {
                 "success": True,
-                "titles": titles,
-                "copywriting": copywriting,
-                "tags": tags
+                "replies": replies,
+                "pinned_comment": pinned_comment
             }
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"内容生成失败: {error_msg}")
+            logger.error(f"评论回复生成失败: {error_msg}")
 
             # 根据错误类型提供更详细的错误信息
             if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower() or "401" in error_msg:
@@ -240,7 +304,7 @@ class ContentService:
                 )
             else:
                 detailed_error = (
-                    f"内容生成失败。\n"
+                    f"评论回复生成失败。\n"
                     f"错误详情: {error_msg}\n"
                     "建议：检查配置文件 text_providers.yaml"
                 )
@@ -251,9 +315,9 @@ class ContentService:
             }
 
 
-def get_content_service() -> ContentService:
+def get_reply_service() -> ReplyService:
     """
-    获取内容生成服务实例
+    获取评论区互动助手服务实例
     每次调用都创建新实例以确保配置是最新的
     """
-    return ContentService()
+    return ReplyService()

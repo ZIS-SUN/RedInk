@@ -47,7 +47,9 @@ class ImageResponseExtractor:
                 f"响应内容: {str(result)[:500]}"
             )
 
-        content = choices[0].get("message", {}).get("content")
+        first_choice = choices[0] if isinstance(choices[0], dict) else {}
+        message = first_choice.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str):
             raise ValueError(
                 "Chat 图片接口响应 content 格式异常。\n"
