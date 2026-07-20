@@ -147,6 +147,44 @@ class OutlineService:
                 "error": detailed_error
             }
 
+    def build_outline_prompt(
+        self,
+        topic: str,
+        images: Optional[List[bytes]] = None,
+        brand: Optional[Dict] = None
+    ) -> str:
+        """
+        组装大纲生成 prompt（流式与非流式共用，保证两条链路产出完全一致）
+
+        参数：
+            topic: 用户主题
+            images: 参考图片列表（可选，仅影响 prompt 中的提示文案）
+            brand: 品牌档案字典（可选），提供时追加品牌人设约束
+        """
+        prompt = self.prompt_template.format(topic=topic)
+
+        if images and len(images) > 0:
+            prompt += f"\n\n注意：用户提供了 {len(images)} 张参考图片，请在生成大纲时考虑这些图片的内容和风格。这些图片可能是产品图、个人照片或场景图，请根据图片内容来优化大纲，使生成的内容与图片相关联。"
+            logger.debug(f"添加了 {len(images)} 张参考图片到提示词")
+
+        # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
+        brand_constraint = build_brand_constraint(brand)
+        if brand_constraint:
+            logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
+            prompt += brand_constraint
+
+        return prompt
+
+    def get_generation_params(self) -> tuple:
+        """解析大纲生成的模型调用参数：(model, temperature, max_output_tokens)"""
+        return resolve_generation_params(
+            self.text_config, default_max_output_tokens=8000
+        )
+
+    def parse_outline(self, outline_text: str) -> List[Dict[str, Any]]:
+        """把大纲原始文本解析为页面列表（_parse_outline 的公开入口，供流式端点复用）"""
+        return self._parse_outline(outline_text)
+
     def _parse_outline(self, outline_text: str) -> List[Dict[str, Any]]:
         # 按 <page> 分割页面（兼容旧的 --- 分隔符）
         if '<page>' in outline_text:
@@ -189,22 +227,11 @@ class OutlineService:
     ) -> Dict[str, Any]:
         try:
             logger.info(f"开始生成大纲: topic={topic[:50]}..., images={len(images) if images else 0}")
-            prompt = self.prompt_template.format(topic=topic)
-
-            if images and len(images) > 0:
-                prompt += f"\n\n注意：用户提供了 {len(images)} 张参考图片，请在生成大纲时考虑这些图片的内容和风格。这些图片可能是产品图、个人照片或场景图，请根据图片内容来优化大纲，使生成的内容与图片相关联。"
-                logger.debug(f"添加了 {len(images)} 张参考图片到提示词")
-
-            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
-            brand_constraint = build_brand_constraint(brand)
-            if brand_constraint:
-                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
-                prompt += brand_constraint
+            # prompt 组装收敛到 build_outline_prompt，与流式端点共用同一逻辑
+            prompt = self.build_outline_prompt(topic, images=images, brand=brand)
 
             # 从配置中获取模型参数
-            model, temperature, max_output_tokens = resolve_generation_params(
-                self.text_config, default_max_output_tokens=8000
-            )
+            model, temperature, max_output_tokens = self.get_generation_params()
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
             outline_text = self.client.generate_text(

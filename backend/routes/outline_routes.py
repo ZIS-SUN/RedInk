@@ -7,11 +7,17 @@
 """
 
 import time
+import json
 import base64
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
+from backend.errors import AppError, ensure_app_error
 from backend.services.outline import get_outline_service
 from backend.services.brand import get_brand_service
+from backend.utils.text_stream import (
+    StreamingNotSupportedError,
+    get_text_stream_client,
+)
 from .utils import (
     api_error_response,
     log_request,
@@ -101,6 +107,139 @@ def create_outline_blueprint():
             log_error('/outline', e)
             return api_error_response(e, context={"endpoint": "/api/outline"})
 
+    @outline_bp.route('/outline/stream', methods=['POST'])
+    def generate_outline_stream():
+        """
+        流式生成大纲（SSE），把用户感知等待降到首字级
+
+        请求体（application/json，不支持图片；带图请走 POST /outline）：
+        - topic: 主题文本（必填）
+        - brand_id: 品牌档案 ID（可选），提供且有效时注入品牌人设约束
+
+        返回 SSE 事件流（事件格式与图片管线一致）：
+        - delta: {"text": "..."} 文本增量
+        - complete: 最终完整文本 + 服务端解析好的结构化大纲
+          （与 POST /outline 成功响应同构：success/outline/pages/has_images）
+        - error: 结构化错误（error 为 AppError 字典）
+        - finish: {"success": bool} 流结束标记
+
+        激活服务商不支持流式时，返回 400 + code=STREAMING_NOT_SUPPORTED
+        的普通 JSON 响应，前端据此回退到非流式接口。
+        """
+        start_time = time.time()
+
+        try:
+            data = request.get_json(silent=True) or {}
+            topic = data.get('topic')
+            brand_id = data.get('brand_id')
+
+            log_request('/outline/stream', {'topic': topic})
+
+            # 参数校验与 /outline 一致（400 规范）
+            if not topic or not isinstance(topic, str) or not topic.strip():
+                logger.warning("流式大纲生成请求缺少 topic 参数")
+                return api_error_response(
+                    validation_error("topic 不能为空", "请输入要生成图文的主题内容。"),
+                    context={"endpoint": "/api/outline/stream"},
+                )
+
+            # 流式版只支持无图路径；带图请求应由前端走既有 POST /outline
+            if data.get('images'):
+                logger.warning("流式大纲生成请求携带了图片，拒绝处理")
+                return api_error_response(
+                    validation_error(
+                        "流式大纲生成不支持图片",
+                        "带参考图片时请使用非流式接口 POST /api/outline。",
+                    ),
+                    context={"endpoint": "/api/outline/stream"},
+                )
+
+            # 按 brand_id 取品牌档案（取不到/异常一律置 None，静默忽略）
+            brand = _load_brand(brand_id)
+
+            # 流开始前完成所有可能失败的准备工作，
+            # 让配置类错误以普通 JSON 响应返回（前端可据此回退非流式）
+            outline_service = get_outline_service()
+            try:
+                stream_client = get_text_stream_client(outline_service.text_config)
+            except StreamingNotSupportedError as e:
+                logger.info(f"激活服务商不支持流式输出: {e}")
+                return api_error_response(AppError(
+                    code="STREAMING_NOT_SUPPORTED",
+                    title="当前服务商不支持流式输出",
+                    detail=str(e),
+                    suggestion="请使用非流式接口，或在系统设置中切换到 OpenAI 兼容服务商。",
+                    status=400,
+                    retryable=False,
+                ), context={"endpoint": "/api/outline/stream"})
+
+            # prompt 组装复用 OutlineService，保证与非流式产出完全一致
+            prompt = outline_service.build_outline_prompt(topic, brand=brand)
+            model, temperature, max_output_tokens = outline_service.get_generation_params()
+
+            logger.info(f"🔄 开始流式生成大纲，主题: {topic[:50]}...")
+
+            def generate():
+                """SSE 事件生成器：delta* → complete → finish（出错：error → finish）"""
+                chunks = []
+                upstream = stream_client.stream_text(
+                    prompt=prompt,
+                    model=model,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                )
+                try:
+                    for delta in upstream:
+                        chunks.append(delta)
+                        yield _sse_event('delta', {'text': delta})
+
+                    outline_text = ''.join(chunks)
+                    if not outline_text.strip():
+                        raise ValueError("AI 返回的大纲内容为空")
+
+                    # 解析复用 OutlineService 的既有逻辑，与非流式结果同构
+                    pages = outline_service.parse_outline(outline_text)
+                    elapsed = time.time() - start_time
+                    logger.info(f"✅ 流式大纲生成成功，耗时 {elapsed:.2f}s，共 {len(pages)} 页")
+
+                    yield _sse_event('complete', {
+                        'success': True,
+                        'outline': outline_text,
+                        'pages': pages,
+                        'has_images': False,
+                    })
+                    yield _sse_event('finish', {'success': True})
+                except GeneratorExit:
+                    # 客户端断开（SSE 断连）：关闭上游流式生成器，
+                    # 触发其 finally 关闭底层 HTTP 连接，停止上游流
+                    upstream.close()
+                    raise
+                except Exception as e:
+                    log_error('/outline/stream', e)
+                    app_error = ensure_app_error(
+                        e, context={"endpoint": "/api/outline/stream"}
+                    )
+                    yield _sse_event('error', {
+                        'success': False,
+                        'error': app_error.to_dict(),
+                        'message': app_error.to_message(),
+                        'retryable': app_error.retryable,
+                    })
+                    yield _sse_event('finish', {'success': False})
+
+            return Response(
+                generate(),
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'X-Accel-Buffering': 'no',
+                }
+            )
+
+        except Exception as e:
+            log_error('/outline/stream', e)
+            return api_error_response(e, context={"endpoint": "/api/outline/stream"})
+
     @outline_bp.route('/outline/polish', methods=['POST'])
     def polish_page():
         """
@@ -186,6 +325,11 @@ def create_outline_blueprint():
             return api_error_response(e, context={"endpoint": "/api/outline/polish"})
 
     return outline_bp
+
+
+def _sse_event(event_type: str, data: dict) -> str:
+    """格式化单条 SSE 事件（与图片管线的事件写法一致）"""
+    return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 def _load_brand(brand_id):

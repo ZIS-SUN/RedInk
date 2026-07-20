@@ -29,6 +29,19 @@
         @imagesChange="handleImagesChange"
       />
 
+      <!-- 流式生成预览：实时滚动展示已生成的大纲文本 -->
+      <div
+        v-if="loading && streamingText"
+        ref="streamPreviewEl"
+        class="stream-preview"
+        role="status"
+        aria-live="polite"
+        aria-label="大纲生成中"
+      >
+        <pre class="stream-preview-text">{{ streamingText }}</pre>
+        <span class="stream-cursor" aria-hidden="true"></span>
+      </div>
+
       <!-- 示例主题：一键填入输入框，帮新手迈出第一步 -->
       <div class="topic-chips" role="list" aria-label="示例主题">
         <button
@@ -119,10 +132,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { nextTick, ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import { generateOutline, createHistory, getHistoryList, type HistoryRecord } from '../api'
+import {
+  generateOutline,
+  generateOutlineStream,
+  shouldFallbackToNonStream,
+  createHistory,
+  getHistoryList,
+  type HistoryRecord,
+  type OutlineResponse
+} from '../api'
+import { isAbortError } from '../api/client'
 import { getBrandList, type BrandKit } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
@@ -140,6 +162,13 @@ const topic = ref('')
 const loading = ref(false)
 const error = ref<AppError | null>(null)
 const composerRef = ref<InstanceType<typeof ComposerInput> | null>(null)
+
+// 流式生成：已收到的大纲文本（实时滚动展示）与预览容器引用
+const streamingText = ref('')
+const streamPreviewEl = ref<HTMLElement | null>(null)
+
+// 流式请求的取消控制器（卸载时 abort，参照 useGenerationRunner 的 abort 模式）
+let abortController: AbortController | null = null
 
 // 上传的图片文件
 const uploadedImageFiles = ref<File[]>([])
@@ -250,7 +279,19 @@ function handleImagesChange(images: File[]) {
 }
 
 /**
- * 生成大纲
+ * 流式增量到达时更新预览文本，并把预览区滚动到底部
+ */
+function handleStreamDelta(fullText: string) {
+  streamingText.value = fullText
+  nextTick(() => {
+    const el = streamPreviewEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+/**
+ * 生成大纲：无图时优先走 SSE 流式接口（首字 1-3 秒可见），
+ * 带图片、或流式接口不可用/网络异常时自动回退到既有非流式接口（用户无感）
  */
 async function handleGenerate() {
   if (loading.value) return
@@ -258,15 +299,35 @@ async function handleGenerate() {
 
   loading.value = true
   error.value = null
+  streamingText.value = ''
+  abortController = new AbortController()
 
   try {
     const imageFiles = uploadedImageFiles.value
+    const trimmedTopic = topic.value.trim()
+    const brandId = store.brandId || undefined
 
-    const result = await generateOutline(
-      topic.value.trim(),
-      imageFiles.length > 0 ? imageFiles : undefined,
-      store.brandId || undefined
-    )
+    let result: OutlineResponse & { has_images?: boolean }
+    if (imageFiles.length > 0) {
+      // 流式版只支持无图路径：带图片直接走既有非流式接口
+      result = await generateOutline(trimmedTopic, imageFiles, brandId)
+    } else {
+      try {
+        result = await generateOutlineStream(
+          trimmedTopic,
+          brandId,
+          { onDelta: handleStreamDelta },
+          { signal: abortController.signal }
+        )
+      } catch (err) {
+        // 离开页面导致的主动取消：静默结束，不回退也不报错
+        if (isAbortError(err)) return
+        if (!shouldFallbackToNonStream(err)) throw err
+        // 流式不可用（后端不支持/网络异常/断流）：无感回退非流式
+        streamingText.value = ''
+        result = await generateOutline(trimmedTopic, undefined, brandId)
+      }
+    }
 
     if (result.success && result.pages) {
       // 设置主题和大纲到 store
@@ -317,8 +378,16 @@ async function handleGenerate() {
     error.value = normalizeApiError(err, '生成大纲失败')
   } finally {
     loading.value = false
+    streamingText.value = ''
+    abortController = null
   }
 }
+
+// 卸载时中止流式 fetch，避免回调操作已卸载的组件
+onUnmounted(() => {
+  abortController?.abort()
+  abortController = null
+})
 </script>
 
 <style scoped>
@@ -358,6 +427,47 @@ async function handleGenerate() {
   font-weight: 600;
   margin-bottom: var(--space-4);
   letter-spacing: 0.02em;
+}
+
+/* 流式生成预览：轻量卡片，与 composer 的 loading 设计融合 */
+.stream-preview {
+  margin-top: var(--space-3);
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  background: var(--gray-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  animation: fadeIn 0.3s var(--ease-out);
+}
+
+.stream-preview-text {
+  display: inline;
+  margin: 0;
+  font-family: inherit;
+  font-size: var(--font-size-caption);
+  line-height: 1.7;
+  color: var(--text-sub);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 生成中的闪烁光标，提示内容仍在持续输出 */
+.stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--primary);
+  animation: streamBlink 1s steps(2, start) infinite;
+}
+
+@keyframes streamBlink {
+  to {
+    visibility: hidden;
+  }
 }
 
 /* 示例主题 chips：浅色圆角，移动端可横向滚动 */
@@ -644,7 +754,9 @@ async function handleGenerate() {
 @media (prefers-reduced-motion: reduce) {
   .hero-section,
   .home-error,
-  .recent-works {
+  .recent-works,
+  .stream-preview,
+  .stream-cursor {
     animation: none;
   }
 
