@@ -1,0 +1,39 @@
+name: Docker Persistence Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - scripts/smoke-docker-persistence.sh
+      - backend/data_catalog.py
+      - backend/paths.py
+      - backend/app.py
+      - .github/workflows/docker-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  persistence-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Docker runtime
+        run: |
+          docker info
+          docker compose version
+
+      - name: Run single-volume persistence smoke test
+        run: bash scripts/smoke-docker-persistence.sh
