@@ -13,31 +13,13 @@ env:
   IMAGE_NAME: redink
 
 jobs:
-  # 发布前先跑后端测试，测试失败不发布镜像
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout 代码
-        uses: actions/checkout@v4
-
-      - name: 设置 Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: 安装 uv
-        uses: astral-sh/setup-uv@v5
-
-      - name: 安装后端依赖
-        run: uv sync --locked
-
-      - name: 运行后端测试
-        run: uv run pytest -q
+  # 发布前先过统一质量门（后端测试 + 前端 lint/test/typecheck/build + 依赖审计），失败不发布镜像
+  quality:
+    uses: ./.github/workflows/quality.yml
 
   build-and-push:
     runs-on: ubuntu-latest
-    needs: test
+    needs: quality
 
     steps:
       - name: Checkout 代码
