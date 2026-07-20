@@ -26,6 +26,20 @@
         @imagesChange="handleImagesChange"
       />
 
+      <!-- 示例主题：一键填入输入框，帮新手迈出第一步 -->
+      <div class="topic-chips" role="list" aria-label="示例主题">
+        <button
+          v-for="example in EXAMPLE_TOPICS"
+          :key="example"
+          type="button"
+          class="topic-chip"
+          role="listitem"
+          @click="applyExampleTopic(example)"
+        >
+          {{ example }}
+        </button>
+      </div>
+
       <!-- 品牌人设选择器（可选） -->
       <div v-if="brands.length > 0" class="brand-select-row">
         <label class="brand-select-label" for="brand-select">品牌人设（可选）</label>
@@ -40,6 +54,43 @@
             {{ brand.name }}
           </option>
         </select>
+      </div>
+    </div>
+
+    <!-- 最近作品：有历史记录才渲染，安静的回访入口 -->
+    <div v-if="recentRecords.length > 0" class="recent-works">
+      <div class="recent-works-head">
+        <h2 class="recent-works-title">最近作品</h2>
+        <router-link to="/history" class="recent-works-more">查看全部</router-link>
+      </div>
+      <div class="recent-works-grid">
+        <div
+          v-for="record in recentRecords"
+          :key="record.id"
+          class="recent-card"
+          role="link"
+          tabindex="0"
+          @click="router.push('/history')"
+          @keydown.enter="router.push('/history')"
+        >
+          <div class="recent-thumb">
+            <img
+              v-if="record.thumbnail && record.task_id"
+              :src="`/api/images/${record.task_id}/${record.thumbnail}`"
+              alt=""
+              loading="lazy"
+              decoding="async"
+            />
+            <span v-else class="recent-thumb-placeholder">{{ record.title.charAt(0) }}</span>
+          </div>
+          <div class="recent-card-info">
+            <div class="recent-card-title" :title="record.title">{{ record.title }}</div>
+            <div class="recent-card-meta">
+              <span class="recent-status" :class="record.status">{{ statusLabel(record.status) }}</span>
+              <span>{{ formatRecentDate(record.updated_at) }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -68,7 +119,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import { generateOutline, createHistory } from '../api'
+import { generateOutline, createHistory, getHistoryList, type HistoryRecord } from '../api'
 import { getBrandList, type BrandKit } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
@@ -92,13 +143,71 @@ const uploadedImageFiles = ref<File[]>([])
 // 品牌档案列表（用于品牌人设选择器）
 const brands = ref<BrandKit[]>([])
 
+// 示例主题：点击即填入输入框
+const EXAMPLE_TOPICS = [
+  '秋冬显瘦穿搭公式',
+  '新手化妆避坑指南',
+  '周末城市漫步路线',
+  '打工人快手早餐',
+  '平价护肤红黑榜',
+  '居家收纳神器测评'
+]
+
+// 最近作品（最多 3 条；为空则整个区块不渲染）
+const recentRecords = ref<HistoryRecord[]>([])
+
 // 从大纲页「上一步」返回时，回填之前输入的主题
 onMounted(() => {
   if (store.topic && !topic.value) {
     topic.value = store.topic
   }
   loadBrands()
+  loadRecentWorks()
 })
+
+/**
+ * 点击示例主题：填入输入框并同步到 store
+ */
+function applyExampleTopic(example: string) {
+  topic.value = example
+  store.setTopic(example)
+}
+
+/**
+ * 拉取最近 3 条历史记录；加载失败静默（区块不渲染）
+ */
+async function loadRecentWorks() {
+  try {
+    const res = await getHistoryList(1, 3)
+    if (res.success) {
+      recentRecords.value = res.records.slice(0, 3)
+    }
+  } catch {
+    // 静默失败：首页不因历史接口异常报错
+  }
+}
+
+/**
+ * 历史记录状态 → 中文徽标文案
+ */
+function statusLabel(status: string): string {
+  const map: Record<string, string> = {
+    draft: '草稿',
+    generating: '生成中',
+    partial: '部分完成',
+    completed: '已完成',
+    error: '失败'
+  }
+  return map[status] || status
+}
+
+/**
+ * 最近作品的更新时间（M/D）
+ */
+function formatRecentDate(dateStr: string): string {
+  const d = new Date(dateStr)
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
 
 /**
  * 拉取品牌档案列表并确定默认选中项：
@@ -140,6 +249,7 @@ function handleImagesChange(images: File[]) {
  * 生成大纲
  */
 async function handleGenerate() {
+  if (loading.value) return
   if (!topic.value.trim()) return
 
   loading.value = true
@@ -178,9 +288,9 @@ async function handleGenerate() {
           console.error('创建历史记录失败:', historyResult.error || '未知错误')
           store.setRecordId(null)
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         // 创建历史记录异常，记录错误但不阻断流程
-        console.error('创建历史记录异常:', err.message || err)
+        console.error('创建历史记录异常:', err instanceof Error ? err.message : err)
         store.setRecordId(null)
       }
 
@@ -199,7 +309,7 @@ async function handleGenerate() {
     } else {
       error.value = normalizeApiError(result.error || result.error_message || '生成大纲失败', '生成大纲失败')
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     error.value = normalizeApiError(err, '生成大纲失败')
   } finally {
     loading.value = false
@@ -244,6 +354,174 @@ async function handleGenerate() {
   font-weight: 600;
   margin-bottom: var(--space-4);
   letter-spacing: 0.02em;
+}
+
+/* 示例主题 chips：浅色圆角，移动端可横向滚动 */
+.topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.topic-chip {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  background: var(--gray-1);
+  color: var(--text-sub);
+  font-size: var(--font-size-caption);
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.topic-chip:hover {
+  background: var(--primary-fade);
+  color: var(--primary);
+  border-color: var(--primary-fade);
+}
+
+/* 最近作品区：安静、克制的回访入口 */
+.recent-works {
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-5);
+  animation: fadeIn 0.6s var(--ease-out);
+}
+
+.recent-works-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-3);
+}
+
+.recent-works-title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-sub);
+}
+
+.recent-works-more {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.recent-works-more:hover {
+  color: var(--primary);
+}
+
+.recent-works-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.recent-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.recent-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+.recent-card:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+.recent-thumb {
+  width: 48px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--gray-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recent-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.recent-thumb-placeholder {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--gray-5);
+}
+
+.recent-card-info {
+  min-width: 0;
+}
+
+.recent-card-title {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: var(--space-1);
+}
+
+.recent-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.recent-status {
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--gray-2);
+  color: var(--text-sub);
+}
+
+.recent-status.completed {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.recent-status.generating {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+.recent-status.partial {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.recent-status.error {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 /* 品牌人设选择器 */
@@ -361,8 +639,13 @@ async function handleGenerate() {
 
 @media (prefers-reduced-motion: reduce) {
   .hero-section,
-  .home-error {
+  .home-error,
+  .recent-works {
     animation: none;
+  }
+
+  .recent-card:hover {
+    transform: none;
   }
 }
 
@@ -371,6 +654,24 @@ async function handleGenerate() {
   .hero-section {
     padding: var(--space-6) var(--space-4);
     margin-bottom: var(--space-6);
+  }
+
+  /* 示例主题改为单行横向滚动 */
+  .topic-chips {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: var(--space-1);
+  }
+
+  .topic-chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .recent-works-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

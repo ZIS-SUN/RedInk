@@ -99,7 +99,9 @@ const statusText = computed(() => {
   const map: Record<string, string> = {
     draft: '草稿',
     completed: '已完成',
-    generating: '生成中'
+    generating: '生成中',
+    partial: '部分完成',
+    error: '生成失败'
   }
   return map[props.record.status] || props.record.status
 })
@@ -268,6 +270,16 @@ const formattedDate = computed(() => {
 .status-badge.generating {
   background: var(--color-info-soft);
   color: var(--color-info);
+}
+
+.status-badge.partial {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.status-badge.error {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
 /* 底部区域 */

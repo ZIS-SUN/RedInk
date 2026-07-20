@@ -5,7 +5,7 @@
  * - 提供各平台预设尺寸（小红书 / 方形 / 抖音竖版 / 公众号头图 / B站封面）
  * - 纯函数计算 contain / cover 布局矩形（可在 node 环境单测）
  * - 将图片渲染到目标尺寸 canvas：留白（纯色 / 原图高斯模糊铺底）或裁切填满
- * - 可选右下角文字水印
+ * - 可选文字水印（五种位置，默认右下角，向后兼容旧调用）
  * - 导出 PNG Blob 与触发浏览器下载
  *
  * 注意：本模块不依赖任何 store / api，调用方在运行时传入图片地址即可。
@@ -21,17 +21,31 @@ export type BackgroundOption =
   | { type: 'color'; color: string }
   | { type: 'blur'; blurRadius?: number }
 
-/** 水印配置（右下角文字水印） */
+/** 水印位置（五选一） */
+export type WatermarkPosition =
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'bottom-center'
+
+/** 水印配置（文字水印，默认右下角） */
 export interface WatermarkOptions {
   text: string
-  /** 字号（px），默认按画布宽度自适应 */
+  /** 字号（px），默认按画布宽度自适应；显式指定时优先于 sizeRatio */
   fontSize?: number
   /** 透明度 0~1，默认 0.5 */
   opacity?: number
   /** 颜色，默认白色（带深色描影保证可读） */
   color?: string
-  /** 距右下角边距（px），默认 = 字号 */
+  /** 距边缘边距（px），默认 = 字号 */
   margin?: number
+  /** 位置，默认 'bottom-right'（保持原行为） */
+  position?: WatermarkPosition
+  /** 字号占画布宽度比例（如 0.035 = 3.5%），fontSize 未指定时生效 */
+  sizeRatio?: number
+  /** 是否绘制深色描影（浅色水印建议开启），默认 true（保持原行为） */
+  shadow?: boolean
 }
 
 /** 单次导出参数 */
@@ -124,6 +138,46 @@ export function computeCoverRect(
 /** 默认水印字号：按画布宽度自适应，限制在 14~64px */
 export function computeDefaultWatermarkFontSize(canvasWidth: number): number {
   return Math.min(64, Math.max(14, Math.round(canvasWidth * 0.03)))
+}
+
+/** 按占宽比例计算水印字号（小/中/大 ≈ 2.5%/3.5%/5%），限制在 12~160px */
+export function computeWatermarkFontSize(canvasWidth: number, ratio: number): number {
+  return Math.min(160, Math.max(12, Math.round(canvasWidth * ratio)))
+}
+
+/** 水印锚点：坐标 + 文字对齐方式（纯函数，便于单测） */
+export interface WatermarkAnchor {
+  x: number
+  y: number
+  textAlign: CanvasTextAlign
+  textBaseline: CanvasTextBaseline
+}
+
+/** 按位置计算水印锚点，默认右下角 */
+export function computeWatermarkAnchor(
+  position: WatermarkPosition,
+  dstWidth: number,
+  dstHeight: number,
+  margin: number
+): WatermarkAnchor {
+  switch (position) {
+    case 'top-left':
+      return { x: margin, y: margin, textAlign: 'left', textBaseline: 'top' }
+    case 'top-right':
+      return { x: dstWidth - margin, y: margin, textAlign: 'right', textBaseline: 'top' }
+    case 'bottom-left':
+      return { x: margin, y: dstHeight - margin, textAlign: 'left', textBaseline: 'bottom' }
+    case 'bottom-center':
+      return {
+        x: Math.round(dstWidth / 2),
+        y: dstHeight - margin,
+        textAlign: 'center',
+        textBaseline: 'bottom'
+      }
+    case 'bottom-right':
+    default:
+      return { x: dstWidth - margin, y: dstHeight - margin, textAlign: 'right', textBaseline: 'bottom' }
+  }
 }
 
 /** 高斯模糊铺底的默认模糊半径：按画布短边自适应 */
@@ -224,7 +278,7 @@ function drawBlurBackground(
   ctx.restore()
 }
 
-/** 绘制右下角文字水印 */
+/** 绘制文字水印（位置可配，默认右下角） */
 function drawWatermark(
   ctx: CanvasRenderingContext2D,
   options: WatermarkOptions,
@@ -234,22 +288,29 @@ function drawWatermark(
   const text = options.text.trim()
   if (!text) return
 
-  const fontSize = options.fontSize ?? computeDefaultWatermarkFontSize(dstWidth)
+  const fontSize =
+    options.fontSize ??
+    (options.sizeRatio != null
+      ? computeWatermarkFontSize(dstWidth, options.sizeRatio)
+      : computeDefaultWatermarkFontSize(dstWidth))
   const opacity = options.opacity ?? 0.5
   const color = options.color ?? '#FFFFFF'
   const margin = options.margin ?? fontSize
+  const anchor = computeWatermarkAnchor(options.position ?? 'bottom-right', dstWidth, dstHeight, margin)
 
   ctx.save()
   ctx.globalAlpha = Math.min(1, Math.max(0, opacity))
   ctx.font = `600 ${fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`
-  ctx.textAlign = 'right'
-  ctx.textBaseline = 'bottom'
-  // 深色描影保证浅色背景下依然可读
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
-  ctx.shadowBlur = Math.max(2, Math.round(fontSize / 8))
-  ctx.shadowOffsetY = 1
+  ctx.textAlign = anchor.textAlign
+  ctx.textBaseline = anchor.textBaseline
+  if (options.shadow ?? true) {
+    // 深色描影保证浅色背景下依然可读
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'
+    ctx.shadowBlur = Math.max(2, Math.round(fontSize / 8))
+    ctx.shadowOffsetY = 1
+  }
   ctx.fillStyle = color
-  ctx.fillText(text, dstWidth - margin, dstHeight - margin)
+  ctx.fillText(text, anchor.x, anchor.y)
   ctx.restore()
 }
 

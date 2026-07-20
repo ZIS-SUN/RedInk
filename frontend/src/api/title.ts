@@ -9,6 +9,8 @@ export interface TitleCandidate {
   score: number
   /** 命中的爆款要素标签，如：数字 / 悬念 / 身份认同 / 紧迫感 */
   elements: string[]
+  /** 命中的品牌禁用词（仅在使用了设置禁用词的品牌人设时返回） */
+  banned_word_hits?: string[]
 }
 
 export interface TitleResponse {

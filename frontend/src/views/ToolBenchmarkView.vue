@@ -7,14 +7,56 @@
 
     <!-- 输入区 -->
     <div class="card benchmark-card">
-      <label class="field-label" for="benchmark-input">对标内容（标题 + 正文）</label>
-      <textarea
-        id="benchmark-input"
-        v-model="content"
-        class="benchmark-textarea"
-        rows="9"
-        placeholder="把你看到的爆款内容完整粘贴到这里（建议包含标题和正文）…"
-      ></textarea>
+      <!-- 输入模式切换 -->
+      <div class="mode-tabs" role="tablist">
+        <button
+          type="button"
+          class="mode-tab"
+          :class="{ active: mode === 'paste' }"
+          role="tab"
+          :aria-selected="mode === 'paste'"
+          @click="mode = 'paste'"
+        >
+          粘贴内容
+        </button>
+        <button
+          type="button"
+          class="mode-tab"
+          :class="{ active: mode === 'url' }"
+          role="tab"
+          :aria-selected="mode === 'url'"
+          @click="mode = 'url'"
+        >
+          网页链接
+        </button>
+      </div>
+
+      <div v-if="mode === 'paste'" class="input-area">
+        <label class="field-label" for="benchmark-input">对标内容（标题 + 正文）</label>
+        <textarea
+          id="benchmark-input"
+          v-model="content"
+          class="benchmark-textarea"
+          rows="9"
+          placeholder="把你看到的爆款内容完整粘贴到这里（建议包含标题和正文）…"
+        ></textarea>
+      </div>
+
+      <div v-else class="input-area">
+        <label class="field-label" for="benchmark-url-input">对标内容链接</label>
+        <input
+          id="benchmark-url-input"
+          v-model="url"
+          type="url"
+          class="topic-input"
+          placeholder="粘贴文章链接，如 https://example.com/article"
+          :disabled="loading"
+          @keyup.enter="handleAnalyze"
+        />
+        <p class="input-hint">
+          支持公开可访问的文章页面。小红书 / 抖音等 App 内的内容通常无法直接抓取，建议切到「粘贴内容」复制正文
+        </p>
+      </div>
 
       <div class="field-block">
         <label class="field-label" for="my-topic-input">
@@ -34,13 +76,35 @@
         <button
           type="button"
           class="btn btn-primary benchmark-btn"
-          :disabled="loading || !content.trim()"
+          :disabled="loading || !!sending || !canAnalyze"
           @click="handleAnalyze"
         >
           <span v-if="loading" class="spinner-sm" aria-hidden="true"></span>
           {{ loading ? '拆解中…' : '开始拆解' }}
         </button>
       </div>
+    </div>
+
+    <!-- 最近拆解（本地历史） -->
+    <div v-if="history.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showHistory = !showHistory">
+        <span class="history-title">最近拆解（{{ history.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showHistory }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showHistory" class="history-list">
+        <li v-for="entry in history" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromHistory(entry)">
+            <span class="history-summary">{{ entry.summary }}</span>
+            <span class="history-time">{{ formatTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <!-- 加载骨架 -->
@@ -125,6 +189,32 @@
           </div>
           <p class="analysis-text template-text">{{ analysis.reusable_template }}</p>
         </div>
+
+        <!-- 一键送创作 -->
+        <div class="creation-bar">
+          <button
+            v-if="draft"
+            type="button"
+            class="btn btn-primary creation-btn"
+            :disabled="loading || !!sending"
+            @click="sendDraftToCreation"
+          >
+            <span v-if="sending === 'draft'" class="spinner-sm" aria-hidden="true"></span>
+            {{ sending === 'draft' ? '正在生成大纲…' : '用仿写草稿创作' }}
+          </button>
+          <button
+            v-if="analysis.reusable_template"
+            type="button"
+            class="btn creation-btn"
+            :class="draft ? 'btn-secondary' : 'btn-primary'"
+            :disabled="loading || !!sending"
+            @click="openTopicDialog"
+          >
+            <span v-if="sending === 'template'" class="spinner-sm" aria-hidden="true"></span>
+            {{ sending === 'template' ? '正在生成大纲…' : '以此结构创作我的主题' }}
+          </button>
+        </div>
+        <p class="creation-tip">送创作后会自动转成图文大纲，进入创作中心继续编辑和生成图片</p>
       </div>
 
       <!-- 仿写草稿区 -->
@@ -155,6 +245,33 @@
       <p class="empty-example">拆解维度：钩子 · 结构 · 情绪 · 受众 · 爆点 · 可复用模板</p>
     </div>
 
+    <!-- 「以此结构创作」主题输入弹窗 -->
+    <div v-if="topicDialogVisible" class="topic-dialog-mask" @click.self="closeTopicDialog">
+      <div class="card topic-dialog" role="dialog" aria-modal="true" aria-labelledby="topic-dialog-title">
+        <h3 id="topic-dialog-title" class="topic-dialog-title">以此结构创作我的主题</h3>
+        <p class="topic-dialog-desc">AI 会严格按刚拆解出的爆款结构模板，围绕你的主题生成图文大纲</p>
+        <input
+          ref="topicDialogInputEl"
+          v-model="topicDialogInput"
+          class="topic-input"
+          type="text"
+          placeholder="例如：新手如何 30 天学会做短视频"
+          @keyup.enter="confirmTemplateCreation"
+        />
+        <div class="topic-dialog-actions">
+          <button type="button" class="btn btn-secondary" @click="closeTopicDialog">取消</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            :disabled="!topicDialogInput.trim()"
+            @click="confirmTemplateCreation"
+          >
+            开始创作
+          </button>
+        </div>
+      </div>
+    </div>
+
     <ErrorCard
       v-if="error"
       class="benchmark-error"
@@ -167,12 +284,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useGeneratorStore } from '../stores/generator'
 import { analyzeBenchmark, type BenchmarkAnalysis } from '../api/benchmark'
+import { linkToOutline } from '../api/link'
+import type { Page } from '../api/types'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  addEntry,
+  createEntry,
+  loadHistory,
+  saveHistory,
+  type BenchmarkHistoryEntry,
+} from '../utils/benchmarkHistory'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
+const router = useRouter()
+const store = useGeneratorStore()
+
+const mode = ref<'paste' | 'url'>('paste')
 const content = ref('')
+const url = ref('')
 const myTopic = ref('')
 const analysis = ref<BenchmarkAnalysis | null>(null)
 const draft = ref('')
@@ -180,25 +313,49 @@ const loading = ref(false)
 const error = ref<AppError | null>(null)
 const copiedKey = ref('')
 
+// 送创作加载态：'' 空闲 | 'draft' 仿写草稿 | 'template' 结构模板
+const sending = ref<'' | 'draft' | 'template'>('')
+
+// 「以此结构创作」主题弹窗
+const topicDialogVisible = ref(false)
+const topicDialogInput = ref('')
+const topicDialogInputEl = ref<HTMLInputElement | null>(null)
+
+// 本地历史
+const history = ref<BenchmarkHistoryEntry[]>(loadHistory())
+const showHistory = ref(false)
+
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 
+onUnmounted(() => {
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+})
+
+const canAnalyze = computed(() =>
+  mode.value === 'paste' ? !!content.value.trim() : !!url.value.trim()
+)
+
 async function handleAnalyze() {
-  if (!content.value.trim() || loading.value) return
+  if (!canAnalyze.value || loading.value || sending.value) return
 
   loading.value = true
   error.value = null
   analysis.value = null
   draft.value = ''
 
+  const input = mode.value === 'paste' ? content.value.trim() : url.value.trim()
+
   try {
-    const result = await analyzeBenchmark(
-      content.value.trim(),
-      myTopic.value.trim() || undefined
-    )
+    const result = await analyzeBenchmark({
+      content: mode.value === 'paste' ? input : undefined,
+      url: mode.value === 'url' ? input : undefined,
+      myTopic: myTopic.value.trim() || undefined,
+    })
 
     if (result.success && result.analysis) {
       analysis.value = result.analysis
       draft.value = result.draft || ''
+      recordHistory(input, result.analysis, result.draft || '')
     } else {
       error.value = normalizeApiError(result.error || result.error_message || '对标拆解失败', '对标拆解失败')
     }
@@ -208,6 +365,108 @@ async function handleAnalyze() {
     loading.value = false
   }
 }
+
+// ==================== 本地历史 ====================
+
+function recordHistory(input: string, resultAnalysis: BenchmarkAnalysis, resultDraft: string) {
+  const entry = createEntry({
+    input,
+    analysis: resultAnalysis,
+    draft: resultDraft,
+    myTopic: myTopic.value.trim(),
+  })
+  history.value = addEntry(history.value, entry)
+  saveHistory(history.value)
+}
+
+/** 点击历史条目：回填结果区，不重新调 AI */
+function restoreFromHistory(entry: BenchmarkHistoryEntry) {
+  if (loading.value || sending.value) return
+  analysis.value = entry.analysis
+  draft.value = entry.draft
+  if (entry.myTopic) myTopic.value = entry.myTopic
+  error.value = null
+}
+
+function formatTime(timestamp: number): string {
+  const d = new Date(timestamp)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// ==================== 一键送创作 ====================
+
+/**
+ * 长文本 → 大纲 → 写入 store → 跳转创作中心（照抄 ToolLinkView.sendToCreation 模式）
+ */
+async function sendTextToCreation(text: string, fallbackTopic: string, kind: 'draft' | 'template') {
+  if (loading.value || sending.value) return
+
+  sending.value = kind
+  error.value = null
+
+  try {
+    const result = await linkToOutline({ text })
+
+    if (result.success && result.pages && result.pages.length > 0) {
+      const pages: Page[] = result.pages
+      pages.forEach((page, i) => {
+        page.index = i
+      })
+      const raw = pages.map(page => page.content).join('\n\n<page>\n\n')
+
+      store.setTopic((fallbackTopic || result.topic || '对标仿创').trim())
+      store.setOutline(raw, pages)
+      // 清空旧的历史记录 ID，让大纲页为本次内容创建新的历史记录
+      store.setRecordId(null)
+
+      router.push('/outline')
+    } else {
+      error.value = normalizeApiError(
+        result.error || result.error_message || '生成大纲失败',
+        '生成大纲失败'
+      )
+    }
+  } catch (err: unknown) {
+    error.value = normalizeApiError(err, '生成大纲失败')
+  } finally {
+    sending.value = ''
+  }
+}
+
+/** 「用仿写草稿创作」：把 draft 转成大纲后进入创作流程 */
+function sendDraftToCreation() {
+  if (!draft.value) return
+  sendTextToCreation(draft.value, myTopic.value.trim(), 'draft')
+}
+
+function openTopicDialog() {
+  if (loading.value || sending.value) return
+  topicDialogInput.value = myTopic.value.trim()
+  topicDialogVisible.value = true
+  nextTick(() => topicDialogInputEl.value?.focus())
+}
+
+function closeTopicDialog() {
+  topicDialogVisible.value = false
+}
+
+/** 「以此结构创作我的主题」：主题 + 套路模板拼成长文，转大纲后进入创作流程 */
+function confirmTemplateCreation() {
+  const topic = topicDialogInput.value.trim()
+  if (!topic || !analysis.value?.reusable_template) return
+
+  topicDialogVisible.value = false
+  const text = [
+    '请严格按以下爆款结构模板创作：',
+    `主题：${topic}`,
+    `结构模板：\n${analysis.value.reusable_template}`,
+  ].join('\n\n')
+
+  sendTextToCreation(text, topic, 'template')
+}
+
+// ==================== 复制 ====================
 
 async function copyText(text: string, key: string) {
   try {
@@ -276,6 +535,49 @@ function copyDraft() {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* 输入模式切换（与链接转图文页保持一致的视觉） */
+.mode-tabs {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: var(--space-3);
+}
+
+.mode-tab {
+  padding: 8px 18px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-full);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.mode-tab:hover {
+  color: var(--text-main);
+  background: var(--gray-1);
+}
+
+.mode-tab.active {
+  background: var(--primary-fade);
+  color: var(--primary);
+}
+
+.input-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.input-hint {
+  font-size: 13px;
+  color: var(--text-sub);
+  line-height: 1.6;
+  margin: 0;
 }
 
 .field-label {
@@ -350,6 +652,85 @@ function copyDraft() {
 
 .benchmark-btn {
   min-width: 180px;
+}
+
+/* 最近拆解（本地历史） */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* 加载骨架（纯 CSS shimmer） */
@@ -515,6 +896,26 @@ function copyDraft() {
   font-weight: 500;
 }
 
+/* 一键送创作 */
+.creation-bar {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.creation-btn {
+  min-width: 200px;
+}
+
+.creation-tip {
+  margin-top: var(--space-2);
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-sub);
+}
+
 .draft-text {
   font-size: 15px;
   line-height: 1.8;
@@ -527,6 +928,47 @@ function copyDraft() {
   margin-top: var(--space-3);
   font-size: 13px;
   color: var(--text-sub);
+}
+
+/* 「以此结构创作」主题弹窗 */
+.topic-dialog-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 16px;
+  animation: fadeIn 0.2s var(--ease-out);
+}
+
+.topic-dialog {
+  width: min(480px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.topic-dialog-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin: 0;
+}
+
+.topic-dialog-desc {
+  font-size: 13.5px;
+  color: var(--text-sub);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.topic-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 /* 空/初始态 */
@@ -598,7 +1040,8 @@ function copyDraft() {
 @media (prefers-reduced-motion: reduce) {
   .result-card,
   .empty-state,
-  .benchmark-error {
+  .benchmark-error,
+  .topic-dialog-mask {
     animation: none;
   }
 
@@ -618,7 +1061,8 @@ function copyDraft() {
     padding: var(--space-5);
   }
 
-  .benchmark-btn {
+  .benchmark-btn,
+  .creation-btn {
     width: 100%;
   }
 

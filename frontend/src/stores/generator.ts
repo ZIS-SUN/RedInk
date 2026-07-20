@@ -16,6 +16,7 @@
 import { defineStore } from 'pinia'
 import type { Page } from '../api/types'
 import { withCacheBuster } from '../utils/url'
+import { removeAt } from '../utils/contentEdit'
 
 /**
  * 生成的图片信息
@@ -23,9 +24,11 @@ import { withCacheBuster } from '../utils/url'
 export interface GeneratedImage {
   index: number  // 图片对应的页面索引
   url: string    // 图片URL
-  status: 'generating' | 'done' | 'error' | 'retrying'  // 生成状态
+  status: 'queued' | 'generating' | 'done' | 'error' | 'retrying'  // 生成状态
   error?: string      // 错误信息
   retryable?: boolean // 是否可以重试
+  startedAt?: number  // 本张图开始生成的时间（epoch 毫秒），用于进度估算
+  durationMs?: number // 本张图完成耗时（毫秒），用作后续图片的时长样本
 }
 
 /**
@@ -57,6 +60,7 @@ export interface GeneratorState {
     current: number  // 当前已完成的数量
     total: number    // 总共需要生成的数量
     status: 'idle' | 'generating' | 'done' | 'error'
+    phase?: string   // 当前生成阶段：'cover' 封面 / 'content' 内容页
   }
 
   // 生成的图片结果列表
@@ -75,6 +79,11 @@ export interface GeneratorState {
 
   // 历史记录ID（用于保存和加载历史记录）
   recordId: string | null
+
+  // 大纲在上次生成开始之后是否被编辑过。
+  // 为 true 时进入生成页会跳过"从历史恢复旧图"，强制走全新生成，确保编辑生效；
+  // 在 startGeneration()（新一轮生成已使用最新大纲）时清除
+  outlineDirty: boolean
 
   // 用户上传的参考图片（File对象，不会被持久化）
   userImages: File[]
@@ -126,6 +135,7 @@ function isValidPersistedState(data: unknown): data is Partial<GeneratorState> {
   if (d.recordId !== undefined && d.recordId !== null && typeof d.recordId !== 'string') return false
   if (d.stylePrompt !== undefined && typeof d.stylePrompt !== 'string') return false
   if (d.brandId !== undefined && typeof d.brandId !== 'string') return false
+  if (d.outlineDirty !== undefined && typeof d.outlineDirty !== 'boolean') return false
 
   return true
 }
@@ -171,6 +181,7 @@ function saveState(state: GeneratorState) {
       stylePrompt: state.stylePrompt,        // 本次生成的风格提示词
       brandId: state.brandId,                // 本次创作使用的品牌档案ID
       recordId: state.recordId,              // 历史记录ID
+      outlineDirty: state.outlineDirty,      // 大纲是否在上次生成后被编辑过
       content: state.content,                // 生成的内容（标题、文案、标签）
       outlineStatus: state.outlineStatus,    // 大纲生成状态
       lastSavedAt: state.lastSavedAt         // 最后保存时间
@@ -218,6 +229,9 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 历史记录ID
       recordId: saved.recordId || null,
+
+      // 大纲是否在上次生成后被编辑过
+      outlineDirty: saved.outlineDirty === true,
 
       // 用户上传的参考图片（不从 localStorage 恢复）
       userImages: [],
@@ -270,7 +284,24 @@ export const useGeneratorStore = defineStore('generator', {
         page.content = content
         // 同步更新 raw 文本
         this.syncRawFromPages()
+        this.markOutlineDirty()
       }
+    },
+
+    /**
+     * 标记大纲被用户编辑过（增删改页、排序）。
+     * 生成页据此跳过"从历史恢复旧图"，强制重新生成，避免编辑静默失效。
+     */
+    markOutlineDirty() {
+      this.outlineDirty = true
+    },
+
+    /**
+     * 设置大纲编辑标记（从历史打开新记录等场景需要显式清除残留标记）
+     * @param dirty 是否被编辑过
+     */
+    setOutlineDirty(dirty: boolean) {
+      this.outlineDirty = dirty
     },
 
     /**
@@ -295,6 +326,7 @@ export const useGeneratorStore = defineStore('generator', {
       })
       // 同步更新 raw 文本
       this.syncRawFromPages()
+      this.markOutlineDirty()
     },
 
     /**
@@ -311,6 +343,7 @@ export const useGeneratorStore = defineStore('generator', {
       this.outline.pages.push(newPage)
       // 同步更新 raw 文本
       this.syncRawFromPages()
+      this.markOutlineDirty()
     },
 
     /**
@@ -332,6 +365,7 @@ export const useGeneratorStore = defineStore('generator', {
       })
       // 同步更新 raw 文本
       this.syncRawFromPages()
+      this.markOutlineDirty()
     },
 
     /**
@@ -352,6 +386,7 @@ export const useGeneratorStore = defineStore('generator', {
       this.outline.pages = pages
       // 同步更新 raw 文本
       this.syncRawFromPages()
+      this.markOutlineDirty()
     },
 
     /**
@@ -363,12 +398,33 @@ export const useGeneratorStore = defineStore('generator', {
       this.progress.current = 0
       this.progress.total = this.outline.pages.length
       this.progress.status = 'generating'
-      // 为每个页面创建对应的图片占位对象
+      // 新一轮生成基于最新大纲，编辑标记归零
+      this.outlineDirty = false
+      // 为每个页面创建对应的图片占位对象（串行生成，初始都在排队中）
       this.images = this.outline.pages.map(page => ({
         index: page.index,
         url: '',
-        status: 'generating'
+        status: 'queued'
       }))
+    },
+
+    /**
+     * 标记某张图片开始生成（SSE progress 事件触发）
+     * @param index 页面索引
+     * @param phase 当前阶段：'cover' 封面 / 'content' 内容页
+     */
+    markImageStarted(index: number, phase?: string) {
+      const image = this.images.find(img => img.index === index)
+      if (image && (image.status === 'queued' || image.status === 'generating')) {
+        image.status = 'generating'
+        // 已有 startedAt 时不覆盖，避免重复事件重置计时
+        if (!image.startedAt) {
+          image.startedAt = Date.now()
+        }
+      }
+      if (phase) {
+        this.progress.phase = phase
+      }
     },
 
     /**
@@ -394,6 +450,11 @@ export const useGeneratorStore = defineStore('generator', {
       }
       if (status === 'error') {
         image.retryable = true
+      }
+
+      // 完成时记录单张耗时，作为后续图片的预期时长样本
+      if (status === 'done' && image.startedAt && image.durationMs === undefined) {
+        image.durationMs = Date.now() - image.startedAt
       }
 
       // 成功完成时增加计数（只在从"未完成"变为"完成"时）
@@ -451,14 +512,15 @@ export const useGeneratorStore = defineStore('generator', {
     },
 
     /**
-     * 把所有仍处于 generating/retrying 状态的图片批量置为 error（可重试）
+     * 把所有仍处于 queued/generating/retrying 状态的图片批量置为 error（可重试）
      * 用于 SSE 断流/网络中断时，让"补全失败图片"入口可用
      * @param error 错误信息，默认为断流提示
      */
     markGeneratingAsError(error: string = '生成中断，请重试') {
       let changed = false
       this.images.forEach(image => {
-        if (image.status === 'generating' || image.status === 'retrying') {
+        // 排队中的图片也应可重试：中断时同样置为 error
+        if (image.status === 'queued' || image.status === 'generating' || image.status === 'retrying') {
           image.status = 'error'
           image.error = image.error || error
           image.retryable = true
@@ -488,6 +550,9 @@ export const useGeneratorStore = defineStore('generator', {
       const image = this.images.find(img => img.index === index)
       if (image) {
         image.status = 'retrying'
+        // 重试视为重新开始计时
+        image.startedAt = Date.now()
+        delete image.durationMs
       }
     },
 
@@ -557,6 +622,9 @@ export const useGeneratorStore = defineStore('generator', {
       // 清空历史记录ID
       this.recordId = null
 
+      // 清除大纲编辑标记
+      this.outlineDirty = false
+
       // 清空用户上传的参考图片
       this.userImages = []
 
@@ -599,6 +667,43 @@ export const useGeneratorStore = defineStore('generator', {
       this.content.tags = tags
       this.content.status = 'done'
       this.content.error = undefined
+    },
+
+    /**
+     * 更新指定索引的标题文本（结果页 inline 编辑用）
+     * 空白文本视为无效输入，直接忽略
+     * @param index 标题索引
+     * @param text 新标题文本
+     */
+    updateContentTitle(index: number, text: string) {
+      const trimmed = text.trim()
+      if (!trimmed) return
+      if (index < 0 || index >= this.content.titles.length) return
+      this.content.titles[index] = trimmed
+    },
+
+    /**
+     * 删除指定索引的标题
+     * @param index 标题索引
+     */
+    removeContentTitle(index: number) {
+      this.content.titles = removeAt(this.content.titles, index)
+    },
+
+    /**
+     * 更新文案内容（结果页编辑用）
+     * @param text 新文案全文
+     */
+    updateCopywriting(text: string) {
+      this.content.copywriting = text
+    },
+
+    /**
+     * 整体替换标签列表（结果页增删标签用）
+     * @param tags 新标签数组
+     */
+    updateTags(tags: string[]) {
+      this.content.tags = tags
     },
 
     /**
@@ -659,27 +764,6 @@ export const useGeneratorStore = defineStore('generator', {
     },
 
     /**
-     * 检查是否有未保存的更改
-     * @returns true-有未保存的更改, false-没有未保存的更改
-     */
-    hasUnsavedChanges(): boolean {
-      // 如果没有历史记录ID，说明从未保存过
-      if (!this.recordId) {
-        // 如果有任何实质性的数据（主题、大纲、图片），则认为有未保存的更改
-        return !!(this.topic || this.outline.pages.length > 0 || this.images.length > 0)
-      }
-
-      // 如果有历史记录ID但没有保存时间，认为有未保存的更改
-      if (!this.lastSavedAt) {
-        return true
-      }
-
-      // 可以根据具体需求添加更多判断逻辑
-      // 例如：检查最后修改时间是否晚于最后保存时间
-      return false
-    },
-
-    /**
      * 保存当前状态到 localStorage
      * 用于浏览器刷新后恢复状态
      */
@@ -727,6 +811,7 @@ export function setupAutoSave(debounceMs: number = 500) {
       stylePrompt: store.stylePrompt,        // 本次生成的风格提示词
       brandId: store.brandId,                // 本次创作使用的品牌档案ID
       recordId: store.recordId,              // 历史记录ID
+      outlineDirty: store.outlineDirty,      // 大纲是否在上次生成后被编辑过
       content: store.content,                // 生成的内容
       outlineStatus: store.outlineStatus,    // 大纲生成状态
       lastSavedAt: store.lastSavedAt         // 最后保存时间

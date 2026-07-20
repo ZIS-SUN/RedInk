@@ -22,6 +22,38 @@ export async function updateConfig(config: Partial<Config>): Promise<{
   return response.data
 }
 
+export async function getImagePrompt(): Promise<{
+  success: boolean
+  template?: string
+  is_custom?: boolean
+  placeholders?: string[]
+  error?: AppError | string
+  error_message?: string
+}> {
+  const response = await http.get('/config/image-prompt')
+  return response.data
+}
+
+export async function saveImagePrompt(template: string): Promise<{
+  success: boolean
+  message?: string
+  error?: AppError | string
+  error_message?: string
+}> {
+  const response = await http.put('/config/image-prompt', { template })
+  return response.data
+}
+
+export async function resetImagePrompt(): Promise<{
+  success: boolean
+  message?: string
+  error?: AppError | string
+  error_message?: string
+}> {
+  const response = await http.delete('/config/image-prompt')
+  return response.data
+}
+
 export async function testConnection(config: {
   type: string
   provider_name?: string

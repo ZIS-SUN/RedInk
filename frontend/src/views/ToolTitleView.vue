@@ -129,6 +129,15 @@
                 :key="el"
                 class="element-tag"
               >{{ el }}</span>
+              <!-- 品牌禁用词命中警示（仅使用了设置禁用词的品牌人设时可能出现） -->
+              <span
+                v-if="item.banned_word_hits && item.banned_word_hits.length > 0"
+                class="banned-tag"
+                role="alert"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+                命中禁用词：{{ item.banned_word_hits.join('、') }}
+              </span>
             </div>
           </div>
           <div class="card-side">
@@ -181,7 +190,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { generateTitles, type TitleCandidate } from '../api/title'
 import { getBrandList, type BrandKit } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
@@ -228,6 +237,10 @@ onMounted(async () => {
 })
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
+
+onUnmounted(() => {
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+})
 
 const activeStyleHint = computed(() =>
   STYLES.find(s => s.value === style.value)?.hint ?? ''
@@ -680,6 +693,20 @@ async function handleCopy(text: string) {
   color: var(--text-sub);
   font-size: 12px;
   font-weight: 500;
+}
+
+/* 品牌禁用词命中的红色警示标记 */
+.banned-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .card-side {

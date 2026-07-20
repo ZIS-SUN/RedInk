@@ -92,17 +92,6 @@ export async function updateHistory(
   }
 }
 
-export async function checkHistoryExists(recordId: string): Promise<boolean> {
-  try {
-    const response = await http.get(`/history/${recordId}/exists`, {
-      timeout: 5000
-    })
-    return response.data.exists === true
-  } catch {
-    return false
-  }
-}
-
 export async function deleteHistory(recordId: string): Promise<{
   success: boolean
   error?: AppError | string

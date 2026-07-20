@@ -37,6 +37,18 @@
         </div>
       </div>
 
+      <div class="field-group account-data-row">
+        <label class="account-data-toggle">
+          <input
+            v-model="useAccountData"
+            type="checkbox"
+            class="account-data-checkbox"
+          />
+          <span class="account-data-label">结合我的账号数据</span>
+        </label>
+        <span class="account-data-hint">需先在数据复盘工具录入笔记数据</span>
+      </div>
+
       <button
         type="button"
         class="btn btn-primary generate-btn"
@@ -61,6 +73,10 @@
 
     <!-- 结果区 -->
     <div v-if="topics.length > 0" class="result-section">
+      <div v-if="accountContextUsed" class="account-context-banner" role="status">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        已结合你的账号数据生成
+      </div>
       <div class="result-toolbar">
         <span class="result-count">
           共 {{ topics.length }} 条灵感<template v-if="formatFilter !== ALL_FORMATS">，筛选后 {{ displayTopics.length }} 条</template>
@@ -117,7 +133,7 @@
                 class="use-btn"
                 @click="handleUse(item)"
               >
-                用于创作
+                用这个选题创作
               </button>
               <button
                 type="button"
@@ -157,7 +173,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { generateTopics, type TopicIdea } from '../api/topic'
 import { useGeneratorStore } from '../stores/generator'
@@ -172,6 +188,8 @@ const store = useGeneratorStore()
 
 const niche = ref('')
 const platform = ref<string>(PLATFORMS[0])
+const useAccountData = ref(false)
+const accountContextUsed = ref(false)
 const loading = ref(false)
 const hasGenerated = ref(false)
 const error = ref<AppError | null>(null)
@@ -181,6 +199,10 @@ const formatFilter = ref(ALL_FORMATS)
 const copiedTitle = ref('')
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
+
+onUnmounted(() => {
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+})
 
 // 结果中出现过的内容形式，用于筛选 chips
 const formatOptions = computed(() => {
@@ -219,11 +241,13 @@ async function handleGenerate() {
   try {
     const result = await generateTopics({
       niche: niche.value.trim(),
-      platform: platform.value
+      platform: platform.value,
+      ...(useAccountData.value ? { use_account_data: true } : {})
     })
 
     if (result.success && result.topics) {
       topics.value = result.topics
+      accountContextUsed.value = result.account_context_used === true
       hasGenerated.value = true
     } else {
       error.value = normalizeApiError(
@@ -239,10 +263,18 @@ async function handleGenerate() {
 }
 
 /**
- * 把选题用于创作：写入 generator store 的主题，跳回首页创作流程
+ * 把选题用于创作：把标题、切入角度、建议标签组合成更丰富的主题文本
+ * 写入 generator store，跳回首页创作流程（空字段跳过对应行）
  */
 function handleUse(item: TopicIdea) {
-  store.setTopic(item.title)
+  const lines = [item.title]
+  if (item.angle.trim()) {
+    lines.push(`切入角度：${item.angle.trim()}`)
+  }
+  if (item.tags.length > 0) {
+    lines.push(`建议标签：${item.tags.join(' ')}`)
+  }
+  store.setTopic(lines.join('\n'))
   router.push('/')
 }
 
@@ -398,6 +430,42 @@ async function handleCopy(item: TopicIdea) {
   color: var(--primary);
 }
 
+/* ── 结合账号数据开关 ─────────────── */
+.account-data-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.account-data-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.account-data-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.account-data-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.account-data-hint {
+  font-size: var(--font-size-caption);
+  color: var(--text-sub);
+  opacity: 0.85;
+}
+
 /* 生成按钮基于全局 .btn btn-primary，仅覆盖布局 */
 .generate-btn {
   margin-top: 22px;
@@ -462,6 +530,20 @@ async function handleCopy(item: TopicIdea) {
 .result-section {
   margin-top: 28px;
   animation: fadeIn 0.4s var(--ease-out);
+}
+
+.account-context-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 13.5px;
+  font-weight: 500;
 }
 
 .result-toolbar {

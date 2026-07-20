@@ -1,11 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { NavigationGuardWithThis } from 'vue-router'
+// 首页保持同步加载（首屏直达）；其余视图均走动态 import 懒加载拆包
 import HomeView from '../views/HomeView.vue'
-import OutlineView from '../views/OutlineView.vue'
-import GenerateView from '../views/GenerateView.vue'
-import ResultView from '../views/ResultView.vue'
-import HistoryView from '../views/HistoryView.vue'
-import SettingsView from '../views/SettingsView.vue'
 import { useGeneratorStore } from '../stores/generator'
 
 /**
@@ -41,6 +37,8 @@ const requireResultData: NavigationGuardWithThis<undefined> = () => {
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  // 切换路由时回到页面顶部
+  scrollBehavior: () => ({ top: 0 }),
   routes: [
     {
       path: '/',
@@ -50,35 +48,35 @@ const router = createRouter({
     {
       path: '/outline',
       name: 'outline',
-      component: OutlineView,
+      component: () => import('../views/OutlineView.vue'),
       beforeEnter: requireOutlineData
     },
     {
       path: '/generate',
       name: 'generate',
-      component: GenerateView,
+      component: () => import('../views/GenerateView.vue'),
       beforeEnter: requireGenerateData
     },
     {
       path: '/result',
       name: 'result',
-      component: ResultView,
+      component: () => import('../views/ResultView.vue'),
       beforeEnter: requireResultData
     },
     {
       path: '/history',
       name: 'history',
-      component: HistoryView
+      component: () => import('../views/HistoryView.vue')
     },
     {
       path: '/history/:id',
       name: 'history-detail',
-      component: HistoryView
+      component: () => import('../views/HistoryView.vue')
     },
     {
       path: '/settings',
       name: 'settings',
-      component: SettingsView
+      component: () => import('../views/SettingsView.vue')
     },
     {
       path: '/tools',
@@ -144,6 +142,22 @@ const router = createRouter({
       path: '/tools/reply',
       name: 'tool-reply',
       component: () => import('../views/ToolReplyView.vue')
+    },
+    {
+      path: '/tools/card-studio',
+      name: 'tool-card-studio',
+      component: () => import('../views/ToolCardStudioView.vue')
+    },
+    {
+      path: '/tools/publish',
+      name: 'tool-publish',
+      component: () => import('../views/ToolPublishView.vue')
+    },
+    {
+      // 404 兜底：所有未匹配路径统一进入 NotFound 页
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFoundView.vue')
     }
   ]
 })

@@ -33,7 +33,9 @@ export function useImageRetry(setError: (error: AppError | null) => void) {
     const context = {
       fullOutline: store.outline.raw || '',
       userTopic: store.topic || '',
-      recordId: store.recordId
+      recordId: store.recordId,
+      // 重绘沿用本次生成记录在 store 中的风格提示词（API 层不再兜底读 store）
+      stylePrompt: store.stylePrompt
     }
 
     apiRegenerateImage(store.taskId, page, true, context)
@@ -106,7 +108,9 @@ export function useImageRetry(setError: (error: AppError | null) => void) {
           store.markGeneratingAsError(formatErrorMessage(err, '补图中断'))
           setError(normalizeApiError(err, '补图失败'))
         },
-        store.recordId
+        store.recordId,
+        // 补图沿用本次生成记录在 store 中的风格提示词（API 层不再兜底读 store）
+        { stylePrompt: store.stylePrompt }
       )
     } catch (e) {
       isRetrying.value = false

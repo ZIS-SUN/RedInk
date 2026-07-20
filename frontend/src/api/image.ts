@@ -12,7 +12,6 @@ import type {
   TaskState
 } from './types'
 import type { AppError } from '../utils/errors'
-import { useGeneratorStore } from '../stores/generator'
 
 /** 参考图上传前压缩：最长边像素上限 */
 const REFERENCE_IMAGE_MAX_DIMENSION = 1600
@@ -20,21 +19,11 @@ const REFERENCE_IMAGE_MAX_DIMENSION = 1600
 const REFERENCE_IMAGE_QUALITY = 0.85
 
 /**
- * 解析本次请求要携带的 style_prompt：
- * - 调用方显式传入时以传入值为准（空字符串视为「无风格」，不发送该字段）
- * - 未传入时兜底读取 generator store 中记录的本次生成风格，
- *   使不在本模块调用方控制范围内的重试路径（useImageRetry）也能沿用同一风格
+ * 归一化调用方传入的 style_prompt：
+ * 空字符串/未传入均视为「无风格」，不发送该字段。
+ * （API 层不反向依赖 store，本次生成的风格由调用方从 generator store 显式取出传入）
  */
-function resolveStylePrompt(explicit?: string): string | undefined {
-  let value = explicit
-  if (value === undefined) {
-    try {
-      value = useGeneratorStore().stylePrompt
-    } catch {
-      // pinia 未激活（如单测环境）时静默降级为不带风格
-      value = undefined
-    }
-  }
+function normalizeStylePrompt(value?: string): string | undefined {
   return value || undefined
 }
 
@@ -81,7 +70,7 @@ export async function regenerateImage(
       full_outline: context?.fullOutline,
       user_topic: context?.userTopic,
       record_id: context?.recordId || undefined,
-      style_prompt: resolveStylePrompt(context?.stylePrompt)
+      style_prompt: normalizeStylePrompt(context?.stylePrompt)
     },
     // 单张图片重绘走 LLM/绘图模型，耗时较长
     { timeout: LLM_TIMEOUT }
@@ -110,7 +99,7 @@ export async function retryFailedImages(
         task_id: taskId,
         pages,
         record_id: recordId || undefined,
-        style_prompt: resolveStylePrompt(options?.stylePrompt)
+        style_prompt: normalizeStylePrompt(options?.stylePrompt)
       }),
       signal: options?.signal
     })
@@ -163,7 +152,7 @@ export async function generateImagesPost(
         user_topic: userTopic || '',
         record_id: recordId || undefined,
         force,
-        style_prompt: resolveStylePrompt(options?.stylePrompt)
+        style_prompt: normalizeStylePrompt(options?.stylePrompt)
       }),
       signal: options?.signal
     })

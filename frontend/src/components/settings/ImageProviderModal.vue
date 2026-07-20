@@ -92,6 +92,48 @@
           </span>
         </div>
 
+        <!-- 图片尺寸（OpenAI 兼容类接口） -->
+        <div class="form-group" v-if="showDefaultSize">
+          <label>图片尺寸</label>
+          <input
+            type="text"
+            class="form-input"
+            list="image-size-suggestions"
+            :value="formData.default_size"
+            @input="updateField('default_size', ($event.target as HTMLInputElement).value)"
+            placeholder="例如: 1024x1024（留空使用默认）"
+          />
+          <datalist id="image-size-suggestions">
+            <option value="1024x1024"></option>
+            <option value="1024x1536"></option>
+            <option value="1536x1024"></option>
+          </datalist>
+          <span class="form-hint">
+            生成图片的像素尺寸（宽x高），需为服务商支持的规格。留空使用默认 1024x1024。
+          </span>
+        </div>
+
+        <!-- 宽高比（Google GenAI） -->
+        <div class="form-group" v-if="showAspectRatio">
+          <label>图片宽高比</label>
+          <input
+            type="text"
+            class="form-input"
+            list="aspect-ratio-suggestions"
+            :value="formData.default_aspect_ratio"
+            @input="updateField('default_aspect_ratio', ($event.target as HTMLInputElement).value)"
+            placeholder="例如: 3:4（留空使用默认）"
+          />
+          <datalist id="aspect-ratio-suggestions">
+            <option value="3:4"></option>
+            <option value="1:1"></option>
+            <option value="9:16"></option>
+          </datalist>
+          <span class="form-hint">
+            生成图片的宽高比。小红书竖版推荐 3:4，留空使用默认 3:4。
+          </span>
+        </div>
+
         <!-- 高并发模式 -->
         <div class="form-group">
           <label class="toggle-label">
@@ -106,6 +148,24 @@
           </label>
           <span class="form-hint">
             启用后将并行生成图片，速度更快但对 API 质量要求较高。GCP 300$ 试用账号不建议启用。
+          </span>
+        </div>
+
+        <!-- 最大并发数（仅高并发模式下展开） -->
+        <div class="form-group" v-if="formData.high_concurrency">
+          <label>最大并发数</label>
+          <input
+            type="number"
+            class="form-input"
+            min="1"
+            max="8"
+            step="1"
+            :value="formData.max_concurrent"
+            @input="updateMaxConcurrent(($event.target as HTMLInputElement).value)"
+            placeholder="默认 2"
+          />
+          <span class="form-hint">
+            同时生成的图片数量（1-8）。并发越高越快，但可能触发服务商限流。
           </span>
         </div>
 
@@ -183,11 +243,20 @@ const emit = defineEmits<{
 }>()
 
 // 更新表单字段
-function updateField(field: keyof ImageProviderForm, value: string | boolean) {
+function updateField(field: keyof ImageProviderForm, value: string | boolean | number) {
   emit('update:formData', {
     ...props.formData,
     [field]: value
   })
+}
+
+// 更新最大并发数（限制 1-8，非法输入回退默认 2）
+function updateMaxConcurrent(raw: string) {
+  const parsed = Math.floor(Number(raw))
+  const value = Number.isFinite(parsed) && raw.trim() !== ''
+    ? Math.min(8, Math.max(1, parsed))
+    : 2
+  updateField('max_concurrent', value)
 }
 
 // 是否显示 Base URL
@@ -198,6 +267,17 @@ const showBaseUrl = computed(() => {
 // 是否显示端点类型
 const showEndpointType = computed(() => {
   return props.formData.type === 'image_api'
+})
+
+// 是否显示图片尺寸输入（仅 openai 兼容类接口消费 default_size；
+// image_api 后端只读 default_aspect_ratio，展示尺寸会造成"设置无效"的误导）
+const showDefaultSize = computed(() => {
+  return !['google_genai', 'image_api'].includes(props.formData.type)
+})
+
+// 是否显示宽高比输入（Google GenAI 与 image_api 均消费 default_aspect_ratio）
+const showAspectRatio = computed(() => {
+  return ['google_genai', 'image_api'].includes(props.formData.type)
 })
 
 // 模型占位符

@@ -49,10 +49,29 @@
         <div class="titles-list">
           <div v-for="(title, index) in content.titles" :key="index" class="title-item" @click="copyTitle(title, index)">
             <span class="title-badge">{{ index === 0 ? '推荐' : `备选${index}` }}</span>
-            <span class="title-text">{{ title }}</span>
-            <span class="copy-hint" :class="{ show: copiedTitleIndex === index }">
-              {{ copiedTitleIndex === index ? '已复制' : '点击复制' }}
-            </span>
+            <template v-if="editingTitleIndex === index">
+              <input
+                :ref="setTitleInputRef"
+                v-model="editingTitleText"
+                class="title-edit-input"
+                @click.stop
+                @keydown.enter.prevent="confirmTitleEdit"
+                @keydown.esc="cancelTitleEdit"
+                @blur="confirmTitleEdit"
+              />
+            </template>
+            <template v-else>
+              <span class="title-text">{{ title }}</span>
+              <span class="copy-hint" :class="{ show: copiedTitleIndex === index }">
+                {{ copiedTitleIndex === index ? '已复制' : '点击复制' }}
+              </span>
+              <button class="item-icon-btn" title="编辑标题" aria-label="编辑标题" @click.stop="startEditTitle(index)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+              </button>
+              <button class="item-icon-btn danger" title="删除标题" aria-label="删除标题" @click.stop="handleRemoveTitle(index)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </template>
           </div>
         </div>
       </div>
@@ -69,18 +88,38 @@
             </svg>
             文案
           </h3>
-          <button class="copy-btn" @click="copyCopywriting" :class="{ copied: copiedCopywriting }">
-            <svg v-if="!copiedCopywriting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-            </svg>
-            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-            {{ copiedCopywriting ? '已复制' : '复制' }}
-          </button>
+          <div class="header-actions">
+            <button v-if="!editingCopywriting" class="copy-btn" @click="startEditCopywriting">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+              </svg>
+              编辑
+            </button>
+            <button class="copy-btn" @click="copyCopywriting" :class="{ copied: copiedCopywriting }">
+              <svg v-if="!copiedCopywriting" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              {{ copiedCopywriting ? '已复制' : '复制' }}
+            </button>
+          </div>
         </div>
-        <div class="copywriting-content">
+        <div v-if="editingCopywriting" class="copywriting-edit">
+          <textarea
+            ref="copywritingTextareaRef"
+            v-model="editingCopywritingText"
+            class="copywriting-textarea"
+            placeholder="在此输入文案..."
+          />
+          <div class="copywriting-edit-actions">
+            <button class="copy-btn" @click="cancelCopywritingEdit">取消</button>
+            <button class="copy-btn primary" @click="saveCopywriting">保存</button>
+          </div>
+        </div>
+        <div v-else class="copywriting-content">
           <p v-for="(paragraph, index) in formattedCopywriting" :key="index">{{ paragraph }}</p>
         </div>
       </div>
@@ -115,7 +154,16 @@
             :class="{ copied: copiedTagIndex === index }"
           >
             #{{ tag }}
+            <button class="tag-remove" title="删除标签" aria-label="删除标签" @click.stop="handleRemoveTag(index)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
           </span>
+          <input
+            v-model="newTagInput"
+            class="tag-input"
+            placeholder="+ 添加标签，回车确认"
+            @keydown.enter.prevent="handleAddTag"
+          />
         </div>
       </div>
 
@@ -134,10 +182,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onUnmounted } from 'vue'
 import { useGeneratorStore } from '../../stores/generator'
-import { generateContent } from '../../api'
+import { generateContent, updateHistory } from '../../api'
 import { formatErrorMessage } from '../../utils/errors'
+import { addTag, removeAt } from '../../utils/contentEdit'
 
 const store = useGeneratorStore()
 
@@ -161,9 +210,38 @@ function setCopyTimeout(fn: () => void, ms: number) {
 onUnmounted(() => {
   copyTimers.forEach(id => clearTimeout(id))
   copyTimers.length = 0
+  if (contentSyncTimer !== null) {
+    clearTimeout(contentSyncTimer)
+    contentSyncTimer = null
+  }
 })
 
 const content = computed(() => store.content)
+
+// ==================== content 同步落库 ====================
+// 生成成功与每次编辑保存后，防抖 800ms 把标题/文案/标签同步进历史记录。
+// 失败静默（本地 store 已持久化到 localStorage，不打扰用户）。
+let contentSyncTimer: number | null = null
+
+function scheduleContentSync() {
+  if (!store.recordId) return
+  if (contentSyncTimer !== null) clearTimeout(contentSyncTimer)
+  contentSyncTimer = window.setTimeout(async () => {
+    contentSyncTimer = null
+    const recordId = store.recordId
+    if (!recordId) return
+    const result = await updateHistory(recordId, {
+      content: {
+        titles: [...store.content.titles],
+        copywriting: store.content.copywriting,
+        tags: [...store.content.tags]
+      }
+    })
+    if (!result.success) {
+      console.warn('同步发布内容到历史记录失败:', result.error_message || result.error)
+    }
+  }, 800)
+}
 
 // 格式化文案（按换行分段）
 const formattedCopywriting = computed(() => {
@@ -187,10 +265,11 @@ async function handleGenerate() {
 
     if (result.success && result.titles && result.copywriting && result.tags) {
       store.setContent(result.titles, result.copywriting, result.tags)
+      scheduleContentSync()
     } else {
       store.setContentError(formatErrorMessage(result.error || result.error_message || '生成失败', '内容生成失败'))
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     store.setContentError(formatErrorMessage(error, '内容生成失败'))
   } finally {
     loading.value = false
@@ -232,10 +311,86 @@ async function copyTitles() {
 
 // 复制单个标题
 async function copyTitle(title: string, index: number) {
+  // 编辑中的标题行不响应点击复制
+  if (editingTitleIndex.value === index) return
   if (await copyToClipboard(title)) {
     copiedTitleIndex.value = index
     setCopyTimeout(() => copiedTitleIndex.value = null, 2000)
   }
+}
+
+// ==================== 标题编辑 ====================
+const editingTitleIndex = ref<number | null>(null)
+const editingTitleText = ref('')
+// v-for 内同一时刻只渲染一个编辑输入框，用函数 ref 拿到元素
+let titleInputEl: HTMLInputElement | null = null
+function setTitleInputRef(el: unknown) {
+  titleInputEl = (el as HTMLInputElement) || null
+}
+
+async function startEditTitle(index: number) {
+  editingTitleIndex.value = index
+  editingTitleText.value = content.value.titles[index]
+  await nextTick()
+  titleInputEl?.focus()
+}
+
+// Enter/blur 确认：空内容视为无效，store 内部会忽略
+function confirmTitleEdit() {
+  if (editingTitleIndex.value === null) return
+  store.updateContentTitle(editingTitleIndex.value, editingTitleText.value)
+  editingTitleIndex.value = null
+  scheduleContentSync()
+}
+
+// Esc 取消：先置空索引，随后的 blur 会因索引为 null 而不再保存
+function cancelTitleEdit() {
+  editingTitleIndex.value = null
+}
+
+function handleRemoveTitle(index: number) {
+  store.removeContentTitle(index)
+  scheduleContentSync()
+}
+
+// ==================== 文案编辑 ====================
+const editingCopywriting = ref(false)
+const editingCopywritingText = ref('')
+const copywritingTextareaRef = ref<HTMLTextAreaElement | null>(null)
+
+async function startEditCopywriting() {
+  editingCopywritingText.value = content.value.copywriting
+  editingCopywriting.value = true
+  await nextTick()
+  copywritingTextareaRef.value?.focus()
+}
+
+function saveCopywriting() {
+  store.updateCopywriting(editingCopywritingText.value)
+  editingCopywriting.value = false
+  scheduleContentSync()
+}
+
+function cancelCopywritingEdit() {
+  editingCopywriting.value = false
+}
+
+// ==================== 标签编辑 ====================
+const newTagInput = ref('')
+
+// Enter 添加：自动去掉开头 # 和空白、去重（纯逻辑在 utils/contentEdit）
+function handleAddTag() {
+  const next = addTag(content.value.tags, newTagInput.value)
+  if (next !== content.value.tags) {
+    store.updateTags(next)
+    scheduleContentSync()
+  }
+  newTagInput.value = ''
+}
+
+function handleRemoveTag(index: number) {
+  store.updateTags(removeAt(content.value.tags, index))
+  scheduleContentSync()
 }
 
 // 复制文案
@@ -420,6 +575,25 @@ async function copyTag(tag: string, index: number) {
   height: 14px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 「保存」主按钮：沿用 copy-btn 尺寸，品牌色填充 */
+.copy-btn.primary {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.copy-btn.primary:hover {
+  background: var(--primary-hover);
+  color: white;
+  border-color: var(--primary-hover);
+}
+
 /* 标题列表 */
 .titles-list {
   display: flex;
@@ -481,6 +655,56 @@ async function copyTag(tag: string, index: number) {
   color: var(--color-success);
 }
 
+/* 标题行的编辑/删除小按钮 */
+.item-icon-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.item-icon-btn:hover {
+  background: var(--gray-3);
+  color: var(--text-main);
+}
+
+.item-icon-btn.danger:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.item-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 标题 inline 编辑输入框 */
+.title-edit-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: var(--font-size-body);
+  font-family: inherit;
+  color: var(--text-main);
+  line-height: 1.5;
+  background: var(--bg-card);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 3px var(--primary-fade);
+}
+
+.title-edit-input:focus {
+  outline: none;
+}
+
 /* 文案内容 */
 .copywriting-content {
   font-size: var(--font-size-body);
@@ -494,6 +718,35 @@ async function copyTag(tag: string, index: number) {
 
 .copywriting-content p:last-child {
   margin-bottom: 0;
+}
+
+/* 文案编辑态 */
+.copywriting-textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--gray-1);
+  font-size: var(--font-size-body);
+  line-height: 1.8;
+  color: var(--text-main);
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.copywriting-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-fade);
+}
+
+.copywriting-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 /* 标签列表 */
@@ -529,6 +782,79 @@ async function copyTag(tag: string, index: number) {
 .tag-item.copied {
   background: var(--color-success);
   color: white;
+}
+
+/* tag chip 内的删除按钮：继承 chip 当前文字色，hover 反色时同步变化 */
+.tag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-full);
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.tag-remove:hover {
+  opacity: 1;
+}
+
+.tag-remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* 新增标签输入框：与 chip 同高、圆角一致 */
+.tag-input {
+  padding: 8px 16px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--gray-1);
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-full);
+  min-width: 0;
+  width: 170px;
+  max-width: 100%;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.tag-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.tag-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  border-style: solid;
+  background: var(--bg-card);
+}
+
+/* 移动端：编辑控件不溢出 */
+@media (max-width: 640px) {
+  .title-item {
+    flex-wrap: wrap;
+  }
+
+  .title-edit-input {
+    flex-basis: 100%;
+  }
+
+  .tag-input {
+    width: 100%;
+  }
 }
 
 /* 重新生成 */

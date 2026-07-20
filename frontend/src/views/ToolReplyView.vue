@@ -160,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { generateReplies, type ReplyItem, type ReplyTone } from '../api/reply'
 import { normalizeApiError, type AppError } from '../utils/errors'
 import ErrorCard from '../components/common/ErrorCard.vue'
@@ -185,6 +185,10 @@ const pinnedComment = ref('')
 const copiedText = ref('')
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
+
+onUnmounted(() => {
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+})
 
 const parsedComments = computed(() =>
   commentsInput.value

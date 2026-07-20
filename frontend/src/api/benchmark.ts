@@ -29,21 +29,32 @@ export interface BenchmarkResponse {
   error_message?: string
 }
 
+/** 拆解请求参数：content 与 url 至少提供一个，优先 content */
+export interface AnalyzeBenchmarkParams {
+  /** 对标内容（标题+正文） */
+  content?: string
+  /** 对标内容的网页链接（无 content 时，后端先抓取正文再分析） */
+  url?: string
+  /** 用户自己的主题（可选），提供时返回仿写草稿 */
+  myTopic?: string
+}
+
 /**
  * 拆解对标/爆款内容，可选按同样套路为自己的主题生成原创仿写草稿
- *
- * @param content 对标内容（标题+正文）
- * @param myTopic 用户自己的主题（可选），提供时返回仿写草稿
  */
 export async function analyzeBenchmark(
-  content: string,
-  myTopic?: string
+  params: AnalyzeBenchmarkParams
 ): Promise<BenchmarkResponse> {
+  const body: Record<string, string> = {}
+  if (params.content) body.content = params.content
+  if (params.url) body.url = params.url
+  // 不做仿写时不携带 my_topic 键
+  if (params.myTopic) body.my_topic = params.myTopic
+
   const response = await http.post<BenchmarkResponse>(
     '/benchmark',
-    // 不做仿写时不携带 my_topic 键
-    myTopic ? { content, my_topic: myTopic } : { content },
-    // 拆解 + 仿写走 LLM，耗时较长
+    body,
+    // 抓取 + 拆解 + 仿写走 LLM，耗时较长
     { timeout: LLM_TIMEOUT }
   )
   return response.data

@@ -53,6 +53,10 @@
       </div>
 
       <div class="toolbar-right">
+        <button type="button" class="btn btn-mini btn-ai" @click="openAiModal">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          AI 排期
+        </button>
         <select v-model="filterPlatform" class="input select-mini" aria-label="按平台筛选">
           <option value="">全部平台</option>
           <option v-for="p in PLATFORM_OPTIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
@@ -113,6 +117,7 @@
                 @click.stop="openEditModal(plan)"
               >
                 <span class="chip-dot" :style="{ background: platformColor(plan.platform) }"></span>
+                <span v-if="plan.publish_time" class="chip-time">{{ plan.publish_time }}</span>
                 <span class="chip-title">{{ plan.title }}</span>
               </button>
             </div>
@@ -146,6 +151,21 @@
                   <span class="chip-dot" :style="{ background: platformColor(plan.platform) }"></span>
                   {{ platformLabel(plan.platform) }}
                 </span>
+                <span v-if="plan.publish_time" class="plan-time">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                  {{ plan.publish_time }}
+                </span>
+                <button
+                  v-if="plan.record_id"
+                  type="button"
+                  class="record-link"
+                  :aria-label="`查看「${plan.title}」关联的作品`"
+                  title="该计划已关联历史作品"
+                  @click.stop="viewLinkedRecord()"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                  查看作品
+                </button>
                 <span v-if="plan.notes" class="plan-notes" :title="plan.notes">{{ plan.notes }}</span>
               </div>
             </div>
@@ -202,6 +222,20 @@
             </div>
 
             <div class="form-field">
+              <label>发布时间（可选）</label>
+              <input v-model="form.publish_time" class="input" type="time" />
+              <button
+                v-if="bestSlot && suggestedTime"
+                type="button"
+                class="slot-hint"
+                :title="`点击填入 ${suggestedTime}`"
+                @click="applySuggestedTime"
+              >
+                📊 根据你的数据，「{{ bestSlot.name }}」互动率最高
+              </button>
+            </div>
+
+            <div class="form-field">
               <label>状态</label>
               <div class="status-radio-group" role="radiogroup" aria-label="计划状态">
                 <button
@@ -244,6 +278,167 @@
       </div>
     </Teleport>
 
+    <!-- AI 一周排期弹窗 -->
+    <Teleport to="body">
+      <div v-if="showAiModal" class="plan-modal-overlay" @click.self="closeAiModal">
+        <div class="plan-modal ai-modal" role="dialog" aria-modal="true" aria-label="AI 一周排期">
+          <div class="plan-modal-head">
+            <h3>AI 一周排期</h3>
+            <button type="button" class="close-btn" aria-label="关闭" :disabled="aiGenerating || aiAdding" @click="closeAiModal">×</button>
+          </div>
+
+          <div class="plan-modal-body">
+            <div class="form-field">
+              <label>领域 / 赛道 <span class="required">*</span></label>
+              <input
+                v-model="aiForm.niche"
+                class="input"
+                type="text"
+                placeholder="如：健身减脂、职场干货、家常菜教程"
+                maxlength="50"
+                :disabled="aiGenerating"
+                @keyup.enter="handleAiGenerate"
+              />
+            </div>
+
+            <div class="form-grid">
+              <div class="form-field">
+                <label>发布平台</label>
+                <select v-model="aiForm.platform" class="input" :disabled="aiGenerating">
+                  <option v-for="p in PLATFORM_OPTIONS" :key="p.value" :value="p.value">{{ p.label }}</option>
+                </select>
+              </div>
+              <div class="form-field">
+                <label>每周条数（1-7）</label>
+                <input v-model.number="aiForm.frequency" class="input" type="number" min="1" max="7" :disabled="aiGenerating" />
+              </div>
+            </div>
+
+            <label class="ai-switch">
+              <input v-model="aiForm.useAccountData" type="checkbox" :disabled="aiGenerating" />
+              <span>结合我的账号数据（发布时间优先安排在高互动时段）</span>
+            </label>
+
+            <p v-if="aiError" class="form-error" role="alert">{{ aiError }}</p>
+
+            <!-- 预览列表 -->
+            <template v-if="aiPreview.length > 0">
+              <div class="ai-preview-head">
+                <span>排期预览（已勾选 {{ aiSelectedCount }}/{{ aiPreview.length }} 条）</span>
+                <span v-if="aiAccountContextUsed" class="ai-context-badge">已结合账号数据</span>
+              </div>
+              <div class="ai-preview-list">
+                <label v-for="(item, idx) in aiPreview" :key="idx" class="ai-preview-item" :class="{ unchecked: !item.selected }">
+                  <input v-model="item.selected" type="checkbox" :disabled="aiAdding" />
+                  <div class="ai-preview-main">
+                    <div class="ai-preview-title">{{ item.title }}</div>
+                    <div class="ai-preview-meta">
+                      <span>{{ item.publish_date }}</span>
+                      <span v-if="item.publish_time">{{ item.publish_time }}</span>
+                      <span>{{ platformLabel(item.platform) }}</span>
+                    </div>
+                    <div v-if="item.notes" class="ai-preview-notes">{{ item.notes }}</div>
+                  </div>
+                </label>
+              </div>
+            </template>
+          </div>
+
+          <div class="plan-modal-foot">
+            <button type="button" class="btn" :disabled="aiGenerating || aiAdding" @click="closeAiModal">取消</button>
+            <button type="button" class="btn" :disabled="!canGenerateAi || aiAdding" @click="handleAiGenerate">
+              {{ aiGenerating ? '生成中...' : (aiPreview.length > 0 ? '重新生成' : '生成排期') }}
+            </button>
+            <button
+              v-if="aiPreview.length > 0"
+              type="button"
+              class="btn btn-primary"
+              :disabled="aiSelectedCount === 0 || aiAdding || aiGenerating"
+              @click="handleAiAddToCalendar"
+            >
+              {{ aiAdding ? '添加中...' : `添加到日历（${aiSelectedCount} 条）` }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 转录到数据复盘弹窗（条目标记为已发布后弹出） -->
+    <Teleport to="body">
+      <div v-if="showLogModal" class="plan-modal-overlay" @click.self="closeLogModal">
+        <div class="plan-modal" role="dialog" aria-modal="true" aria-label="转录到数据复盘">
+          <div class="plan-modal-head">
+            <h3>转录到数据复盘</h3>
+            <button type="button" class="close-btn" aria-label="关闭" :disabled="logSaving" @click="closeLogModal">×</button>
+          </div>
+
+          <div class="plan-modal-body">
+            <p class="log-hint">
+              已标记为「已发布」。补充播放、点赞等指标即可一键转录到数据复盘；
+              也可以先跳过，之后再次转录会更新同一条记录，不会重复新建。
+            </p>
+
+            <div class="form-field">
+              <label>内容标题</label>
+              <input v-model="logForm.title" class="input" type="text" maxlength="100" :disabled="logSaving" />
+            </div>
+
+            <div class="form-grid">
+              <div class="form-field">
+                <label>发布平台</label>
+                <input v-model="logForm.platform" class="input" type="text" maxlength="30" :disabled="logSaving" />
+              </div>
+              <div class="form-field">
+                <label>发布日期</label>
+                <input v-model="logForm.publish_date" class="input" type="date" :disabled="logSaving" />
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label>发布时间（可选）</label>
+              <input v-model="logForm.publish_time" class="input" type="time" :disabled="logSaving" />
+            </div>
+
+            <div class="form-grid three">
+              <div class="form-field">
+                <label>曝光 / 播放</label>
+                <input v-model.number="logForm.views" class="input" type="number" min="0" placeholder="0" :disabled="logSaving" />
+              </div>
+              <div class="form-field">
+                <label>点赞</label>
+                <input v-model.number="logForm.likes" class="input" type="number" min="0" placeholder="0" :disabled="logSaving" />
+              </div>
+              <div class="form-field">
+                <label>收藏</label>
+                <input v-model.number="logForm.collects" class="input" type="number" min="0" placeholder="0" :disabled="logSaving" />
+              </div>
+              <div class="form-field">
+                <label>评论</label>
+                <input v-model.number="logForm.comments" class="input" type="number" min="0" placeholder="0" :disabled="logSaving" />
+              </div>
+              <div class="form-field">
+                <label>转发</label>
+                <input v-model.number="logForm.shares" class="input" type="number" min="0" placeholder="0" :disabled="logSaving" />
+              </div>
+              <div class="form-field">
+                <label>涨粉</label>
+                <input v-model.number="logForm.followers_gained" class="input" type="number" min="0" placeholder="0" :disabled="logSaving" />
+              </div>
+            </div>
+
+            <p v-if="logError" class="form-error" role="alert">{{ logError }}</p>
+          </div>
+
+          <div class="plan-modal-foot">
+            <button type="button" class="btn" :disabled="logSaving" @click="closeLogModal">跳过</button>
+            <button type="button" class="btn btn-primary" :disabled="logSaving || !canLogSubmit" @click="handleLogSubmit">
+              {{ logSaving ? '转录中...' : '转录到复盘' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
       :visible="!!deleteTarget"
@@ -265,14 +460,19 @@ import ConfirmDialog from './shared/ConfirmDialog.vue'
 import {
   createPlan,
   deletePlan,
+  generateWeekPlan,
   getPlanList,
   getPlanStats,
+  logPlanPerformance,
   updatePlan,
   type PlanItem,
   type PlanPlatform,
   type PlanStats,
-  type PlanStatus
+  type PlanStatus,
+  type WeekPlanPreviewItem
 } from '../api/calendar'
+import { getAnalyticsStats, type AnalyticsTimeSlot } from '../api/analytics'
+import { pickBestTimeSlot, slotToSuggestedTime } from '../utils/calendarSuggest'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
@@ -282,7 +482,11 @@ import { normalizeApiError, type AppError } from '../utils/errors'
  * 功能：
  * - 月历 / 列表两种视图，按月切换
  * - 计划条目的新建 / 编辑 / 删除（删除二次确认）
+ * - 可选发布时间 + 基于账号数据的最佳时段推荐
+ * - 关联历史作品（record_id）的「查看作品」入口
+ * - AI 一周排期（生成预览 → 勾选 → 逐条添加到日历）
  * - 状态流转（想法 → 制作中 → 待发布 → 已发布）
+ * - 标记「已发布」后一键转录到数据复盘（标题/平台/日期预填，补充指标即可）
  * - 按平台 / 状态筛选
  * - 本月统计（计划总数 + 各状态数量）
  */
@@ -356,15 +560,45 @@ const form = reactive<{
   title: string
   platform: PlanPlatform
   publish_date: string
+  publish_time: string
   status: PlanStatus
   notes: string
 }>({
   title: '',
   platform: 'xiaohongshu',
   publish_date: todayDate,
+  publish_time: '',
   status: 'idea',
   notes: ''
 })
+
+// ==================== 最佳发布时段推荐（基于数据复盘的账号数据） ====================
+
+/** 互动率最高的时段（拉取失败或无数据时为 null，提示静默不显示） */
+const bestSlot = ref<AnalyticsTimeSlot | null>(null)
+let bestSlotLoaded = false
+
+/** 最佳时段对应的建议发布时间（时段起始整点），未知时段为 null */
+const suggestedTime = computed(() =>
+  bestSlot.value ? slotToSuggestedTime(bestSlot.value.name) : null
+)
+
+/**
+ * 异步拉取账号时段统计（每次进入页面只拉一次；失败/为空静默）
+ */
+async function loadBestSlot() {
+  if (bestSlotLoaded) return
+  bestSlotLoaded = true
+  const res = await getAnalyticsStats()
+  if (res.success && res.stats) {
+    bestSlot.value = pickBestTimeSlot(res.stats.time_slots)
+  }
+}
+
+/** 点击提示：把最佳时段的起始整点填入发布时间 */
+function applySuggestedTime() {
+  if (suggestedTime.value) form.publish_time = suggestedTime.value
+}
 
 /** 必填项（标题、发布日期）非空才允许保存 */
 const canSave = computed(() => form.title.trim().length > 0 && !!form.publish_date)
@@ -477,10 +711,12 @@ function openCreateModal(date?: string) {
   form.title = ''
   form.platform = 'xiaohongshu'
   form.publish_date = date || (currentMonth.value === todayMonth ? todayDate : `${currentMonth.value}-01`)
+  form.publish_time = ''
   form.status = 'idea'
   form.notes = ''
   formError.value = ''
   showModal.value = true
+  loadBestSlot()
 }
 
 /**
@@ -491,10 +727,12 @@ function openEditModal(plan: PlanItem) {
   form.title = plan.title
   form.platform = plan.platform
   form.publish_date = plan.publish_date
+  form.publish_time = plan.publish_time || ''
   form.status = plan.status
   form.notes = plan.notes
   formError.value = ''
   showModal.value = true
+  loadBestSlot()
 }
 
 function closeModal() {
@@ -522,9 +760,14 @@ async function handleSave() {
     title: form.title.trim(),
     platform: form.platform,
     publish_date: form.publish_date,
+    publish_time: form.publish_time,
     status: form.status,
     notes: form.notes.trim()
   }
+
+  // 保存前记录是否为「新流转到已发布」（弹窗保存也可能把状态改成已发布）
+  const becamePublished = form.status === 'published'
+    && (!editingPlan.value || editingPlan.value.status !== 'published')
 
   const res = editingPlan.value
     ? await updatePlan(editingPlan.value.id, payload)
@@ -536,6 +779,7 @@ async function handleSave() {
     successMessage.value = editingPlan.value ? '计划已更新' : '计划已添加'
     showModal.value = false
     await loadData()
+    if (becamePublished && res.plan) openLogModal(res.plan)
   } else {
     formError.value = res.error_message || '保存失败，请重试'
   }
@@ -543,6 +787,7 @@ async function handleSave() {
 
 /**
  * 状态流转（列表视图内联下拉）
+ * 流转为「已发布」时弹出转录到数据复盘的预填弹窗
  */
 async function handleStatusChange(plan: PlanItem, status: PlanStatus) {
   if (status === plan.status || statusUpdatingId.value) return
@@ -553,6 +798,7 @@ async function handleStatusChange(plan: PlanItem, status: PlanStatus) {
   if (res.success) {
     successMessage.value = `「${plan.title}」已流转为「${statusLabel(status)}」`
     await loadData()
+    if (status === 'published') openLogModal(res.plan || plan)
   } else {
     error.value = normalizeApiError(res.error || res.error_message || '更新计划状态失败', '更新计划状态失败')
     await loadData()
@@ -573,6 +819,211 @@ function startCreation(plan: PlanItem) {
   }
 
   router.push({ name: 'home' })
+}
+
+/**
+ * 查看条目关联的历史作品（简单跳转到历史页）
+ */
+function viewLinkedRecord() {
+  router.push('/history')
+}
+
+// ==================== 转录到数据复盘（发布闭环） ====================
+
+/** 数值输入归一化：空串/NaN/负数 -> 0 */
+function toSafeInt(value: unknown): number {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num < 0) return 0
+  return Math.floor(num)
+}
+
+const showLogModal = ref(false)
+const logPlan = ref<PlanItem | null>(null)
+const logSaving = ref(false)
+const logError = ref('')
+
+const logForm = reactive({
+  title: '',
+  platform: '',
+  publish_date: '',
+  publish_time: '',
+  views: 0,
+  likes: 0,
+  collects: 0,
+  comments: 0,
+  shares: 0,
+  followers_gained: 0
+})
+
+/** 标题、平台非空才允许提交（与数据复盘录入的必填约束一致） */
+const canLogSubmit = computed(() =>
+  logForm.title.trim().length > 0 && logForm.platform.trim().length > 0
+)
+
+/**
+ * 打开转录弹窗：标题 / 平台（转中文名）/ 日期 / 时间从日历条目预填，
+ * 用户只需补充播放、点赞等指标（也可跳过）。
+ */
+function openLogModal(plan: PlanItem) {
+  logPlan.value = plan
+  logForm.title = plan.title
+  logForm.platform = platformLabel(plan.platform)
+  logForm.publish_date = plan.publish_date
+  logForm.publish_time = plan.publish_time || ''
+  logForm.views = 0
+  logForm.likes = 0
+  logForm.collects = 0
+  logForm.comments = 0
+  logForm.shares = 0
+  logForm.followers_gained = 0
+  logError.value = ''
+  showLogModal.value = true
+}
+
+function closeLogModal() {
+  if (logSaving.value) return
+  showLogModal.value = false
+}
+
+/**
+ * 提交转录：调用后端一键转录端点，写入数据复盘并回写关联。
+ * 同一条目重复转录时后端会更新已有关联记录（created 为 false）。
+ */
+async function handleLogSubmit() {
+  if (!logPlan.value || logSaving.value || !canLogSubmit.value) return
+  logSaving.value = true
+  logError.value = ''
+
+  const res = await logPlanPerformance(logPlan.value.id, {
+    title: logForm.title.trim(),
+    platform: logForm.platform.trim(),
+    publish_date: logForm.publish_date,
+    publish_time: logForm.publish_time,
+    views: toSafeInt(logForm.views),
+    likes: toSafeInt(logForm.likes),
+    collects: toSafeInt(logForm.collects),
+    comments: toSafeInt(logForm.comments),
+    shares: toSafeInt(logForm.shares),
+    followers_gained: toSafeInt(logForm.followers_gained)
+  })
+
+  logSaving.value = false
+
+  if (res.success) {
+    successMessage.value = res.created
+      ? `「${logForm.title.trim()}」已转录到数据复盘`
+      : `已更新数据复盘中「${logForm.title.trim()}」的关联记录`
+    showLogModal.value = false
+  } else {
+    logError.value = res.error_message || '转录失败，请重试'
+  }
+}
+
+// ==================== AI 一周排期 ====================
+
+/** 预览条目（在预览列表中可勾选，默认全选） */
+type AiPreviewItem = WeekPlanPreviewItem & { selected: boolean }
+
+const showAiModal = ref(false)
+const aiGenerating = ref(false)
+const aiAdding = ref(false)
+const aiError = ref('')
+const aiPreview = ref<AiPreviewItem[]>([])
+const aiAccountContextUsed = ref(false)
+
+const aiForm = reactive<{
+  niche: string
+  platform: PlanPlatform
+  frequency: number
+  useAccountData: boolean
+}>({
+  niche: '',
+  platform: 'xiaohongshu',
+  frequency: 3,
+  useAccountData: false
+})
+
+const aiSelectedCount = computed(() => aiPreview.value.filter(p => p.selected).length)
+
+const canGenerateAi = computed(() => aiForm.niche.trim().length > 0 && !aiGenerating.value)
+
+function openAiModal() {
+  aiError.value = ''
+  aiPreview.value = []
+  aiAccountContextUsed.value = false
+  showAiModal.value = true
+}
+
+function closeAiModal() {
+  if (aiGenerating.value || aiAdding.value) return
+  showAiModal.value = false
+}
+
+/**
+ * 调用后端生成一周排期预览（不落盘）
+ */
+async function handleAiGenerate() {
+  if (!canGenerateAi.value) return
+  aiGenerating.value = true
+  aiError.value = ''
+  aiPreview.value = []
+
+  const res = await generateWeekPlan({
+    niche: aiForm.niche.trim(),
+    platform: aiForm.platform,
+    frequency: Math.min(7, Math.max(1, Math.round(aiForm.frequency) || 3)),
+    use_account_data: aiForm.useAccountData
+  })
+
+  aiGenerating.value = false
+
+  if (res.success && res.plans?.length) {
+    aiPreview.value = res.plans.map(p => ({ ...p, selected: true }))
+    aiAccountContextUsed.value = !!res.account_context_used
+  } else {
+    aiError.value = res.error_message || 'AI 排期生成失败，请重试'
+  }
+}
+
+/**
+ * 把勾选的预览条目逐条调现有创建接口落盘，然后刷新视图
+ */
+async function handleAiAddToCalendar() {
+  const selected = aiPreview.value.filter(p => p.selected)
+  if (selected.length === 0 || aiAdding.value) return
+
+  aiAdding.value = true
+  aiError.value = ''
+
+  let created = 0
+  let failedMessage = ''
+  for (const item of selected) {
+    const res = await createPlan({
+      title: item.title,
+      platform: item.platform,
+      publish_date: item.publish_date,
+      publish_time: item.publish_time,
+      status: item.status,
+      notes: item.notes
+    })
+    if (res.success) {
+      created += 1
+    } else if (!failedMessage) {
+      failedMessage = res.error_message || '部分计划创建失败'
+    }
+  }
+
+  aiAdding.value = false
+
+  if (created > 0) {
+    successMessage.value = failedMessage
+      ? `已添加 ${created}/${selected.length} 条计划（${failedMessage}）`
+      : `已添加 ${created} 条计划到日历`
+    showAiModal.value = false
+    await loadData()
+  } else {
+    aiError.value = failedMessage || '添加失败，请重试'
+  }
 }
 
 /**
@@ -1229,6 +1680,18 @@ onMounted(() => {
   gap: 14px;
 }
 
+.form-grid.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* 转录到数据复盘弹窗的提示文案 */
+.log-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-sub);
+}
+
 .status-radio-group {
   display: flex;
   gap: 8px;
@@ -1255,6 +1718,173 @@ onMounted(() => {
   margin: 0;
   font-size: 13px;
   color: var(--color-danger);
+}
+
+/* 月历 chip 上的发布时间 */
+.chip-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* 列表行的发布时间 */
+.plan-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「查看作品」小链接 */
+.record-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--primary);
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.record-link:hover {
+  opacity: 0.75;
+  text-decoration: underline;
+}
+
+/* 最佳时段推荐提示（可点击填入） */
+.slot-hint {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-sub);
+  cursor: pointer;
+  text-align: left;
+  transition: color var(--transition-fast);
+}
+
+.slot-hint:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+/* 工具栏「AI 排期」按钮 */
+.btn-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--primary);
+  border-color: var(--primary) !important;
+}
+
+.btn-ai:hover {
+  background: var(--primary-light);
+}
+
+/* AI 排期弹窗 */
+.ai-modal {
+  max-width: 560px;
+}
+
+.ai-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.ai-switch input {
+  accent-color: var(--primary);
+}
+
+.ai-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-top: 4px;
+}
+
+.ai-context-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-success);
+  background: var(--color-success-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.ai-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-preview-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-0);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), opacity var(--transition-fast);
+}
+
+.ai-preview-item:hover {
+  border-color: var(--border-hover);
+}
+
+.ai-preview-item.unchecked {
+  opacity: 0.55;
+}
+
+.ai-preview-item input {
+  margin-top: 3px;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.ai-preview-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ai-preview-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.ai-preview-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-preview-notes {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* 移动端适配 */
@@ -1319,6 +1949,10 @@ onMounted(() => {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .form-grid.three {
+    grid-template-columns: 1fr 1fr;
   }
 
   .plan-modal-overlay {

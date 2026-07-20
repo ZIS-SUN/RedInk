@@ -78,7 +78,9 @@ const ICON = {
   link: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>',
   exportImg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
   calendar: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>',
-  analytics: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>'
+  analytics: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>',
+  cardStudio: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>',
+  publish: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>'
 }
 
 const stages: Stage[] = [
@@ -113,6 +115,7 @@ const stages: Stage[] = [
     sub: '把内容变成成品图',
     tools: [
       { name: 'tool-link', title: '链接转图文', desc: '粘贴链接或长文，自动提炼成多页大纲', tone: 'info', icon: ICON.link },
+      { name: 'tool-card-studio', title: '文字卡片工坊', desc: '本地渲染文字卡片，秒级出图免等待', tone: 'primary', icon: ICON.cardStudio },
       { name: 'tool-export', title: '多尺寸导出', desc: '一图适配 9:16 / 1:1 / 3:4 等多平台尺寸', tone: 'warning', icon: ICON.exportImg }
     ]
   },
@@ -121,6 +124,7 @@ const stages: Stage[] = [
     sub: '规划发布节奏，用数据迭代',
     tools: [
       { name: 'tool-calendar', title: '内容日历', desc: '规划发布节奏，管理各平台内容计划', tone: 'success', icon: ICON.calendar },
+      { name: 'tool-publish', title: '发布助手', desc: '管理多平台账号，一键备好图文去发布', tone: 'primary', icon: ICON.publish },
       { name: 'tool-analytics', title: '数据复盘', desc: '录入数据看表现，获取 AI 复盘洞察', tone: 'info', icon: ICON.analytics }
     ]
   }

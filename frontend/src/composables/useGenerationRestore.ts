@@ -14,32 +14,74 @@ export function useGenerationRestore() {
     return !!record.images?.task_id && (record.images.generated || []).some(Boolean)
   }
 
-  function hydrateFromHistory(record: HistoryDetail) {
+  /**
+   * 从历史记录水合 generator store（全项目唯一水合入口）
+   *
+   * @param record 历史记录详情
+   * @param options.target 目标场景：
+   *  - 'restore'（默认）：生成流程的刷新恢复。保留本地未同步的内容编辑与参考图，
+   *    并根据图片完成度把 stage 推进到 result/generating
+   *  - 'edit'：从历史页打开记录进入编辑。先定向重置上一会话残留状态
+   *    （标题/文案/标签、生成进度、旧图片/任务ID/用户上传图），防止上一篇内容串到新记录；
+   *    stage 停留在 outline（由调用方跳转大纲页），没有已生成图片时保持空白生成状态
+   *
+   * 图片 URL 统一走 getImageUrl（缩略图展示）；下载入口自行替换为 ?thumbnail=false 原图。
+   */
+  function hydrateFromHistory(
+    record: HistoryDetail,
+    options: { target?: 'restore' | 'edit' } = {}
+  ) {
+    const target = options.target ?? 'restore'
+
+    if (target === 'edit') {
+      store.clearContent()
+      store.progress = { current: 0, total: 0, status: 'idle' }
+      store.images = []
+      store.taskId = null
+      store.userImages = []
+      // 上一会话残留的大纲编辑标记不应带入新打开的记录
+      store.setOutlineDirty(false)
+    }
+
+    store.setTopic(record.title)
+    store.setOutline(record.outline.raw, record.outline.pages || [])
+    store.setRecordId(record.id)
+
     const taskId = record.images.task_id
     const generated = record.images.generated || []
     const pages = record.outline.pages || []
-    const doneCount = pages.reduce((count, page, idx) => {
-      const filename = generated[page.index] || generated[idx]
-      return filename ? count + 1 : count
-    }, 0)
 
-    store.setTopic(record.title)
-    store.setOutline(record.outline.raw, pages)
-    store.setRecordId(record.id)
-    store.setTaskId(taskId)
-    store.images = pages.map((page, idx) => {
-      const filename = generated[page.index] || generated[idx] || ''
-      return {
-        index: page.index,
-        url: filename && taskId ? getImageUrl(taskId, filename) : '',
-        status: filename ? 'done' : 'error',
-        retryable: !filename
+    // edit 场景下没有任何已生成图片时不动图片/进度（保持上面重置后的空白状态）
+    if (target === 'restore' || (taskId && generated.some(Boolean))) {
+      store.setTaskId(taskId)
+      store.images = pages.map((page, idx) => {
+        const filename = generated[page.index] || generated[idx] || ''
+        return {
+          index: page.index,
+          url: filename && taskId ? getImageUrl(taskId, filename) : '',
+          status: filename ? 'done' : 'error',
+          retryable: !filename
+        }
+      })
+      const doneCount = store.images.filter(img => img.status === 'done').length
+      store.progress.total = pages.length
+      store.progress.current = doneCount
+      store.progress.status = doneCount >= pages.length ? 'done' : 'error'
+      if (target === 'restore') {
+        store.stage = doneCount >= pages.length ? 'result' : 'generating'
       }
-    })
-    store.progress.total = pages.length
-    store.progress.current = doneCount
-    store.progress.status = doneCount >= pages.length ? 'done' : 'error'
-    store.stage = doneCount >= pages.length ? 'result' : 'generating'
+    }
+
+    // 回填服务器上保存的发布内容（标题/文案/标签）。
+    // 仅在本地没有内容（idle）时回填，避免覆盖用户本地未同步的编辑；旧记录无 content 则跳过。
+    const savedContent = record.content
+    if (savedContent && store.content.status === 'idle') {
+      store.setContent(
+        savedContent.titles || [],
+        savedContent.copywriting || '',
+        savedContent.tags || []
+      )
+    }
   }
 
   async function restoreFromHistory(): Promise<boolean> {
@@ -70,7 +112,7 @@ export function useGenerationRestore() {
     if (!taskId || store.images.length === 0) return false
 
     const wasInterrupted = store.progress.status === 'generating'
-      || store.images.some(img => img.status === 'generating' || img.status === 'retrying')
+      || store.images.some(img => img.status === 'queued' || img.status === 'generating' || img.status === 'retrying')
     if (!wasInterrupted) return false
 
     const res = await getTaskState(taskId)
@@ -82,7 +124,7 @@ export function useGenerationRestore() {
         const filename = generated[key]
         if (filename) {
           store.updateProgress(image.index, 'done', getImageUrl(taskId, filename))
-        } else if (image.status === 'generating' || image.status === 'retrying') {
+        } else if (image.status === 'queued' || image.status === 'generating' || image.status === 'retrying') {
           store.updateProgress(
             image.index,
             'error',
@@ -128,6 +170,7 @@ export function useGenerationRestore() {
 
   return {
     ensureRecord,
+    hydrateFromHistory,
     restoreFromHistory,
     restoreInterruptedGeneration
   }

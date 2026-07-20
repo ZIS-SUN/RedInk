@@ -62,6 +62,30 @@
           </div>
           
           <div class="card-controls">
+            <div class="polish-wrap">
+              <button
+                class="icon-btn polish-btn"
+                :class="{ active: openMenuKey === pageKey(page) }"
+                :disabled="polishingKey !== null"
+                title="AI 润色"
+                aria-label="AI 润色"
+                aria-haspopup="menu"
+                @click.stop="toggleMenu(page)"
+              >
+                <span v-if="polishingKey === pageKey(page)" class="polish-spinner" aria-hidden="true" />
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"></path></svg>
+              </button>
+              <div
+                v-if="openMenuKey === pageKey(page)"
+                class="polish-menu"
+                role="menu"
+                @click.stop
+              >
+                <button class="polish-menu-item" role="menuitem" @click="runPolish(page, 'polish')">润色</button>
+                <button class="polish-menu-item" role="menuitem" @click="runPolish(page, 'shorten')">精简</button>
+                <button class="polish-menu-item" role="menuitem" @click="runPolish(page, 'punchier')">更抓眼球</button>
+              </div>
+            </div>
             <button
               class="icon-btn"
               :disabled="idx === 0"
@@ -93,10 +117,28 @@
           v-model="page.content"
           class="textarea-paper"
           placeholder="在此输入文案..."
+          :disabled="polishingKey === pageKey(page)"
           @input="store.updatePage(page.index, page.content)"
         />
         
         <div class="word-count">{{ page.content.length }} 字</div>
+
+        <!-- AI 润色结果对比预览：应用后才写回，放弃则丢弃 -->
+        <div v-if="polishPreviews[pageKey(page)] !== undefined" class="polish-preview">
+          <div class="polish-preview-label">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"></path></svg>
+            AI 润色结果
+          </div>
+          <div class="polish-preview-text">{{ polishPreviews[pageKey(page)] }}</div>
+          <div class="polish-preview-actions">
+            <button class="polish-mini-btn primary" @click="applyPolish(page)">应用</button>
+            <button class="polish-mini-btn" @click="discardPolish(page)">放弃</button>
+          </div>
+        </div>
+
+        <div v-if="polishErrors[pageKey(page)]" class="polish-error" role="alert">
+          {{ polishErrors[pageKey(page)] }}
+        </div>
       </div>
 
       <!-- 添加按钮卡片 -->
@@ -128,7 +170,14 @@ import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { useStyleLibrary } from '../composables/useStyleLibrary'
-import { updateHistory, createHistory, type Page } from '../api'
+import {
+  updateHistory,
+  createHistory,
+  polishPage,
+  type Page,
+  type PolishInstruction
+} from '../api'
+import { getApiErrorPayload } from '../api/client'
 import StepIndicator from './shared/StepIndicator.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
 
@@ -208,6 +257,68 @@ const movePageBy = (index: number, offset: number) => {
   const target = index + offset
   if (target < 0 || target >= store.outline.pages.length) return
   store.movePage(index, target)
+}
+
+// ==================== 单页 AI 润色 ====================
+
+// 正在润色的页面 key（同一时间只允许一页润色）
+const polishingKey = ref<number | null>(null)
+// 当前展开润色菜单的页面 key
+const openMenuKey = ref<number | null>(null)
+// 润色结果预览（key -> 新文案），应用后才写回 page.content
+const polishPreviews = ref<Record<number, string>>({})
+// 润色失败的错误信息（key -> 错误文本）
+const polishErrors = ref<Record<number, string>>({})
+
+const toggleMenu = (page: Page) => {
+  const key = pageKey(page)
+  openMenuKey.value = openMenuKey.value === key ? null : key
+}
+
+// 点击菜单外部时关闭下拉
+const closeMenuOnOutsideClick = () => {
+  openMenuKey.value = null
+}
+
+const runPolish = async (page: Page, instruction: PolishInstruction) => {
+  openMenuKey.value = null
+  // 同一时间只允许一页在润色
+  if (polishingKey.value !== null) return
+
+  const key = pageKey(page)
+  delete polishErrors.value[key]
+  delete polishPreviews.value[key]
+  polishingKey.value = key
+
+  try {
+    const result = await polishPage(page.content, page.type, store.topic, instruction)
+    if (result.success && result.content) {
+      polishPreviews.value[key] = result.content
+    } else {
+      polishErrors.value[key] =
+        result.error_message
+        || (typeof result.error === 'string' ? result.error : '')
+        || 'AI 润色失败，请稍后重试'
+    }
+  } catch (error) {
+    polishErrors.value[key] = getApiErrorPayload(error, 'AI 润色失败，请稍后重试').error_message
+  } finally {
+    polishingKey.value = null
+  }
+}
+
+const applyPolish = (page: Page) => {
+  const key = pageKey(page)
+  const next = polishPreviews.value[key]
+  if (next === undefined) return
+  // 写回 page.content，触发 store 深度 watch 的自动保存
+  page.content = next
+  store.updatePage(page.index, next)
+  delete polishPreviews.value[key]
+}
+
+const discardPolish = (page: Page) => {
+  delete polishPreviews.value[pageKey(page)]
 }
 
 const addPage = (type: 'cover' | 'content' | 'summary') => {
@@ -355,13 +466,15 @@ const checkAndCreateHistory = async () => {
   }
 }
 
-// 组件挂载时检查历史记录
+// 组件挂载时检查历史记录，并注册润色菜单的点击外部关闭
 onMounted(async () => {
+  document.addEventListener('click', closeMenuOnOutsideClick)
   await checkAndCreateHistory()
 })
 
-// 组件卸载时清理定时器
+// 组件卸载时清理定时器和事件监听
 onUnmounted(() => {
+  document.removeEventListener('click', closeMenuOnOutsideClick)
   if (saveTimer !== null) {
     clearTimeout(saveTimer)
     saveTimer = null
@@ -567,6 +680,151 @@ watch(
 .icon-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* ==================== 单页 AI 润色 ==================== */
+.polish-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.polish-btn.active {
+  color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.polish-btn:hover:not(:disabled) {
+  color: var(--primary);
+  background: var(--primary-fade);
+}
+
+/* 润色进行中的转圈指示 */
+.polish-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--primary-fade);
+  border-top-color: var(--primary);
+  border-radius: var(--radius-full);
+  animation: polish-spin 0.7s linear infinite;
+}
+
+@keyframes polish-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 三选项下拉菜单：右对齐避免小屏溢出 */
+.polish-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  min-width: 108px;
+  padding: 4px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: var(--shadow-hover);
+}
+
+.polish-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-main);
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.polish-menu-item:hover {
+  color: var(--primary);
+  background: var(--primary-fade);
+}
+
+/* 润色结果对比预览块 */
+.polish-preview {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--primary-fade);
+}
+
+.polish-preview-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: var(--space-2);
+}
+
+.polish-preview-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.polish-preview-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.polish-mini-btn {
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-color);
+  background: var(--card-bg, #fff);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.polish-mini-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-hover);
+}
+
+.polish-mini-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.polish-mini-btn.primary:hover {
+  opacity: 0.9;
+  color: #fff;
+}
+
+/* 润色失败错误提示（复用全局 danger 配色变量） */
+.polish-error {
+  margin-top: var(--space-2);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-xs);
+  word-break: break-word;
+}
+
+/* 润色中禁用的文本域 */
+.textarea-paper:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* 文本区域 - 核心 */

@@ -96,8 +96,8 @@ interface UploadedImage {
   preview: string
 }
 
-// 定义 Props
-const props = defineProps<{
+// 定义 Props（模板中直接使用，无需保留赋值）
+defineProps<{
   modelValue: string
   loading: boolean
 }>()

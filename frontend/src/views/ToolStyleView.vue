@@ -259,7 +259,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onUnmounted } from 'vue'
 import { styleCategories, type StyleCategory, type StyleTemplate } from '../data/styleTemplates'
 import { useStyleLibrary } from '../composables/useStyleLibrary'
 
@@ -409,6 +409,11 @@ function handleApply(template: StyleTemplate) {
 // 复制反馈：记录最近一次复制成功的按钮，短暂显示「已复制」后复原
 const copiedKey = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+onUnmounted(() => {
+  if (toastTimer) clearTimeout(toastTimer)
+  if (copiedTimer) clearTimeout(copiedTimer)
+})
 
 function markCopied(key: string) {
   copiedKey.value = key

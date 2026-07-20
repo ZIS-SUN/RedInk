@@ -44,36 +44,69 @@
     <div class="toolbar-wrapper">
       <div class="tabs-container" style="margin-bottom: 0; border-bottom: none;">
         <div
+          v-for="tab in STATUS_TABS"
+          :key="tab.value"
           class="tab-item"
-          :class="{ active: currentTab === 'all' }"
-          @click="switchTab('all')"
+          :class="{ active: currentTab === tab.value }"
+          @click="switchTab(tab.value)"
         >
-          全部
-        </div>
-        <div
-          class="tab-item"
-          :class="{ active: currentTab === 'completed' }"
-          @click="switchTab('completed')"
-        >
-          已完成
-        </div>
-        <div
-          class="tab-item"
-          :class="{ active: currentTab === 'draft' }"
-          @click="switchTab('draft')"
-        >
-          草稿箱
+          {{ tab.label }}
         </div>
       </div>
 
-      <div class="search-mini">
-        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input
-          v-model="searchKeyword"
-          type="text"
-          placeholder="搜索标题..."
-          @keyup.enter="handleSearch"
-        />
+      <div class="toolbar-right">
+        <div class="search-mini">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input
+            v-model="searchKeyword"
+            type="text"
+            placeholder="搜索标题..."
+            @keyup.enter="handleSearch"
+          />
+        </div>
+        <button
+          type="button"
+          class="batch-toggle-btn"
+          :class="{ active: batchMode }"
+          @click="toggleBatchMode"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+          {{ batchMode ? '退出批量' : '批量管理' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- 批量操作条 -->
+    <div v-if="batchMode" class="batch-bar" role="toolbar" aria-label="批量操作">
+      <div class="batch-info">
+        <span class="batch-count">已选 {{ selectedIds.size }} 项</span>
+        <span v-if="batchDeleting" class="batch-progress" role="status" aria-live="polite">
+          删除中 {{ batchProgress.done }}/{{ batchProgress.total }}
+        </span>
+      </div>
+      <div class="batch-actions">
+        <button type="button" class="btn btn-secondary batch-btn" :disabled="batchDeleting" @click="selectAllOnPage">
+          全选本页
+        </button>
+        <button type="button" class="btn btn-secondary batch-btn" :disabled="batchDeleting" @click="toggleBatchMode">
+          取消
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary batch-btn"
+          :disabled="selectedIds.size === 0 || batchDeleting"
+          @click="doBatchDownload"
+        >
+          批量下载
+        </button>
+        <button
+          type="button"
+          class="btn batch-btn batch-btn-danger"
+          :disabled="selectedIds.size === 0 || batchDeleting"
+          @click="showBatchDeleteConfirm = true"
+        >
+          批量删除
+        </button>
       </div>
     </div>
 
@@ -101,14 +134,34 @@
     </div>
 
     <div v-else class="gallery-grid">
-      <div v-for="record in records" :key="record.id" class="gallery-item">
-        <GalleryCard
-          :record="record"
-          @preview="viewImages"
-          @edit="loadRecord"
-          @delete="confirmDelete"
-        />
-        <button type="button" class="add-plan-btn" @click="openPlanModal(record)">
+      <div
+        v-for="record in records"
+        :key="record.id"
+        class="gallery-item"
+        :class="{ 'batch-selected': batchMode && selectedIds.has(record.id) }"
+      >
+        <div class="gallery-card-wrap">
+          <GalleryCard
+            :record="record"
+            @preview="viewImages"
+            @edit="loadRecord"
+            @delete="confirmDelete"
+          />
+          <!-- 批量模式：覆盖层拦截卡片点击，改为切换选中 -->
+          <button
+            v-if="batchMode"
+            type="button"
+            class="batch-overlay"
+            :aria-pressed="selectedIds.has(record.id)"
+            :aria-label="`选择「${record.title}」`"
+            @click="toggleSelect(record.id)"
+          >
+            <span class="batch-checkbox" :class="{ checked: selectedIds.has(record.id) }">
+              <svg v-if="selectedIds.has(record.id)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </span>
+          </button>
+        </div>
+        <button v-if="!batchMode" type="button" class="add-plan-btn" @click="openPlanModal(record)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="12" y1="14" x2="12" y2="18"></line><line x1="10" y1="16" x2="14" y2="16"></line></svg>
           加入内容日历
         </button>
@@ -126,7 +179,7 @@
     <ImageGalleryModal
       v-if="viewingRecord"
       :visible="!!viewingRecord"
-      :record="viewingRecord"
+      :record="viewingRecordForModal"
       :regeneratingImages="regeneratingImages"
       @close="closeGallery"
       @showOutline="showOutlineModal = true"
@@ -152,6 +205,17 @@
       danger
       @confirm="doDelete"
       @cancel="deleteTarget = null"
+    />
+
+    <!-- 批量删除确认弹窗 -->
+    <ConfirmDialog
+      :visible="showBatchDeleteConfirm"
+      title="批量删除创作记录？"
+      :message="`将删除选中的 ${selectedIds.size} 条记录，删除后无法恢复。`"
+      confirm-text="全部删除"
+      danger
+      @confirm="doBatchDelete"
+      @cancel="showBatchDeleteConfirm = false"
     />
 
     <!-- 加入内容日历弹窗 -->
@@ -196,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import {
   getHistoryList,
@@ -205,12 +269,22 @@ import {
   deleteHistory,
   getHistory,
   type HistoryRecord,
+  type HistoryDetail,
+  type Page,
   regenerateImage as apiRegenerateImage,
   updateHistory,
   scanAllTasks
 } from '../api'
 import { useGeneratorStore } from '../stores/generator'
-import { createPlan, type PlanPlatform } from '../api/calendar'
+import { useGenerationRestore } from '../composables/useGenerationRestore'
+import { withCacheBuster } from '../utils/url'
+import { createPlan, type PlanItemInput, type PlanPlatform } from '../api/calendar'
+
+/**
+ * 创建计划入参的本地扩展：附带来源历史记录 ID。
+ * 后端 POST /api/plans 已支持可选 record_id（旧后端会忽略未知字段，向后兼容）。
+ */
+type PlanCreateInput = PlanItemInput & { record_id?: string }
 
 // 引入组件
 import StatsOverview from '../components/history/StatsOverview.vue'
@@ -224,18 +298,54 @@ import { normalizeApiError, type AppError } from '../utils/errors'
 const router = useRouter()
 const route = useRoute()
 const store = useGeneratorStore()
+const { hydrateFromHistory } = useGenerationRestore()
+
+// 状态 tab：与后端 status 全集对齐（generating 为瞬态，不单列）
+const STATUS_TABS: Array<{ value: string; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'completed', label: '已完成' },
+  { value: 'partial', label: '部分完成' },
+  { value: 'draft', label: '草稿箱' },
+  { value: 'error', label: '失败' }
+]
+
+/** 统计概览数据（getHistoryStats 响应的展示子集） */
+interface HistoryStats {
+  total: number
+  by_status: Record<string, number>
+}
 
 // 数据状态
 const records = ref<HistoryRecord[]>([])
 const loading = ref(false)
-const stats = ref<any>(null)
+const stats = ref<HistoryStats | null>(null)
 const currentTab = ref('all')
 const searchKeyword = ref('')
 const currentPage = ref(1)
 const totalPages = ref(1)
 
+// 批量操作状态
+const batchMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+const showBatchDeleteConfirm = ref(false)
+const batchDeleting = ref(false)
+const batchProgress = ref({ done: 0, total: 0 })
+
 // 查看器状态
-const viewingRecord = ref<any>(null)
+const viewingRecord = ref<HistoryDetail | null>(null)
+
+// ImageGalleryModal 的 props 要求 task_id 为非空字符串；草稿等无任务记录退化为空串
+// （此时 generated 均为空，模板只渲染占位，不会拼出图片 URL）
+const viewingRecordForModal = computed(() => {
+  if (!viewingRecord.value) return null
+  return {
+    ...viewingRecord.value,
+    images: {
+      task_id: viewingRecord.value.images.task_id ?? '',
+      generated: viewingRecord.value.images.generated
+    }
+  }
+})
 const regeneratingImages = ref<Set<number>>(new Set())
 const showOutlineModal = ref(false)
 const isScanning = ref(false)
@@ -296,11 +406,13 @@ async function loadData() {
   loading.value = true
   error.value = null
   try {
-    let statusFilter = currentTab.value === 'all' ? undefined : currentTab.value
+    const statusFilter = currentTab.value === 'all' ? undefined : currentTab.value
     const res = await getHistoryList(currentPage.value, 12, statusFilter)
     if (res.success) {
       records.value = res.records
       totalPages.value = res.total_pages
+      // 列表内容变化后清空选中，避免选中项指向已不在当前页的记录
+      selectedIds.value = new Set()
     } else {
       error.value = normalizeApiError(res.error || res.error_message || '获取历史记录列表失败', '获取历史记录列表失败')
     }
@@ -351,6 +463,7 @@ async function handleSearch() {
     if (res.success) {
       records.value = res.records
       totalPages.value = 1
+      selectedIds.value = new Set()
     } else {
       error.value = normalizeApiError(res.error || res.error_message || '搜索历史记录失败', '搜索历史记录失败')
     }
@@ -363,41 +476,13 @@ async function handleSearch() {
 
 /**
  * 加载记录并跳转到编辑页
+ * 水合逻辑统一走 useGenerationRestore 的 hydrateFromHistory（edit 场景：
+ * 先重置上一会话残留状态，stage 停留在大纲页，图片 URL 统一走 getImageUrl）
  */
 async function loadRecord(id: string) {
   const res = await getHistory(id)
   if (res.success && res.record) {
-    // 定向重置上一会话残留状态，防止上一篇的内容串到新记录：
-    // 清空标题/文案/标签、重置生成进度、清空旧图片/任务ID/用户上传图
-    store.clearContent()
-    store.progress = { current: 0, total: 0, status: 'idle' }
-    store.images = []
-    store.taskId = null
-    store.userImages = []
-
-    store.setTopic(res.record.title)
-    store.setOutline(res.record.outline.raw, res.record.outline.pages)
-    store.setRecordId(res.record.id)
-    const generated = res.record.images.generated || []
-    if (generated.some(Boolean)) {
-      store.taskId = res.record.images.task_id
-      store.images = res.record.outline.pages.map((page, idx) => {
-        const filename = generated[page.index] || generated[idx] || ''
-        return {
-          index: page.index,
-          url: filename ? `/api/images/${res.record!.images.task_id}/${filename}` : '',
-          status: filename ? 'done' : 'error',
-          retryable: !filename
-        }
-      })
-      // 同步进度到恢复的图片状态
-      const doneCount = store.images.filter(img => img.status === 'done').length
-      store.progress = {
-        current: doneCount,
-        total: store.images.length,
-        status: doneCount >= store.images.length ? 'done' : 'error'
-      }
-    }
+    hydrateFromHistory(res.record, { target: 'edit' })
     router.push('/outline')
   } else {
     error.value = normalizeApiError(res.error || res.error_message || '打开历史记录失败', '打开历史记录失败')
@@ -409,7 +494,7 @@ async function loadRecord(id: string) {
  */
 async function viewImages(id: string) {
   const res = await getHistory(id)
-  if (res.success) {
+  if (res.success && res.record) {
     viewingRecord.value = res.record
   } else {
     error.value = normalizeApiError(res.error || res.error_message || '查看图片失败', '查看图片失败')
@@ -460,6 +545,108 @@ async function doDelete() {
 }
 
 /**
+ * 进入/退出批量管理模式（退出时清空选中）
+ */
+function toggleBatchMode() {
+  if (batchDeleting.value) return
+  batchMode.value = !batchMode.value
+  selectedIds.value = new Set()
+  showBatchDeleteConfirm.value = false
+}
+
+/**
+ * 切换单条记录选中状态
+ */
+function toggleSelect(id: string) {
+  if (batchDeleting.value) return
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) {
+    next.delete(id)
+  } else {
+    next.add(id)
+  }
+  selectedIds.value = next
+}
+
+/**
+ * 全选当前页
+ */
+function selectAllOnPage() {
+  selectedIds.value = new Set(records.value.map(r => r.id))
+}
+
+/**
+ * 批量删除：逐条串行调用 deleteHistory，展示进度；
+ * 完成后刷新列表并退出批量模式，部分失败时给出提示。
+ */
+async function doBatchDelete() {
+  showBatchDeleteConfirm.value = false
+  const ids = [...selectedIds.value]
+  if (ids.length === 0 || batchDeleting.value) return
+
+  batchDeleting.value = true
+  batchProgress.value = { done: 0, total: ids.length }
+  let failed = 0
+
+  for (const id of ids) {
+    try {
+      const res = await deleteHistory(id)
+      if (!res.success) failed++
+    } catch {
+      failed++
+    }
+    batchProgress.value = { done: batchProgress.value.done + 1, total: ids.length }
+  }
+
+  batchDeleting.value = false
+  batchMode.value = false
+  selectedIds.value = new Set()
+  currentPage.value = 1
+  await loadData()
+  await loadStats()
+
+  if (failed > 0) {
+    error.value = normalizeApiError(
+      `${failed} 条删除失败，已成功删除 ${ids.length - failed} 条。`,
+      '批量删除部分失败'
+    )
+  } else {
+    successMessage.value = `已删除 ${ids.length} 条记录`
+  }
+}
+
+/**
+ * 批量下载：对每条有图片的选中记录触发 zip 下载，
+ * 间隔 400ms 防浏览器拦截；无图片的记录跳过并计数提示。
+ */
+function doBatchDownload() {
+  const selected = records.value.filter(r => selectedIds.value.has(r.id))
+  if (selected.length === 0) return
+
+  // 有缩略图 + 任务 ID 才有已生成图片可打包
+  const downloadable = selected.filter(r => r.thumbnail && r.task_id)
+  const skipped = selected.length - downloadable.length
+
+  downloadable.forEach((record, index) => {
+    setTimeout(() => {
+      const link = document.createElement('a')
+      link.href = `/api/history/${record.id}/download`
+      link.click()
+    }, index * 400)
+  })
+
+  if (downloadable.length === 0) {
+    error.value = normalizeApiError('选中的记录都还没有生成图片，无法下载。', '无可下载内容')
+    return
+  }
+
+  successMessage.value =
+    skipped > 0
+      ? `已开始下载 ${downloadable.length} 条记录，${skipped} 条无图片已跳过`
+      : `已开始下载 ${downloadable.length} 条记录`
+}
+
+/**
  * 打开「加入内容日历」弹窗（默认小红书 + 今天）
  */
 function openPlanModal(record: { id: string; title: string }) {
@@ -488,13 +675,16 @@ async function doAddToPlan() {
   planSaving.value = true
   planFormError.value = ''
 
-  const res = await createPlan({
+  // 附带来源记录 ID，便于日历侧回链到具体作品（旧后端忽略该字段，向后兼容）
+  const payload: PlanCreateInput = {
     title: planTarget.value.title,
     platform: planForm.value.platform,
     publish_date: planForm.value.publish_date,
     status: 'ready',
-    notes: '来自历史作品'
-  })
+    notes: '来自历史作品',
+    record_id: planTarget.value.id
+  }
+  const res = await createPlan(payload)
 
   planSaving.value = false
 
@@ -518,49 +708,50 @@ function changePage(p: number) {
  * 重新生成历史记录中的图片
  */
 async function regenerateHistoryImage(index: number) {
-  if (!viewingRecord.value || !viewingRecord.value.images.task_id) {
+  // 捕获局部引用：await 期间关闭查看器也不影响本次更新与保存
+  const record = viewingRecord.value
+  const taskId = record?.images.task_id
+  if (!record || !taskId) {
     error.value = normalizeApiError('缺少任务信息，无法重新生成图片。', '无法重新生成')
     return
   }
 
-  const page = viewingRecord.value.outline.pages.find((item: any) => item.index === index)
+  const page = record.outline.pages.find((item: Page) => item.index === index)
   if (!page) return
 
   regeneratingImages.value.add(index)
 
   try {
     const context = {
-      fullOutline: viewingRecord.value.outline.raw || '',
-      userTopic: viewingRecord.value.title || '',
-      recordId: viewingRecord.value.id
+      fullOutline: record.outline.raw || '',
+      userTopic: record.title || '',
+      recordId: record.id,
+      // 与旧的 api 层兜底行为保持一致：沿用当前会话记录的风格提示词
+      stylePrompt: store.stylePrompt
     }
 
-    const result = await apiRegenerateImage(
-      viewingRecord.value.images.task_id,
-      page,
-      true,
-      context
-    )
+    const result = await apiRegenerateImage(taskId, page, true, context)
 
     if (result.success && result.image_url) {
-      const filename = result.image_url.split('/').pop()
-      while (viewingRecord.value.images.generated.length <= index) {
-        viewingRecord.value.images.generated.push('')
-      }
-      viewingRecord.value.images.generated[index] = filename
+      // image_url 可能带 query（如 ?thumbnail=true），先去掉再取文件名
+      const filename = result.image_url.split('?')[0].split('/').pop() || ''
 
-      // 刷新图片
-      const timestamp = Date.now()
-      const imgElements = document.querySelectorAll(`img[src*="${viewingRecord.value.images.task_id}/${filename}"]`)
-      imgElements.forEach(img => {
-        const baseUrl = (img as HTMLImageElement).src.split('?')[0]
-        ;(img as HTMLImageElement).src = `${baseUrl}?t=${timestamp}`
-      })
+      // 持久化用的干净文件名列表（剥掉展示层可能追加过的 ?t= 时间戳）
+      const cleanGenerated = record.images.generated.map(name => name.split('?')[0])
+      while (cleanGenerated.length <= index) cleanGenerated.push('')
+      cleanGenerated[index] = filename
 
-      await updateHistory(viewingRecord.value.id, {
+      // 展示层响应式强刷：仅给本张图追加时间戳，src 变化后由模板自动重新加载；
+      // generated 里存的是纯文件名，withCacheBuster 按相对路径解析会带上前导 /，需去掉
+      const nextGenerated = [...record.images.generated]
+      while (nextGenerated.length <= index) nextGenerated.push('')
+      nextGenerated[index] = withCacheBuster(filename).replace(/^\//, '')
+      record.images.generated = nextGenerated
+
+      await updateHistory(record.id, {
         images: {
-          task_id: viewingRecord.value.images.task_id,
-          generated: viewingRecord.value.images.generated
+          task_id: taskId,
+          generated: cleanGenerated
         }
       })
 
@@ -580,8 +771,10 @@ async function regenerateHistoryImage(index: number) {
  */
 function downloadImage(filename: string, index: number) {
   if (!viewingRecord.value) return
+  // 展示层文件名可能带 ?t= 时间戳，下载前剥掉 query
+  const cleanName = filename.split('?')[0]
   const link = document.createElement('a')
-  link.href = `/api/images/${viewingRecord.value.images.task_id}/${filename}?thumbnail=false`
+  link.href = `/api/images/${viewingRecord.value.images.task_id}/${cleanName}?thumbnail=false`
   link.download = `page_${index + 1}.png`
   link.click()
 }
@@ -627,6 +820,40 @@ async function handleScanAll() {
   }
 }
 
+// 会话级自动扫描节流标记：后端全量扫描较慢（超时 60s），
+// 每个浏览器会话只自动扫描一次，手动「同步历史」按钮不受影响
+const AUTO_SCAN_SESSION_KEY = 'history-auto-scan-done'
+
+/** 本会话是否还需要自动扫描（sessionStorage 不可用时保守跳过） */
+function shouldAutoScan(): boolean {
+  try {
+    return sessionStorage.getItem(AUTO_SCAN_SESSION_KEY) !== '1'
+  } catch {
+    return false
+  }
+}
+
+/** 标记本会话已尝试过自动扫描 */
+function markAutoScanDone() {
+  try {
+    sessionStorage.setItem(AUTO_SCAN_SESSION_KEY, '1')
+  } catch {
+    // sessionStorage 不可用时忽略（下次挂载 shouldAutoScan 也会返回 false）
+  }
+}
+
+// 响应 /history/:id 与 /history 之间的导航：有 ID 打开图片查看器，无 ID 关闭
+watch(
+  () => route.params.id,
+  async (id) => {
+    if (typeof id === 'string' && id) {
+      await viewImages(id)
+    } else if (viewingRecord.value) {
+      closeGallery()
+    }
+  }
+)
+
 onMounted(async () => {
   await loadData()
   await loadStats()
@@ -636,15 +863,18 @@ onMounted(async () => {
     await viewImages(route.params.id as string)
   }
 
-  // 自动执行一次扫描（静默，不显示结果）
-  try {
-    const result = await scanAllTasks()
-    if (result.success && (result.synced || 0) > 0) {
-      await loadData()
-      await loadStats()
+  // 自动执行一次扫描（静默，不显示结果；会话级节流，避免每次进页都触发后端全量扫描）
+  if (shouldAutoScan()) {
+    markAutoScanDone()
+    try {
+      const result = await scanAllTasks()
+      if (result.success && (result.synced || 0) > 0) {
+        await loadData()
+        await loadStats()
+      }
+    } catch (e) {
+      console.error('自动扫描失败:', e)
     }
-  } catch (e) {
-    console.error('自动扫描失败:', e)
   }
 })
 </script>
@@ -721,10 +951,158 @@ onMounted(async () => {
   padding-bottom: 0;
 }
 
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+}
+
 .search-mini {
   position: relative;
   width: 240px;
-  margin-bottom: 10px;
+}
+
+/* 批量管理切换按钮 */
+.batch-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: var(--font-size-caption);
+  font-weight: 500;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.batch-toggle-btn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-sm);
+}
+
+.batch-toggle-btn.active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* 批量操作条 */
+.batch-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--gray-0);
+  box-shadow: var(--shadow-xs);
+}
+
+.batch-info {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.batch-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-progress {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.batch-btn {
+  padding: 7px 14px;
+  font-size: var(--font-size-caption);
+}
+
+.batch-btn-danger {
+  border: 1px solid transparent;
+  background: var(--color-danger);
+  color: white;
+}
+
+.batch-btn-danger:hover:not(:disabled) {
+  background: var(--color-danger);
+  opacity: 0.9;
+}
+
+.batch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 批量模式的卡片覆盖层与复选框 */
+.gallery-card-wrap {
+  position: relative;
+}
+
+.batch-overlay {
+  position: absolute;
+  inset: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  z-index: 2;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.batch-overlay:hover {
+  background: rgba(33, 30, 27, 0.04);
+}
+
+.gallery-item.batch-selected .batch-overlay {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.batch-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  border: 2px solid var(--gray-4);
+  background: rgba(255, 255, 255, 0.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.batch-checkbox.checked {
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .search-mini input {
@@ -1047,8 +1425,22 @@ onMounted(async () => {
     gap: 12px;
   }
 
-  .search-mini {
+  .toolbar-right {
     width: 100%;
+  }
+
+  .search-mini {
+    flex: 1;
+    width: auto;
+  }
+
+  .batch-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .batch-actions {
+    justify-content: flex-end;
   }
 
   .gallery-grid {

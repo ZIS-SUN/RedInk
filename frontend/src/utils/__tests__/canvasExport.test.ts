@@ -5,7 +5,9 @@ import {
   computeContainRect,
   computeCoverRect,
   computeDefaultBlurRadius,
-  computeDefaultWatermarkFontSize
+  computeDefaultWatermarkFontSize,
+  computeWatermarkAnchor,
+  computeWatermarkFontSize
 } from '../canvasExport'
 
 describe('computeContainRect', () => {
@@ -78,6 +80,70 @@ describe('computeDefaultWatermarkFontSize', () => {
     expect(computeDefaultWatermarkFontSize(1080)).toBe(32)
     expect(computeDefaultWatermarkFontSize(100)).toBe(14)
     expect(computeDefaultWatermarkFontSize(10000)).toBe(64)
+  })
+})
+
+describe('computeWatermarkFontSize', () => {
+  it('按占宽比例计算：小/中/大 ≈ 2.5%/3.5%/5%', () => {
+    expect(computeWatermarkFontSize(1080, 0.025)).toBe(27)
+    expect(computeWatermarkFontSize(1080, 0.035)).toBe(38)
+    expect(computeWatermarkFontSize(1080, 0.05)).toBe(54)
+  })
+
+  it('限制在 12~160px', () => {
+    expect(computeWatermarkFontSize(100, 0.025)).toBe(12)
+    expect(computeWatermarkFontSize(10000, 0.05)).toBe(160)
+  })
+})
+
+describe('computeWatermarkAnchor', () => {
+  const W = 1080
+  const H = 1920
+  const M = 40
+
+  it('bottom-right（默认位置）：右下角、右对齐、底基线', () => {
+    expect(computeWatermarkAnchor('bottom-right', W, H, M)).toEqual({
+      x: W - M,
+      y: H - M,
+      textAlign: 'right',
+      textBaseline: 'bottom'
+    })
+  })
+
+  it('top-left：左上角、左对齐、顶基线', () => {
+    expect(computeWatermarkAnchor('top-left', W, H, M)).toEqual({
+      x: M,
+      y: M,
+      textAlign: 'left',
+      textBaseline: 'top'
+    })
+  })
+
+  it('top-right：右上角、右对齐、顶基线', () => {
+    expect(computeWatermarkAnchor('top-right', W, H, M)).toEqual({
+      x: W - M,
+      y: M,
+      textAlign: 'right',
+      textBaseline: 'top'
+    })
+  })
+
+  it('bottom-left：左下角、左对齐、底基线', () => {
+    expect(computeWatermarkAnchor('bottom-left', W, H, M)).toEqual({
+      x: M,
+      y: H - M,
+      textAlign: 'left',
+      textBaseline: 'bottom'
+    })
+  })
+
+  it('bottom-center：水平居中、居中对齐、底基线', () => {
+    expect(computeWatermarkAnchor('bottom-center', W, H, M)).toEqual({
+      x: 540,
+      y: H - M,
+      textAlign: 'center',
+      textBaseline: 'bottom'
+    })
   })
 })
 

@@ -16,6 +16,8 @@ export interface AnalyticsRecord {
   platform: string
   /** 发布日期，YYYY-MM-DD */
   publish_date: string
+  /** 发布时间，HH:MM，空串表示未填写（旧记录可能缺失该字段） */
+  publish_time?: string
   /** 内容类型/标签（如"干货教程"/"好物种草"） */
   content_type: string
   /** 曝光/播放数 */
@@ -32,6 +34,10 @@ export interface AnalyticsRecord {
   followers_gained: number
   /** 备注 */
   notes: string
+  /** 关联的历史作品 ID，空串表示未关联（旧记录可能缺失该字段） */
+  record_id?: string
+  /** 关联的内容日历条目 ID，空串表示未关联（旧记录可能缺失该字段） */
+  calendar_plan_id?: string
   created_at: string
   updated_at: string
 }
@@ -68,6 +74,15 @@ export interface AnalyticsTrendPoint {
   followers_gained: number
 }
 
+/** 发布时段汇总（只统计填写了发布时间的记录） */
+export interface AnalyticsTimeSlot {
+  /** 时段名称，如"晚间 18-22" */
+  name: string
+  count: number
+  /** 该时段平均互动率（百分比数值） */
+  avg_engagement: number
+}
+
 /** 统计概览 */
 export interface AnalyticsStats {
   total_records: number
@@ -82,6 +97,8 @@ export interface AnalyticsStats {
   platforms: AnalyticsGroupSummary[]
   content_types: AnalyticsGroupSummary[]
   trend: AnalyticsTrendPoint[]
+  /** 发布时段汇总（新增字段，旧后端可能缺失） */
+  time_slots?: AnalyticsTimeSlot[]
 }
 
 /** AI 复盘洞察结果 */
@@ -123,6 +140,28 @@ export async function createAnalyticsRecord(data: AnalyticsRecordInput): Promise
     return response.data
   } catch (error: unknown) {
     return { success: false, ...getApiErrorPayload(error, '创建表现记录失败') }
+  }
+}
+
+/** 批量创建的单行失败信息 */
+export interface AnalyticsBatchFailure {
+  /** 提交数组中的行下标（0 起） */
+  index: number
+  error: string
+}
+
+export async function batchCreateAnalyticsRecords(records: AnalyticsRecordInput[]): Promise<{
+  success: boolean
+  created?: number
+  failed?: AnalyticsBatchFailure[]
+  error?: AppError | string
+  error_message?: string
+}> {
+  try {
+    const response = await http.post('/analytics/records/batch', { records })
+    return response.data
+  } catch (error: unknown) {
+    return { success: false, ...getApiErrorPayload(error, '批量导入表现记录失败') }
   }
 }
 

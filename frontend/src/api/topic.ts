@@ -18,6 +18,8 @@ export interface TopicIdea {
 export interface TopicResponse {
   success: boolean
   topics?: TopicIdea[]
+  /** 本次生成是否实际结合了账号数据（数据复盘工具录入的记录） */
+  account_context_used?: boolean
   error?: AppError | string
   error_message?: string
 }
@@ -27,6 +29,8 @@ export interface GenerateTopicsParams {
   niche: string
   /** 目标平台，如：小红书、抖音 */
   platform: string
+  /** 是否结合账号数据（需先在数据复盘工具录入笔记数据），默认 false */
+  use_account_data?: boolean
 }
 
 export async function generateTopics(

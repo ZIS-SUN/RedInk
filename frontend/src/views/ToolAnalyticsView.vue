@@ -6,10 +6,16 @@
         <h1 class="page-title">数据复盘</h1>
         <p class="page-subtitle">手动录入已发布内容的表现数据，用数据找到下一个爆款方向</p>
       </div>
-      <button type="button" class="btn btn-primary" @click="openCreateModal">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-        录入数据
-      </button>
+      <div class="page-actions">
+        <button type="button" class="btn btn-import" @click="openImportModal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          批量导入
+        </button>
+        <button type="button" class="btn btn-primary" @click="openCreateModal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          录入数据
+        </button>
+      </div>
     </div>
 
     <!-- 反馈提示 -->
@@ -47,7 +53,10 @@
       </div>
       <h3 class="empty-title">还没有表现数据</h3>
       <p class="empty-tips">把已发布内容的曝光、点赞等数据录进来，就能看到统计和 AI 复盘建议</p>
-      <button type="button" class="btn btn-primary empty-cta" @click="openCreateModal">立即录入</button>
+      <div class="empty-cta">
+        <button type="button" class="btn btn-primary" @click="openCreateModal">立即录入</button>
+        <button type="button" class="btn btn-import" @click="openImportModal">从表格批量导入</button>
+      </div>
     </div>
 
     <template v-else>
@@ -71,36 +80,31 @@
         </div>
       </div>
 
-      <!-- 平台汇总 + 趋势 -->
+      <!-- 平台/类型对比 + 趋势 + 发布时段 -->
       <div v-if="stats" class="panel-grid">
         <div class="card panel">
-          <h3 class="panel-title">各平台表现</h3>
+          <h3 class="panel-title">各平台表现（互动率）</h3>
           <div v-if="stats.platforms.length === 0" class="panel-empty">暂无数据</div>
-          <div v-for="p in stats.platforms" :key="p.name" class="summary-row">
-            <span class="summary-name">{{ p.name }}</span>
-            <span class="summary-meta">{{ p.count }} 条 · 曝光 {{ formatNumber(p.views) }} · 互动率 {{ p.engagement_rate }}%</span>
-          </div>
+          <CompareBarChart v-else :items="platformBars" rate-label="互动率" />
 
-          <h3 class="panel-title" style="margin-top: 18px;">各内容类型表现</h3>
+          <h3 class="panel-title" style="margin-top: 18px;">各内容类型表现（互动率）</h3>
           <div v-if="stats.content_types.length === 0" class="panel-empty">暂无数据</div>
-          <div v-for="c in stats.content_types" :key="c.name" class="summary-row">
-            <span class="summary-name">{{ c.name }}</span>
-            <span class="summary-meta">{{ c.count }} 条 · 曝光 {{ formatNumber(c.views) }} · 互动率 {{ c.engagement_rate }}%</span>
-          </div>
+          <CompareBarChart v-else :items="contentTypeBars" rate-label="互动率" />
         </div>
 
         <div class="card panel">
-          <h3 class="panel-title">按月趋势（曝光）</h3>
+          <h3 class="panel-title">按月趋势（曝光 × 互动率）</h3>
           <div v-if="stats.trend.length === 0" class="panel-empty">记录中填写发布日期后即可查看趋势</div>
-          <div v-else class="trend-list">
-            <div v-for="t in stats.trend" :key="t.month" class="trend-row">
-              <span class="trend-month">{{ t.month }}</span>
-              <div class="trend-bar-track">
-                <div class="trend-bar" :style="{ width: trendBarWidth(t.views) }"></div>
-              </div>
-              <span class="trend-value">{{ formatNumber(t.views) }}</span>
-            </div>
-          </div>
+          <TrendLineChart v-else :points="stats.trend" />
+
+          <h3 class="panel-title" style="margin-top: 18px;">最佳发布时段</h3>
+          <div v-if="timeSlotBars.length === 0" class="panel-empty">记录中填写发布时间后即可查看时段分析</div>
+          <template v-else>
+            <CompareBarChart :items="timeSlotBars" rate-label="平均互动率" />
+            <p v-if="bestTimeSlot" class="slot-conclusion">
+              你的内容在【{{ bestTimeSlot.name }}】表现最好，平均互动率 {{ bestTimeSlot.avg_engagement }}%
+            </p>
+          </template>
         </div>
       </div>
 
@@ -163,10 +167,23 @@
             </thead>
             <tbody>
               <tr v-for="record in records" :key="record.id">
-                <td class="title-cell" :title="record.title">{{ record.title }}</td>
+                <td class="title-cell" :title="record.title">
+                  <span
+                    v-if="record.calendar_plan_id || record.record_id"
+                    class="linked-badge"
+                    :title="record.calendar_plan_id ? '由内容日历转录，已关联日历条目' : '已关联历史作品'"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                    已关联
+                  </span>
+                  {{ record.title }}
+                </td>
                 <td><span class="platform-tag">{{ record.platform }}</span></td>
                 <td>{{ record.content_type || '—' }}</td>
-                <td>{{ record.publish_date || '—' }}</td>
+                <td>
+                  {{ record.publish_date || '—' }}
+                  <span v-if="record.publish_time" class="time-sub">{{ record.publish_time }}</span>
+                </td>
                 <td class="num">{{ formatNumber(record.views) }}</td>
                 <td class="num">{{ formatNumber(record.likes) }}</td>
                 <td class="num">{{ formatNumber(record.collects) }}</td>
@@ -175,6 +192,14 @@
                 <td class="num">{{ formatNumber(record.followers_gained) }}</td>
                 <td class="num">{{ engagementRateText(record) }}</td>
                 <td class="actions-cell">
+                  <button
+                    v-if="record.record_id"
+                    type="button"
+                    class="btn btn-mini btn-view-work"
+                    :aria-label="`查看「${record.title}」关联的作品`"
+                    title="跳转到关联的历史作品详情"
+                    @click="viewLinkedWork(record)"
+                  >查看作品</button>
                   <button type="button" class="btn btn-mini" :aria-label="`编辑「${record.title}」`" @click="openEditModal(record)">编辑</button>
                   <button type="button" class="btn btn-mini btn-danger" :aria-label="`删除「${record.title}」`" @click="deleteTarget = record">删除</button>
                 </td>
@@ -216,6 +241,10 @@
               <div class="form-field">
                 <label>发布日期</label>
                 <input v-model="form.publish_date" class="input" type="date" />
+              </div>
+              <div class="form-field">
+                <label>发布时间</label>
+                <input v-model="form.publish_time" class="input" type="time" />
               </div>
             </div>
 
@@ -276,6 +305,116 @@
       </div>
     </Teleport>
 
+    <!-- 批量导入弹窗 -->
+    <Teleport to="body">
+      <div v-if="showImportModal" class="analytics-modal-overlay" @click.self="closeImportModal">
+        <div class="analytics-modal import-modal" role="dialog" aria-modal="true" aria-label="批量导入表现数据">
+          <div class="analytics-modal-head">
+            <h3>批量导入</h3>
+            <button type="button" class="close-btn" aria-label="关闭" @click="closeImportModal">×</button>
+          </div>
+
+          <div class="analytics-modal-body">
+            <!-- 导入结果 -->
+            <template v-if="importResult">
+              <div class="import-result" role="status">
+                <p class="import-result-main">成功导入 {{ importResult.created }} 条记录</p>
+                <template v-if="importResult.failed.length">
+                  <p class="import-result-sub">以下 {{ importResult.failed.length }} 条被后端拒绝，未导入：</p>
+                  <ul class="import-errors">
+                    <li v-for="f in importResult.failed" :key="f.index">第 {{ f.index + 1 }} 条：{{ f.error }}</li>
+                  </ul>
+                </template>
+              </div>
+            </template>
+
+            <!-- 粘贴 + 预览 -->
+            <template v-else>
+              <p class="import-hint">
+                从 Excel / 创作者中心表格直接复制粘贴（制表符分隔），或粘贴 CSV 文本。首行为表头，
+                支持：标题、平台、日期、发布时间、类型/标签、曝光/播放、点赞、收藏、评论、转发、涨粉。
+              </p>
+              <textarea
+                v-model="importText"
+                class="input import-textarea"
+                rows="8"
+                :placeholder="importPlaceholder"
+                aria-label="粘贴表格内容"
+              ></textarea>
+
+              <template v-if="importText.trim()">
+                <div class="import-summary">
+                  <span>识别出 <strong>{{ importParse.records.length }}</strong> 条记录（{{ importParse.delimiter === 'tab' ? '制表符分隔' : 'CSV 逗号分隔' }}）</span>
+                  <span v-if="importParse.errors.length" class="import-error-count">{{ importParse.errors.length }} 行无法解析</span>
+                </div>
+
+                <ul v-if="importParse.errors.length" class="import-errors">
+                  <li v-for="err in importParse.errors" :key="err.line">第 {{ err.line }} 行：{{ err.reason }}</li>
+                </ul>
+
+                <div v-if="importParse.records.length" class="records-table-wrap import-preview-wrap">
+                  <table class="records-table import-preview-table">
+                    <thead>
+                      <tr>
+                        <th>标题</th>
+                        <th>平台</th>
+                        <th>日期</th>
+                        <th>时间</th>
+                        <th>类型</th>
+                        <th class="num">曝光</th>
+                        <th class="num">点赞</th>
+                        <th class="num">收藏</th>
+                        <th class="num">评论</th>
+                        <th class="num">转发</th>
+                        <th class="num">涨粉</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(r, i) in importPreviewRows" :key="i">
+                        <td class="title-cell" :title="r.title">{{ r.title }}</td>
+                        <td>{{ r.platform }}</td>
+                        <td>{{ r.publish_date || '—' }}</td>
+                        <td>{{ r.publish_time || '—' }}</td>
+                        <td>{{ r.content_type || '—' }}</td>
+                        <td class="num">{{ formatNumber(r.views ?? 0) }}</td>
+                        <td class="num">{{ formatNumber(r.likes ?? 0) }}</td>
+                        <td class="num">{{ formatNumber(r.collects ?? 0) }}</td>
+                        <td class="num">{{ formatNumber(r.comments ?? 0) }}</td>
+                        <td class="num">{{ formatNumber(r.shares ?? 0) }}</td>
+                        <td class="num">{{ formatNumber(r.followers_gained ?? 0) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p v-if="importParse.records.length > 10" class="import-more">
+                    仅预览前 10 条，实际将导入 {{ importParse.records.length }} 条
+                  </p>
+                </div>
+              </template>
+
+              <p v-if="importError" class="form-error" role="alert">{{ importError }}</p>
+            </template>
+          </div>
+
+          <div class="analytics-modal-foot">
+            <template v-if="importResult">
+              <button type="button" class="btn btn-primary" @click="closeImportModal">完成</button>
+            </template>
+            <template v-else>
+              <button type="button" class="btn" @click="closeImportModal">取消</button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="importing || importParse.records.length === 0"
+                @click="handleImport"
+              >
+                {{ importing ? '导入中...' : importParse.records.length > 0 ? `确认导入 ${importParse.records.length} 条` : '确认导入' }}
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
       :visible="!!deleteTarget"
@@ -291,19 +430,26 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import ErrorCard from '../components/common/ErrorCard.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
+import CompareBarChart from '../components/analytics/CompareBarChart.vue'
+import TrendLineChart from '../components/analytics/TrendLineChart.vue'
 import {
+  batchCreateAnalyticsRecords,
   createAnalyticsRecord,
   deleteAnalyticsRecord,
   generateAnalyticsInsight,
   getAnalyticsRecords,
   getAnalyticsStats,
   updateAnalyticsRecord,
+  type AnalyticsBatchFailure,
   type AnalyticsInsight,
   type AnalyticsRecord,
-  type AnalyticsStats
+  type AnalyticsStats,
+  type AnalyticsTimeSlot
 } from '../api/analytics'
+import { parseAnalyticsImport } from '../utils/analyticsImport'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
 /**
@@ -311,9 +457,13 @@ import { normalizeApiError, type AppError } from '../utils/errors'
  *
  * 功能：
  * - 手动录入已发布内容的表现数据（CRUD）
- * - 统计概览：总数、各平台/各类型汇总、平均互动率、按月趋势
- * - 一键 AI 复盘洞察：哪类内容/标题/平台表现更好 + 下一步建议
+ * - 批量导入：粘贴 Excel / CSV 表格文本，预览后一键入库
+ * - 统计概览：总数、各平台/各类型对比（SVG 柱状图）、按月趋势（SVG 折线图）、最佳发布时段
+ * - 一键 AI 复盘洞察：哪类内容/标题/平台/时段表现更好 + 下一步建议
+ * - 关联展示：带 record_id 的记录可一键跳转到历史作品详情，带关联的行有小标识
  */
+
+const router = useRouter()
 
 // 列表与统计状态
 const records = ref<AnalyticsRecord[]>([])
@@ -336,6 +486,7 @@ const form = reactive({
   title: '',
   platform: '',
   publish_date: '',
+  publish_time: '',
   content_type: '',
   views: 0,
   likes: 0,
@@ -357,10 +508,46 @@ const deleteMessage = computed(() => {
   return `「${deleteTarget.value.title}」删除后无法恢复。`
 })
 
-const maxTrendViews = computed(() => {
-  if (!stats.value || stats.value.trend.length === 0) return 0
-  return Math.max(...stats.value.trend.map(t => t.views))
-})
+// 批量导入状态
+const showImportModal = ref(false)
+const importText = ref('')
+const importing = ref(false)
+const importError = ref('')
+const importResult = ref<{ created: number; failed: AnalyticsBatchFailure[] } | null>(null)
+
+/** 粘贴文本的实时解析结果（纯函数，见 utils/analyticsImport.ts） */
+const importParse = computed(() => parseAnalyticsImport(importText.value))
+
+/** 预览表格只显示前 10 行 */
+const importPreviewRows = computed(() => importParse.value.records.slice(0, 10))
+
+const importPlaceholder = [
+  '标题\t平台\t日期\t发布时间\t类型\t曝光\t点赞\t收藏\t评论\t转发\t涨粉',
+  '敏感肌自救指南\t小红书\t2026-07-01\t20:30\t干货教程\t1.2万\t1,024\t300\t56\t18\t120'
+].join('\n')
+
+// ==================== 图表数据 ====================
+
+/** 各平台对比条目（互动率 + 篇数） */
+const platformBars = computed(() =>
+  (stats.value?.platforms ?? []).map(p => ({ name: p.name, count: p.count, rate: p.engagement_rate }))
+)
+
+/** 各内容类型对比条目 */
+const contentTypeBars = computed(() =>
+  (stats.value?.content_types ?? []).map(c => ({ name: c.name, count: c.count, rate: c.engagement_rate }))
+)
+
+/** 发布时段条目（按平均互动率倒序） */
+const sortedTimeSlots = computed<AnalyticsTimeSlot[]>(() =>
+  [...(stats.value?.time_slots ?? [])].sort((a, b) => b.avg_engagement - a.avg_engagement)
+)
+
+const timeSlotBars = computed(() =>
+  sortedTimeSlots.value.map(s => ({ name: s.name, count: s.count, rate: s.avg_engagement }))
+)
+
+const bestTimeSlot = computed<AnalyticsTimeSlot | null>(() => sortedTimeSlots.value[0] ?? null)
 
 /** 数字千分位格式化 */
 function formatNumber(value: number): string {
@@ -374,10 +561,10 @@ function engagementRateText(record: AnalyticsRecord): string {
   return `${Math.round((engagements / record.views) * 10000) / 100}%`
 }
 
-/** 趋势条宽度（相对当月最大曝光） */
-function trendBarWidth(views: number): string {
-  if (!maxTrendViews.value) return '0%'
-  return `${Math.max((views / maxTrendViews.value) * 100, 2)}%`
+/** 跳转到记录关联的历史作品详情 */
+function viewLinkedWork(record: AnalyticsRecord) {
+  if (!record.record_id) return
+  router.push({ name: 'history-detail', params: { id: record.record_id } })
 }
 
 /** 数值输入归一化：空串/NaN/负数 -> 0 */
@@ -430,6 +617,7 @@ function openCreateModal() {
   form.title = ''
   form.platform = ''
   form.publish_date = ''
+  form.publish_time = ''
   form.content_type = ''
   form.views = 0
   form.likes = 0
@@ -450,6 +638,7 @@ function openEditModal(record: AnalyticsRecord) {
   form.title = record.title
   form.platform = record.platform
   form.publish_date = record.publish_date
+  form.publish_time = record.publish_time || ''
   form.content_type = record.content_type
   form.views = record.views
   form.likes = record.likes
@@ -487,6 +676,7 @@ async function handleSave() {
     title: form.title.trim(),
     platform: form.platform.trim(),
     publish_date: form.publish_date,
+    publish_time: form.publish_time,
     content_type: form.content_type.trim(),
     views: toSafeInt(form.views),
     likes: toSafeInt(form.likes),
@@ -509,6 +699,47 @@ async function handleSave() {
     await loadData()
   } else {
     formError.value = res.error_message || '保存失败，请重试'
+  }
+}
+
+/**
+ * 打开批量导入弹窗
+ */
+function openImportModal() {
+  importText.value = ''
+  importError.value = ''
+  importResult.value = null
+  showImportModal.value = true
+}
+
+function closeImportModal() {
+  showImportModal.value = false
+}
+
+/**
+ * 确认批量导入：把解析出的记录提交批量接口，展示成功/失败结果
+ */
+async function handleImport() {
+  if (importing.value) return
+  const parsedRecords = importParse.value.records
+  if (parsedRecords.length === 0) return
+  if (parsedRecords.length > 200) {
+    importError.value = `一次最多导入 200 条（当前 ${parsedRecords.length} 条），请分批粘贴`
+    return
+  }
+
+  importing.value = true
+  importError.value = ''
+
+  const res = await batchCreateAnalyticsRecords(parsedRecords)
+  importing.value = false
+
+  if (res.success) {
+    importResult.value = { created: res.created ?? 0, failed: res.failed ?? [] }
+    successMessage.value = `批量导入完成：成功 ${res.created ?? 0} 条`
+    await loadData()
+  } else {
+    importError.value = res.error_message || '批量导入失败，请重试'
   }
 }
 
@@ -643,6 +874,29 @@ onMounted(() => {
 
 .empty-cta {
   margin-top: var(--space-5);
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 页头操作区 */
+.page-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* 次级按钮（批量导入） */
+.btn-import {
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+
+.btn-import:hover {
+  border-color: var(--border-hover);
+  background: var(--gray-0);
 }
 
 /* 统计卡片 */
@@ -708,77 +962,15 @@ onMounted(() => {
   padding: 6px 0;
 }
 
-.summary-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--gray-2);
+/* 最佳发布时段结论 */
+.slot-conclusion {
+  margin: 10px 0 0;
+  padding: 10px 12px;
   font-size: 13px;
-}
-
-.summary-meta,
-.trend-value {
-  font-variant-numeric: tabular-nums;
-}
-
-.summary-row:last-child {
-  border-bottom: none;
-}
-
-.summary-name {
-  font-weight: 600;
-  color: var(--text-main);
-  flex-shrink: 0;
-}
-
-.summary-meta {
-  color: var(--text-sub);
-  text-align: right;
-}
-
-/* 趋势条 */
-.trend-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.trend-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-
-.trend-month {
-  flex-shrink: 0;
-  width: 60px;
-  color: var(--text-sub);
-}
-
-.trend-bar-track {
-  flex: 1;
-  height: 10px;
-  background: var(--gray-1);
-  border-radius: var(--radius-full);
-  overflow: hidden;
-}
-
-.trend-bar {
-  height: 100%;
-  border-radius: var(--radius-full);
-  background: var(--primary);
-  transition: width 0.4s var(--ease-out);
-}
-
-.trend-value {
-  flex-shrink: 0;
-  min-width: 56px;
-  text-align: right;
-  color: var(--text-main);
-  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  color: var(--color-success);
+  background: var(--color-success-soft);
+  border-radius: var(--radius-sm);
 }
 
 /* AI 洞察面板 */
@@ -911,6 +1103,31 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
+/* 关联标识（由内容日历转录 / 已关联历史作品） */
+.linked-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light);
+  vertical-align: middle;
+}
+
+/* 「查看作品」小按钮 */
+.btn-view-work {
+  color: var(--primary);
+  border-color: var(--primary) !important;
+}
+
+.btn-view-work:hover {
+  background: var(--primary-light);
+}
+
 .platform-tag {
   display: inline-block;
   padding: 2px 8px;
@@ -918,6 +1135,14 @@ onMounted(() => {
   font-size: 12px;
   background: var(--gray-2);
   color: var(--text-sub);
+}
+
+/* 日期单元格里的发布时间 */
+.time-sub {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--text-sub);
+  font-variant-numeric: tabular-nums;
 }
 
 .actions-cell {
@@ -1090,6 +1315,93 @@ onMounted(() => {
   margin: 0;
   font-size: 13px;
   color: var(--color-danger);
+}
+
+/* 批量导入弹窗 */
+.import-modal {
+  max-width: 760px;
+}
+
+.import-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-sub);
+}
+
+.import-textarea {
+  resize: vertical;
+  min-height: 140px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.import-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.import-error-count {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+}
+
+.import-errors {
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  border-radius: var(--radius-sm);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.import-preview-wrap {
+  border: 1px solid var(--gray-2);
+  border-radius: var(--radius-sm);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.import-preview-table {
+  min-width: 720px;
+}
+
+.import-more {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-sub);
+  border-top: 1px solid var(--gray-2);
+}
+
+.import-result {
+  padding: 8px 0;
+}
+
+.import-result-main {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.import-result-sub {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-main);
 }
 
 /* 移动端适配 */

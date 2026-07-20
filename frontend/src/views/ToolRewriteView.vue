@@ -95,15 +95,27 @@
       >
         <div class="result-header">
           <span class="platform-badge">{{ platformLabel(item.platform) }}</span>
-          <button
-            type="button"
-            class="btn btn-secondary copy-btn"
-            :class="{ copied: copiedPlatform === item.platform }"
-            :aria-label="`复制${platformLabel(item.platform)}文案`"
-            @click="copyResult(item)"
-          >
-            {{ copiedPlatform === item.platform ? '已复制 ✓' : '一键复制' }}
-          </button>
+          <div class="result-actions">
+            <button
+              type="button"
+              class="btn btn-primary send-btn"
+              :disabled="sendingPlatform !== ''"
+              :aria-label="`把${platformLabel(item.platform)}文案送入创作中心`"
+              @click="sendToCreation(item)"
+            >
+              <span v-if="sendingPlatform === item.platform" class="spinner-sm"></span>
+              {{ sendingPlatform === item.platform ? '正在转成大纲…' : '送入创作中心' }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary copy-btn"
+              :class="{ copied: copiedPlatform === item.platform }"
+              :aria-label="`复制${platformLabel(item.platform)}文案`"
+              @click="copyResult(item)"
+            >
+              {{ copiedPlatform === item.platform ? '已复制 ✓' : '一键复制' }}
+            </button>
+          </div>
         </div>
         <h3 class="result-title">{{ item.title }}</h3>
         <p class="result-content">{{ item.content }}</p>
@@ -135,9 +147,12 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { rewriteCopy, type RewritePlatform, type RewriteResult } from '../api/rewrite'
 import { getBrandList, type BrandKit } from '../api/brand'
+import { linkToOutline } from '../api/link'
+import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
@@ -154,6 +169,9 @@ const platforms: PlatformOption[] = [
   { code: 'weibo', label: '微博' }
 ]
 
+const router = useRouter()
+const store = useGeneratorStore()
+
 const content = ref('')
 const sourcePlatform = ref<RewritePlatform | ''>('')
 const targetPlatforms = ref<RewritePlatform[]>([])
@@ -161,6 +179,8 @@ const results = ref<RewriteResult[]>([])
 const loading = ref(false)
 const error = ref<AppError | null>(null)
 const copiedPlatform = ref('')
+// 正在流转到创作中心的平台代号，'' 表示空闲（同一时间只允许一个流转请求）
+const sendingPlatform = ref('')
 
 // 品牌人设选择：'' 表示不使用，默认选中当前启用档案
 const brands = ref<BrandKit[]>([])
@@ -220,7 +240,58 @@ async function handleRewrite() {
   }
 }
 
+/**
+ * 把某个平台的改写结果送入创作中心：
+ * title + content + tags 拼成长文本 → 调链接工具的长文转大纲能力 →
+ * 照 ToolLinkView.sendToCreation 的模式写入 generator store 并跳转大纲页
+ */
+async function sendToCreation(item: RewriteResult) {
+  if (sendingPlatform.value !== '') return
+
+  const rawParts = [`标题：${item.title}`, item.content]
+  if (item.tags.length > 0) {
+    rawParts.push(`标签：${item.tags.join(' ')}`)
+  }
+  const rawText = rawParts.filter(Boolean).join('\n\n')
+
+  sendingPlatform.value = item.platform
+  error.value = null
+
+  try {
+    const result = await linkToOutline({ text: rawText })
+
+    if (result.success && result.pages && result.pages.length > 0) {
+      const pages = result.pages
+      // 保证 index 连续
+      pages.forEach((page, i) => {
+        page.index = i
+      })
+      const raw = pages.map(page => page.content).join('\n\n<page>\n\n')
+
+      store.setTopic(result.topic?.trim() || item.title)
+      store.setOutline(raw, pages)
+      // 清空旧的历史记录 ID，让大纲页为本次内容创建新的历史记录
+      store.setRecordId(null)
+
+      router.push('/outline')
+    } else {
+      error.value = normalizeApiError(
+        result.error || result.error_message || '送入创作中心失败',
+        '送入创作中心失败'
+      )
+    }
+  } catch (err: unknown) {
+    error.value = normalizeApiError(err, '送入创作中心失败')
+  } finally {
+    sendingPlatform.value = ''
+  }
+}
+
 let copyTimer: ReturnType<typeof setTimeout> | undefined
+
+onUnmounted(() => {
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+})
 
 async function copyResult(item: RewriteResult) {
   const parts = [item.title, item.content]
@@ -467,6 +538,21 @@ async function copyResult(item: RewriteResult) {
   border-radius: var(--radius-full);
   font-size: var(--font-size-caption);
   font-weight: 600;
+}
+
+.result-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.send-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  font-size: 14px;
 }
 
 .copy-btn {

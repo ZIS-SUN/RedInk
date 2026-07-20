@@ -11,9 +11,13 @@
         <button class="btn btn-secondary" @click="showResetConfirm = true">
           再来一篇
         </button>
-        <button class="btn btn-primary" @click="downloadAll">
+        <button class="btn btn-secondary" @click="router.push('/tools/export')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M9 3v18"></path><path d="M3 9h6"></path></svg>
+          多尺寸导出
+        </button>
+        <button class="btn btn-primary" @click="downloadAll" :disabled="isDownloadingAll">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          一键下载
+          {{ isDownloadingAll ? '下载中…' : '一键下载' }}
         </button>
       </div>
     </div>
@@ -60,6 +64,15 @@
             <div style="display: flex; gap: 10px; align-items: center;">
               <button
                 class="action-link"
+                title="编辑此页文字"
+                @click="openEditModal(image)"
+                :disabled="regeneratingIndex !== null"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                编辑文字
+              </button>
+              <button
+                class="action-link"
                 title="重新生成此图"
                 @click="handleRegenerate(image)"
                 :disabled="regeneratingIndex === image.index"
@@ -83,6 +96,21 @@
 
     <!-- 标题、文案、标签生成区域 -->
     <ContentDisplay />
+
+    <ReviewPanel />
+
+    <!-- 发布前检查：与爆款体检并列（体检管内容好不好，检查管发布合不合规） -->
+    <ChecklistPanel />
+
+    <!-- 编辑单页文字弹窗 -->
+    <EditPageTextModal
+      :visible="editingIndex !== null"
+      :page-index="editingIndex ?? 0"
+      :initial-content="editingContent"
+      @cancel="editingIndex = null"
+      @save="handleSaveText"
+      @save-and-regenerate="handleSaveAndRegenerate"
+    />
 
     <!-- 再来一篇确认 -->
     <ConfirmDialog
@@ -171,11 +199,14 @@
 </style>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useGeneratorStore } from '../stores/generator'
-import { regenerateImage } from '../api'
+import { useGeneratorStore, type GeneratedImage } from '../stores/generator'
+import { regenerateImage, updateHistory } from '../api'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
+import ReviewPanel from '../components/result/ReviewPanel.vue'
+import ChecklistPanel from '../components/result/ChecklistPanel.vue'
+import EditPageTextModal from '../components/result/EditPageTextModal.vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
 import StepIndicator from './shared/StepIndicator.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
@@ -212,7 +243,7 @@ const startOver = () => {
   router.push('/')
 }
 
-const downloadOne = (image: any) => {
+const downloadOne = (image: GeneratedImage) => {
   if (image.url) {
     const link = document.createElement('a')
     const baseUrl = image.url.split('?')[0]
@@ -222,33 +253,44 @@ const downloadOne = (image: any) => {
   }
 }
 
+// 批量下载进行中标志：无 recordId 时逐张定时下载耗时较长，防止连点叠加触发
+const isDownloadingAll = ref(false)
+
 const downloadAll = () => {
   if (store.recordId) {
     const link = document.createElement('a')
     link.href = `/api/history/${store.recordId}/download`
     link.click()
   } else {
-    store.images.forEach((image, index) => {
-      if (image.url) {
-        setTimeout(() => {
-          const link = document.createElement('a')
-          const baseUrl = image.url.split('?')[0]
-          link.href = baseUrl + '?thumbnail=false'
-          link.download = `rednote_page_${image.index + 1}.png`
-          link.click()
-        }, index * 300)
-      }
+    if (isDownloadingAll.value) return
+    const downloadable = store.images.filter(image => image.url)
+    if (downloadable.length === 0) return
+
+    isDownloadingAll.value = true
+    downloadable.forEach((image, index) => {
+      setTimeout(() => {
+        const link = document.createElement('a')
+        const baseUrl = image.url.split('?')[0]
+        link.href = baseUrl + '?thumbnail=false'
+        link.download = `rednote_page_${image.index + 1}.png`
+        link.click()
+        // 最后一张触发后解除下载中状态
+        if (index === downloadable.length - 1) {
+          isDownloadingAll.value = false
+        }
+      }, index * 300)
     })
   }
 }
 
-const handleRegenerate = async (image: any) => {
+// 重画指定索引的页面（「重新生成」按钮与编辑弹窗「保存并重画」共用）
+const regeneratePage = async (index: number) => {
   if (!store.taskId || regeneratingIndex.value !== null) return
 
-  regeneratingIndex.value = image.index
+  regeneratingIndex.value = index
   try {
     // Find the page content from outline
-    const pageContent = store.outline.pages.find(p => p.index === image.index)
+    const pageContent = store.outline.pages.find(p => p.index === index)
     if (!pageContent) {
        error.value = normalizeApiError('无法找到对应页面的内容', '无法重新生成')
        return
@@ -258,20 +300,71 @@ const handleRegenerate = async (image: any) => {
     const context = {
       fullOutline: store.outline.raw || '',
       userTopic: store.topic || '',
-      recordId: store.recordId
+      recordId: store.recordId,
+      // 重绘沿用本次生成记录在 store 中的风格提示词（API 层不再兜底读 store）
+      stylePrompt: store.stylePrompt
     }
 
     const result = await regenerateImage(store.taskId, pageContent, true, context)
     if (result.success && result.image_url) {
        const newUrl = result.image_url
-       store.updateImage(image.index, newUrl)
+       store.updateImage(index, newUrl)
     } else {
        error.value = normalizeApiError(result.error || result.error_message || '重新生成失败', '重新生成失败')
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     error.value = normalizeApiError(e, '重新生成失败')
   } finally {
     regeneratingIndex.value = null
   }
+}
+
+const handleRegenerate = (image: GeneratedImage) => regeneratePage(image.index)
+
+// ==================== 编辑文字弹窗 ====================
+// 当前正在编辑的页面索引（null 表示弹窗关闭）
+const editingIndex = ref<number | null>(null)
+
+// 弹窗初始文案：取该页最新的 outline content
+const editingContent = computed(() => {
+  if (editingIndex.value === null) return ''
+  return store.outline.pages.find(p => p.index === editingIndex.value)?.content ?? ''
+})
+
+const openEditModal = (image: GeneratedImage) => {
+  // 有页面在重画时禁止打开编辑（与并发重画的互斥保持一致）
+  if (regeneratingIndex.value !== null) return
+  const page = store.outline.pages.find(p => p.index === image.index)
+  if (!page) {
+    error.value = normalizeApiError('无法找到对应页面的内容', '无法编辑')
+    return
+  }
+  editingIndex.value = image.index
+}
+
+// 保存文案到 store，并在有历史记录时同步大纲到服务器
+const savePageText = async (index: number, content: string) => {
+  store.updatePage(index, content)
+  if (store.recordId) {
+    // 同步失败不阻断本地编辑（store 已持久化到 localStorage）
+    await updateHistory(store.recordId, {
+      outline: { raw: store.outline.raw, pages: store.outline.pages }
+    })
+  }
+}
+
+const handleSaveText = async (content: string) => {
+  if (editingIndex.value === null) return
+  const index = editingIndex.value
+  editingIndex.value = null
+  await savePageText(index, content)
+}
+
+const handleSaveAndRegenerate = async (content: string) => {
+  if (editingIndex.value === null) return
+  const index = editingIndex.value
+  editingIndex.value = null
+  await savePageText(index, content)
+  await regeneratePage(index)
 }
 </script>

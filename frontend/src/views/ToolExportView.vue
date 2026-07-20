@@ -148,17 +148,67 @@
       <h2 class="section-title" style="margin-top: 24px;">4. 水印（可选）</h2>
       <div class="option-row watermark-row">
         <input
-          v-model="watermarkText"
+          v-model="wm.text"
           type="text"
           class="watermark-input"
-          placeholder="水印文字，留空则不加（显示在右下角）"
+          placeholder="水印文字，留空则不加"
           maxlength="30"
         />
-        <label v-if="watermarkText.trim()" class="opacity-label">
-          透明度 {{ Math.round(watermarkOpacity * 100) }}%
-          <input v-model.number="watermarkOpacity" type="range" min="0.1" max="1" step="0.05" />
-        </label>
+        <button
+          type="button"
+          class="brand-fill-btn"
+          :disabled="!brandName"
+          :title="brandName ? `填入 @${brandName}` : '先在品牌工坊设置品牌'"
+          @click="fillBrandWatermark"
+        >
+          用品牌昵称
+        </button>
       </div>
+      <template v-if="wm.text.trim()">
+        <div class="option-row watermark-controls">
+          <span class="option-label">位置：</span>
+          <label
+            v-for="pos in positionOptions"
+            :key="pos.value"
+            class="radio-item small"
+            :class="{ selected: wm.position === pos.value }"
+          >
+            <input v-model="wm.position" type="radio" :value="pos.value" style="display: none;" />
+            {{ pos.label }}
+          </label>
+        </div>
+        <div class="option-row watermark-controls">
+          <span class="option-label">字号：</span>
+          <label
+            v-for="size in sizeOptions"
+            :key="size.value"
+            class="radio-item small"
+            :class="{ selected: wm.size === size.value }"
+          >
+            <input v-model="wm.size" type="radio" :value="size.value" style="display: none;" />
+            {{ size.label }}
+          </label>
+        </div>
+        <div class="option-row watermark-controls">
+          <span class="option-label">颜色：</span>
+          <label
+            v-for="color in colorOptions"
+            :key="color.value"
+            class="radio-item small color-item"
+            :class="{ selected: wm.color === color.value }"
+          >
+            <input v-model="wm.color" type="radio" :value="color.value" style="display: none;" />
+            <span class="color-dot" :style="{ background: color.swatch }" aria-hidden="true"></span>
+            {{ color.label }}
+          </label>
+        </div>
+        <div class="option-row watermark-controls">
+          <label class="opacity-label">
+            不透明度 {{ Math.round(wm.opacity * 100) }}%
+            <input v-model.number="wm.opacity" type="range" min="0.1" max="1" step="0.05" />
+          </label>
+        </div>
+      </template>
     </div>
 
     <!-- 3. 预览 -->
@@ -204,18 +254,30 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useGeneratorStore } from '../stores/generator'
 import { getHistory, getHistoryList, getImageUrl, type HistoryRecord } from '../api'
+import { getActiveBrand } from '../api/brand'
 import {
   SIZE_PRESETS,
   loadImage,
   loadImageFromBlob,
   renderToCanvas,
-  type BackgroundOption
+  type BackgroundOption,
+  type WatermarkOptions,
+  type WatermarkPosition
 } from '../utils/canvasExport'
 import { useMultiSizeExport, type ExportSource } from '../composables/useMultiSizeExport'
 import { normalizeApiError } from '../utils/errors'
+import {
+  WATERMARK_COLOR_VALUES,
+  WATERMARK_SIZE_RATIOS,
+  WATERMARK_TEXT_MAX_CHARS,
+  loadWatermarkSettings,
+  saveWatermarkSettings,
+  type WatermarkColorKey,
+  type WatermarkSizeKey
+} from '../utils/watermarkSettings'
 
 type SourceTabKey = 'upload' | 'result' | 'history'
 
@@ -390,18 +452,65 @@ const fit = ref<'contain' | 'cover'>('contain')
 const bgType = ref<'blur' | 'color'>('blur')
 const bgColor = ref('#FFFFFF')
 
-const watermarkText = ref('')
-const watermarkOpacity = ref(0.5)
-
 const background = computed<BackgroundOption>(() =>
   bgType.value === 'blur' ? { type: 'blur' } : { type: 'color', color: bgColor.value }
 )
 
-const watermark = computed(() =>
-  watermarkText.value.trim()
-    ? { text: watermarkText.value.trim(), opacity: watermarkOpacity.value }
+/* ---------------- 水印 ---------------- */
+
+// 进页回填上次的水印设置（损坏/缺失时为默认值），变更即持久化
+const wm = reactive(loadWatermarkSettings())
+
+watch(wm, () => saveWatermarkSettings({ ...wm }))
+
+const positionOptions: { value: WatermarkPosition; label: string }[] = [
+  { value: 'top-left', label: '左上' },
+  { value: 'top-right', label: '右上' },
+  { value: 'bottom-left', label: '左下' },
+  { value: 'bottom-right', label: '右下' },
+  { value: 'bottom-center', label: '底部居中' }
+]
+
+const sizeOptions: { value: WatermarkSizeKey; label: string }[] = [
+  { value: 'small', label: '小' },
+  { value: 'medium', label: '中' },
+  { value: 'large', label: '大' }
+]
+
+const colorOptions: { value: WatermarkColorKey; label: string; swatch: string }[] = [
+  { value: 'white', label: '白', swatch: WATERMARK_COLOR_VALUES.white },
+  { value: 'black', label: '黑', swatch: WATERMARK_COLOR_VALUES.black },
+  { value: 'red', label: '主题红', swatch: WATERMARK_COLOR_VALUES.red }
+]
+
+const watermark = computed<WatermarkOptions | undefined>(() =>
+  wm.text.trim()
+    ? {
+        text: wm.text.trim(),
+        opacity: wm.opacity,
+        position: wm.position,
+        sizeRatio: WATERMARK_SIZE_RATIOS[wm.size],
+        color: WATERMARK_COLOR_VALUES[wm.color],
+        // 白色水印保留深色描影保证深浅底可读；黑/红不加
+        shadow: wm.color === 'white'
+      }
     : undefined
 )
+
+// 激活品牌名称（用于「用品牌昵称」一键填入；拿不到则按钮 disabled）
+const brandName = ref('')
+
+onMounted(async () => {
+  const res = await getActiveBrand()
+  if (res.success && res.brand && typeof res.brand.name === 'string' && res.brand.name.trim()) {
+    brandName.value = res.brand.name.trim()
+  }
+})
+
+function fillBrandWatermark() {
+  if (!brandName.value) return
+  wm.text = `@${brandName.value}`.slice(0, WATERMARK_TEXT_MAX_CHARS)
+}
 
 /* ---------------- 预览 ---------------- */
 
@@ -890,12 +999,58 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-focus);
 }
 
+.brand-fill-btn {
+  padding: 10px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.brand-fill-btn:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.brand-fill-btn:disabled {
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.watermark-controls {
+  margin-top: 12px;
+}
+
+.color-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
 .opacity-label {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: var(--text-sub);
+}
+
+.opacity-label input[type='range'] {
+  max-width: 200px;
 }
 
 /* 预览 */
@@ -1040,6 +1195,28 @@ onBeforeUnmount(() => {
 
   .export-bar .btn {
     width: 100%;
+  }
+
+  /* 水印控件在窄屏下不溢出 */
+  .watermark-input {
+    min-width: 0;
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .watermark-controls .radio-item.small {
+    padding: 7px 12px;
+    font-size: 12px;
+  }
+
+  .opacity-label {
+    width: 100%;
+  }
+
+  .opacity-label input[type='range'] {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
   }
 }
 </style>

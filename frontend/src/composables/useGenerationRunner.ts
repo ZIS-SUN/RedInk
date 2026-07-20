@@ -40,12 +40,15 @@ export function useGenerationRunner(
     // 刷新/中断恢复：已有 taskId 时按任务状态续传，不盲目重开新任务
     if (await restoreInterruptedGeneration()) return
 
-    if (await restoreFromHistory()) return
+    // 大纲在上次生成后被编辑过时跳过旧图恢复，走全新生成让编辑生效；
+    // 未编辑的刷新恢复场景保持原有行为（直接恢复历史里已生成的图片）
+    if (!store.outlineDirty && await restoreFromHistory()) return
 
     await ensureRecord()
 
     // 任务开始前就确定 taskId 并立即持久化，中途刷新也不会丢
-    const taskId = store.taskId || createLocalTaskId()
+    // 大纲编辑后的重新生成不复用旧任务ID，避免与已完成任务的状态混淆
+    const taskId = (!store.outlineDirty && store.taskId) || createLocalTaskId()
     store.startGeneration()
     // 记录本次生成使用的风格提示词（空字符串表示未应用风格），
     // 写入 store 并随 setTaskId 一起立即持久化，重试/刷新恢复时沿用同一风格
@@ -59,8 +62,12 @@ export function useGenerationRunner(
       store.outline.pages,
       taskId,
       store.outline.raw,
-      () => {
-        // progress 事件仅表示某页开始生成，占位图已在 startGeneration 中创建
+      (event) => {
+        // progress 事件表示某页开始生成：标记开始时间与阶段，驱动实时进度展示
+        // （batch_start 等汇总事件不带 index，或 index 为 -1，直接忽略）
+        if (typeof event.index === 'number' && event.index >= 0 && event.status === 'generating') {
+          store.markImageStarted(event.index, event.phase)
+        }
       },
       (event) => {
         if (event.image_url) {
@@ -104,6 +111,18 @@ export function useGenerationRunner(
     )
   }
 
+  /**
+   * 取消完成后的 1 秒自动跳转（不影响 SSE 流与卸载标志）。
+   * 生成完成（isDone）时只需要取消跳转，不能把组件标记为已卸载，
+   * 否则后续真实的 SSE 错误会被 onStreamError 静默吞掉。
+   */
+  function cancelAutoRedirect() {
+    if (redirectTimer.value !== null) {
+      clearTimeout(redirectTimer.value)
+      redirectTimer.value = null
+    }
+  }
+
   function cleanupGenerationRunner() {
     isUnmounted = true
     // 离开页面时中止 SSE fetch，避免回调操作已卸载的组件
@@ -111,13 +130,11 @@ export function useGenerationRunner(
       abortController.abort()
       abortController = null
     }
-    if (redirectTimer.value !== null) {
-      clearTimeout(redirectTimer.value)
-      redirectTimer.value = null
-    }
+    cancelAutoRedirect()
   }
 
   return {
+    cancelAutoRedirect,
     cleanupGenerationRunner,
     startGenerationFlow
   }

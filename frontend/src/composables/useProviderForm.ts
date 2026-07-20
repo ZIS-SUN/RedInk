@@ -21,7 +21,10 @@ export interface Provider {
   api_key_masked?: string
   endpoint_type?: string
   high_concurrency?: boolean
+  max_concurrent?: number
   short_prompt?: boolean
+  default_size?: string
+  default_aspect_ratio?: string
   // 保持 any：SettingsView/组件侧存在同名 Provider 类型，改成 unknown 会破坏互相赋值
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any
@@ -54,8 +57,11 @@ export interface ImageProviderForm {
   base_url: string
   model: string
   high_concurrency: boolean
+  max_concurrent: number
   short_prompt: boolean
   endpoint_type: string
+  default_size: string
+  default_aspect_ratio: string
   _has_api_key: boolean
 }
 
@@ -135,8 +141,11 @@ export function useProviderForm() {
       base_url: '',
       model: '',
       high_concurrency: false,
+      max_concurrent: 2,
       short_prompt: false,
       endpoint_type: '/v1/images/generations',
+      default_size: '',
+      default_aspect_ratio: '',
       _has_api_key: false
     }
   }
@@ -390,8 +399,13 @@ export function useProviderForm() {
       base_url: provider.base_url || '',
       model: provider.model || '',
       high_concurrency: provider.high_concurrency || false,
+      max_concurrent: typeof provider.max_concurrent === 'number' && provider.max_concurrent > 0
+        ? provider.max_concurrent
+        : 2,
       short_prompt: provider.short_prompt || false,
       endpoint_type: provider.endpoint_type || '/v1/images/generations',
+      default_size: provider.default_size || '',
+      default_aspect_ratio: provider.default_aspect_ratio || '',
       _has_api_key: !!provider.api_key_masked
     }
     showImageModal.value = true
@@ -437,9 +451,33 @@ export function useProviderForm() {
       short_prompt: imageForm.value.short_prompt
     }
 
+    // 最大并发数：限制在 1-8，非法值回退默认 2
+    const maxConcurrent = Math.floor(Number(imageForm.value.max_concurrent))
+    providerData.max_concurrent = Number.isFinite(maxConcurrent)
+      ? Math.min(8, Math.max(1, maxConcurrent))
+      : 2
+
     // 如果是 OpenAI 兼容接口，保存 endpoint_type
     if (imageForm.value.type === 'image_api') {
       providerData.endpoint_type = imageForm.value.endpoint_type
+    }
+
+    // 图片尺寸 / 宽高比：只管理当前类型表单暴露的字段，留空时移除（后端使用默认值）。
+    // 另一个字段保持原样，避免误删已有配置。
+    // google_genai / image_api 后端消费 default_aspect_ratio；
+    // 仅其余 openai 兼容类型消费 default_size。
+    if (['google_genai', 'image_api'].includes(imageForm.value.type)) {
+      if (imageForm.value.default_aspect_ratio.trim()) {
+        providerData.default_aspect_ratio = imageForm.value.default_aspect_ratio.trim()
+      } else {
+        delete providerData.default_aspect_ratio
+      }
+    } else {
+      if (imageForm.value.default_size.trim()) {
+        providerData.default_size = imageForm.value.default_size.trim()
+      } else {
+        delete providerData.default_size
+      }
     }
 
     // 如果填写了新的 API Key，使用新的；否则保留原有的

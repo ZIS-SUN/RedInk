@@ -150,7 +150,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { generateCoverDirections, type CoverDirection } from '../api/cover'
 import { normalizeApiError, type AppError } from '../utils/errors'
 import ErrorCard from '../components/common/ErrorCard.vue'
@@ -164,6 +164,10 @@ const directions = ref<CoverDirection[]>([])
 /** 已复制标记（key 形如 "0-text"），短暂显示"已复制"反馈 */
 const copiedKey = ref('')
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
+
+onUnmounted(() => {
+  if (copiedTimer !== undefined) clearTimeout(copiedTimer)
+})
 
 /** 评分最高的方向下标，用于"推荐"角标 */
 const bestIndex = computed(() => {

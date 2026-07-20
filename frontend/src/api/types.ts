@@ -23,6 +23,8 @@ export interface ProgressEvent {
   message?: string
   error?: AppError | string
   retryable?: boolean
+  /** 当前生成阶段：'cover' 封面 / 'content' 内容页（后端 progress/complete 事件携带） */
+  phase?: string
 }
 
 export interface FinishEvent {
@@ -62,6 +64,8 @@ export interface HistoryDetail {
   }
   status: string
   thumbnail: string | null
+  /** 发布内容（标题/文案/标签）；旧记录没有该字段 */
+  content?: { titles: string[]; copywriting: string; tags: string[] }
 }
 
 export interface CreateHistoryParams {
@@ -75,6 +79,8 @@ export interface UpdateHistoryParams {
   images?: { task_id: string | null; generated: string[] }
   status?: string
   thumbnail?: string
+  /** 发布内容（标题/文案/标签），后端做宽松校验，坏结构静默忽略 */
+  content?: { titles: string[]; copywriting: string; tags: string[] }
 }
 
 /**
@@ -106,6 +112,8 @@ export interface ContentResponse {
   titles?: string[]
   copywriting?: string
   tags?: string[]
+  /** 命中的品牌禁用词（仅在使用了设置禁用词的品牌人设时返回） */
+  banned_word_hits?: string[]
   error?: AppError | string
   error_message?: string
 }
