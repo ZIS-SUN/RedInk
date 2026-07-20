@@ -44,6 +44,10 @@ _IMAGE_MIMETYPES = {
 _MAX_USER_IMAGES = 5
 _MAX_USER_IMAGE_BYTES = 20 * 1024 * 1024
 
+# 图片文件内容不可变（重新生成时前端用 ?t= cache buster 强刷），
+# 可安全地长缓存一年并标记 immutable
+_IMAGE_CACHE_MAX_AGE = 31536000
+
 
 def create_image_blueprint():
     """创建图片路由蓝图（工厂函数，支持多次调用）"""
@@ -186,11 +190,17 @@ def create_image_blueprint():
                 # send_from_directory 内部使用 safe_join，双重保险
                 # MIME 类型按扩展名推断，避免 jpg/webp 被硬编码成 image/png
                 ext = os.path.splitext(target_filename)[1].lower()
-                return send_from_directory(
+                response = send_from_directory(
                     history_root,
                     os.path.join(task_id, target_filename),
-                    mimetype=_IMAGE_MIMETYPES.get(ext, 'image/png')
+                    mimetype=_IMAGE_MIMETYPES.get(ext, 'image/png'),
+                    max_age=_IMAGE_CACHE_MAX_AGE
                 )
+                # Flask 的 max_age 参数不会带上 public/immutable，手动补全
+                response.headers['Cache-Control'] = (
+                    f'public, max-age={_IMAGE_CACHE_MAX_AGE}, immutable'
+                )
+                return response
 
             if thumbnail:
                 # 尝试返回缩略图

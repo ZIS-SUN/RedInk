@@ -375,65 +375,112 @@ class HistoryService:
             partial -> completed: 剩余图片生成完成
         """
         with self._lock:
-            # 获取现有记录
-            record = self.get_record(record_id)
-            if not record:
+            record = self._apply_record_update(
+                record_id,
+                outline=outline,
+                images=images,
+                status=status,
+                thumbnail=thumbnail,
+                content=content,
+            )
+            if record is None:
                 return False
-
-            # 更新时间戳
-            now = datetime.now().isoformat()
-            record["updated_at"] = now
-
-            # 更新大纲内容（支持修改大纲）
-            if outline is not None:
-                record["outline"] = outline
-
-            # 更新图片信息
-            if images is not None:
-                record["images"] = self._merge_safe_images(record.get("images"), images)
-
-            # 更新状态（状态流转）
-            if status is not None:
-                record["status"] = self._protect_status(record.get("status"), status, record)
-
-            # 更新缩略图
-            if thumbnail is not None:
-                record["thumbnail"] = thumbnail
-
-            # 更新发布内容（标题/文案/标签）：坏结构静默忽略
-            if content is not None:
-                safe_content = self.sanitize_content(content)
-                if safe_content is not None:
-                    record["content"] = safe_content
-
-            # 保存完整记录（原子写）
-            record_path = self._get_record_path(record_id)
-            self._atomic_write_json(record_path, record)
 
             # 同步更新索引
             index = self._load_index()
-            for idx_record in index["records"]:
-                if idx_record["id"] == record_id:
-                    idx_record["updated_at"] = now
-
-                    # 更新状态
-                    idx_record["status"] = record.get("status", idx_record.get("status"))
-
-                    # 更新缩略图
-                    idx_record["thumbnail"] = record.get("thumbnail")
-
-                    # 更新页数（如果大纲被修改）
-                    if outline:
-                        idx_record["page_count"] = len(outline.get("pages", []))
-
-                    # 更新任务 ID
-                    if record.get("images", {}).get("task_id"):
-                        idx_record["task_id"] = record.get("images", {}).get("task_id")
-
-                    break
-
+            self._apply_index_entry_update(index, record_id, record, outline=outline)
             self._save_index(index)
             return True
+
+    def _apply_record_update(
+        self,
+        record_id: str,
+        outline: Optional[Dict] = None,
+        images: Optional[Dict] = None,
+        status: Optional[str] = None,
+        thumbnail: Optional[str] = None,
+        content: Optional[Dict] = None
+    ) -> Optional[Dict]:
+        """
+        更新记录文件（不写索引），返回更新后的完整记录。
+
+        必须在持有 self._lock 时调用；调用方负责随后同步索引
+        （便于批量扫描时把多次索引更新攒批成一次写盘）。
+
+        Returns:
+            Optional[Dict]: 更新后的记录，记录不存在时返回 None
+        """
+        # 获取现有记录
+        record = self.get_record(record_id)
+        if not record:
+            return None
+
+        # 更新时间戳
+        now = datetime.now().isoformat()
+        record["updated_at"] = now
+
+        # 更新大纲内容（支持修改大纲）
+        if outline is not None:
+            record["outline"] = outline
+
+        # 更新图片信息
+        if images is not None:
+            record["images"] = self._merge_safe_images(record.get("images"), images)
+
+        # 更新状态（状态流转）
+        if status is not None:
+            record["status"] = self._protect_status(record.get("status"), status, record)
+
+        # 更新缩略图
+        if thumbnail is not None:
+            record["thumbnail"] = thumbnail
+
+        # 更新发布内容（标题/文案/标签）：坏结构静默忽略
+        if content is not None:
+            safe_content = self.sanitize_content(content)
+            if safe_content is not None:
+                record["content"] = safe_content
+
+        # 保存完整记录（原子写）
+        record_path = self._get_record_path(record_id)
+        self._atomic_write_json(record_path, record)
+        return record
+
+    @staticmethod
+    def _apply_index_entry_update(
+        index: Dict,
+        record_id: str,
+        record: Dict,
+        outline: Optional[Dict] = None
+    ) -> None:
+        """
+        把一条记录的最新状态同步到索引数据（就地修改，不写盘）。
+
+        Args:
+            index: _load_index() 返回的索引数据
+            record_id: 记录 ID
+            record: 更新后的完整记录
+            outline: 若本次更新修改了大纲，传入以刷新 page_count
+        """
+        for idx_record in index["records"]:
+            if idx_record["id"] == record_id:
+                idx_record["updated_at"] = record.get("updated_at")
+
+                # 更新状态
+                idx_record["status"] = record.get("status", idx_record.get("status"))
+
+                # 更新缩略图
+                idx_record["thumbnail"] = record.get("thumbnail")
+
+                # 更新页数（如果大纲被修改）
+                if outline:
+                    idx_record["page_count"] = len(outline.get("pages", []))
+
+                # 更新任务 ID
+                if record.get("images", {}).get("task_id"):
+                    idx_record["task_id"] = record.get("images", {}).get("task_id")
+
+                break
 
     def merge_generated_image(
         self,
@@ -699,6 +746,103 @@ class HistoryService:
             "by_status": status_count
         }
 
+    def _build_task_record_map(self, index: Dict) -> Dict[str, str]:
+        """
+        构建 task_id -> record_id 映射（用于扫描时 O(1) 查找关联记录）。
+
+        索引条目本身冗余存储了 task_id（create_record / update_record 均会写入），
+        因此正常情况下无需读取任何记录文件。仅对极老的、缺少 task_id 字段的
+        索引条目回退为读取记录文件补齐。
+
+        同一 task_id 出现多次时保留索引序（新记录在前）中的第一条，
+        与旧实现"遍历索引取首个匹配记录"的语义一致。
+        """
+        mapping: Dict[str, str] = {}
+        for rec in index.get("records", []):
+            if "task_id" in rec:
+                task_id = rec.get("task_id")
+            else:
+                # 兼容旧数据：索引条目缺少 task_id 字段时回退读取记录文件
+                record_detail = self.get_record(rec["id"])
+                task_id = (record_detail or {}).get("images", {}).get("task_id")
+            if task_id and task_id not in mapping:
+                mapping[task_id] = rec["id"]
+        return mapping
+
+    def _sync_task_dir_images(
+        self, task_id: str, record_id: Optional[str]
+    ) -> tuple:
+        """
+        扫描单个任务目录并把图片合并进关联记录文件（不写索引）。
+
+        只在记录文件读改写期间持锁；目录扫描本身无锁。
+        索引同步由调用方负责（单次扫描立即写，批量扫描攒批一次性写）。
+
+        Returns:
+            tuple: (扫描结果 Dict, 更新后的记录 Dict 或 None)
+        """
+        files_by_index = HistoryImageMerger.files_by_index(self.history_dir, task_id)
+        image_files = list(files_by_index.values())
+
+        if record_id:
+            # 更新历史记录（读改写在锁内，避免并发丢更新）
+            with self._lock:
+                record = self.get_record(record_id)
+                if record:
+                    expected_count = len(record.get("outline", {}).get("pages", []))
+                    existing_generated = record.get("images", {}).get("generated", [])
+                    merged_images = HistoryImageMerger.merge_many(
+                        existing_generated,
+                        files_by_index,
+                        expected_count,
+                    )
+                    status = HistoryImageMerger.compute_status(merged_images, expected_count)
+
+                    # 更新图片列表和状态（仅记录文件，索引由调用方攒批写）
+                    updated_record = self._apply_record_update(
+                        record_id,
+                        images={
+                            "task_id": task_id,
+                            "generated": merged_images
+                        },
+                        status=status,
+                        thumbnail=HistoryImageMerger.first_image(merged_images)
+                    )
+
+                    if updated_record is not None:
+                        return ({
+                            "success": True,
+                            "record_id": record_id,
+                            "task_id": task_id,
+                            "images_count": len(image_files),
+                            "images": merged_images,
+                            "status": status
+                        }, updated_record)
+
+        # 没有关联的记录，返回扫描结果
+        return ({
+            "success": True,
+            "task_id": task_id,
+            "images_count": len(image_files),
+            "images": image_files,
+            "no_record": True
+        }, None)
+
+    def _flush_index_entry_updates(self, updated_records: Dict[str, Dict]) -> None:
+        """
+        把一批记录的最新状态一次性同步到索引（重新加载后就地更新，单次原子写）。
+
+        重新加载而不是复用扫描开始时的快照，避免覆盖扫描期间
+        其他线程对索引的并发修改（新建/删除记录等）。
+        """
+        if not updated_records:
+            return
+        with self._lock:
+            index = self._load_index()
+            for record_id, record in updated_records.items():
+                self._apply_index_entry_update(index, record_id, record)
+            self._save_index(index)
+
     def scan_and_sync_task_images(self, task_id: str) -> Dict[str, Any]:
         """
         扫描任务文件夹，同步图片列表
@@ -732,61 +876,14 @@ class HistoryService:
             }
 
         try:
-            files_by_index = HistoryImageMerger.files_by_index(self.history_dir, task_id)
-            image_files = list(files_by_index.values())
-
-            # 查找关联的历史记录
+            # 通过索引冗余的 task_id 字段直接定位关联记录，避免逐条读盘
             index = self._load_index()
-            record_id = None
-            for rec in index.get("records", []):
-                # 通过遍历所有记录，找到 task_id 匹配的记录
-                record_detail = self.get_record(rec["id"])
-                if record_detail and record_detail.get("images", {}).get("task_id") == task_id:
-                    record_id = rec["id"]
-                    break
+            record_id = self._build_task_record_map(index).get(task_id)
 
-            if record_id:
-                # 更新历史记录（读改写在锁内，避免并发丢更新）
-                with self._lock:
-                    record = self.get_record(record_id)
-                    if record:
-                        expected_count = len(record.get("outline", {}).get("pages", []))
-                        existing_generated = record.get("images", {}).get("generated", [])
-                        merged_images = HistoryImageMerger.merge_many(
-                            existing_generated,
-                            files_by_index,
-                            expected_count,
-                        )
-                        status = HistoryImageMerger.compute_status(merged_images, expected_count)
-
-                        # 更新图片列表和状态
-                        self.update_record(
-                            record_id,
-                            images={
-                                "task_id": task_id,
-                                "generated": merged_images
-                            },
-                            status=status,
-                            thumbnail=HistoryImageMerger.first_image(merged_images)
-                        )
-
-                        return {
-                            "success": True,
-                            "record_id": record_id,
-                            "task_id": task_id,
-                            "images_count": len(image_files),
-                            "images": merged_images,
-                            "status": status
-                        }
-
-            # 没有关联的记录，返回扫描结果
-            return {
-                "success": True,
-                "task_id": task_id,
-                "images_count": len(image_files),
-                "images": image_files,
-                "no_record": True
-            }
+            result, updated_record = self._sync_task_dir_images(task_id, record_id)
+            if updated_record is not None:
+                self._flush_index_entry_updates({record_id: updated_record})
+            return result
 
         except Exception as e:
             return {
@@ -823,7 +920,15 @@ class HistoryService:
             orphan_tasks = []  # 没有关联记录的任务
             results = []
 
-            # 遍历 history 目录
+            # 只加载一次索引并构建 task_id -> record_id 映射，
+            # 消除旧实现"每个任务目录 × 每条记录"的全量读盘
+            index = self._load_index()
+            task_record_map = self._build_task_record_map(index)
+
+            # 攒批的索引更新：record_id -> 更新后的记录，扫描结束后一次性写盘
+            pending_index_updates: Dict[str, Dict] = {}
+
+            # 遍历 history 目录（listdir 与目录比对不持锁）
             for item in os.listdir(self.history_dir):
                 item_path = os.path.join(self.history_dir, item)
 
@@ -838,8 +943,16 @@ class HistoryService:
                 # 假设任务文件夹名就是 task_id
                 task_id = item
 
-                # 扫描并同步
-                result = self.scan_and_sync_task_images(task_id)
+                # 扫描并同步（单任务失败不中断整体扫描，与旧实现一致）
+                try:
+                    result, updated_record = self._sync_task_dir_images(
+                        task_id, task_record_map.get(task_id)
+                    )
+                except Exception as e:
+                    result, updated_record = {
+                        "success": False,
+                        "error": f"扫描任务失败: {str(e)}"
+                    }, None
                 results.append(result)
 
                 if result.get("success"):
@@ -847,8 +960,13 @@ class HistoryService:
                         orphan_tasks.append(task_id)
                     else:
                         synced_count += 1
+                        if updated_record is not None:
+                            pending_index_updates[result["record_id"]] = updated_record
                 else:
                     failed_count += 1
+
+            # 索引更新一次性写盘（内部重新加载索引，兼容扫描期间的并发修改）
+            self._flush_index_entry_updates(pending_index_updates)
 
             return {
                 "success": True,
