@@ -217,11 +217,25 @@
         预览
         <span class="section-sub">（第一张选中图片 × 各选中尺寸）</span>
       </h2>
+      <!-- 平台安全区开关：仅当选中尺寸里有安全区数据时展示 -->
+      <div v-if="hasAnySafeZone" class="safezone-row">
+        <label class="safezone-toggle" :class="{ selected: safeZone.enabled }">
+          <input v-model="safeZone.enabled" type="checkbox" style="display: none;" />
+          <span class="safezone-check" aria-hidden="true">✓</span>
+          显示平台安全区
+        </label>
+        <span v-if="safeZone.enabled" class="safezone-hint">
+          红色区域可能被平台 UI 遮挡，仅预览可见，不会导出到图片
+        </span>
+      </div>
       <p v-if="previewError" class="error-tip">{{ previewError }}</p>
       <div class="preview-row">
         <figure v-for="p in previews" :key="p.presetId" class="preview-item">
           <img :src="p.dataUrl" :alt="p.label" />
-          <figcaption>{{ p.label }}</figcaption>
+          <figcaption>
+            {{ p.label }}
+            <span v-if="safeZone.enabled && !p.hasSafeZone" class="safezone-none">该尺寸暂无安全区数据</span>
+          </figcaption>
         </figure>
         <span v-if="previewLoading" class="loading-tip">预览生成中…</span>
       </div>
@@ -278,6 +292,13 @@ import {
   type WatermarkColorKey,
   type WatermarkSizeKey
 } from '../utils/watermarkSettings'
+import {
+  getSafeZoneScheme,
+  loadSafeZoneSettings,
+  saveSafeZoneSettings,
+  toPixelRect,
+  type SafeZoneScheme
+} from '../utils/safeZone'
 
 type SourceTabKey = 'upload' | 'result' | 'history'
 
@@ -512,12 +533,57 @@ function fillBrandWatermark() {
   wm.text = `@${brandName.value}`.slice(0, WATERMARK_TEXT_MAX_CHARS)
 }
 
+/* ---------------- 平台安全区 ---------------- */
+
+// 进页回填上次的显隐设置（默认关），变更即持久化
+const safeZone = reactive(loadSafeZoneSettings())
+
+watch(safeZone, () => saveSafeZoneSettings({ ...safeZone }))
+
+// 选中的尺寸里只要有一个有安全区数据就展示开关
+const hasAnySafeZone = computed(() =>
+  selectedPresets.value.some(preset => getSafeZoneScheme(preset.id) !== null)
+)
+
+/**
+ * 在预览 canvas 上叠加安全区遮罩（半透明红 + 区域名称小标签）。
+ * 只作用于预览画布，导出走 exportImageToBlob 独立渲染，不会带上遮罩。
+ */
+function drawSafeZoneOverlay(canvas: HTMLCanvasElement, scheme: SafeZoneScheme) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  // 预览画布较小（高 220），标签字号取固定小号即可
+  const fontSize = 10
+  ctx.save()
+  for (const region of scheme.regions) {
+    const rect = toPixelRect(region, canvas.width, canvas.height)
+    if (rect.width <= 0 || rect.height <= 0) continue
+    ctx.fillStyle = 'rgba(239, 42, 69, 0.3)'
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
+    ctx.strokeStyle = 'rgba(239, 42, 69, 0.75)'
+    ctx.lineWidth = 1
+    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1)
+    // 区域名称标签画在区域内左上角，保证不出画布
+    ctx.font = `600 ${fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
+    ctx.shadowBlur = 2
+    ctx.fillText(region.label, rect.x + 4, rect.y + 3, Math.max(0, rect.width - 8))
+    ctx.shadowBlur = 0
+  }
+  ctx.restore()
+}
+
 /* ---------------- 预览 ---------------- */
 
 interface PreviewItem {
   presetId: string
   label: string
   dataUrl: string
+  /** 该尺寸是否有安全区数据（开启开关但无数据时给轻提示） */
+  hasSafeZone: boolean
 }
 
 const previews = ref<PreviewItem[]>([])
@@ -560,10 +626,16 @@ async function refreshPreview() {
         background: background.value,
         watermark: watermark.value
       })
+      // 安全区遮罩只叠加在预览画布上；导出走 exportImageToBlob 重新渲染，绝不包含遮罩
+      const scheme = getSafeZoneScheme(preset.id)
+      if (safeZone.enabled && scheme) {
+        drawSafeZoneOverlay(canvas, scheme)
+      }
       items.push({
         presetId: preset.id,
         label: `${preset.label} ${preset.ratio}`,
-        dataUrl: canvas.toDataURL('image/png')
+        dataUrl: canvas.toDataURL('image/png'),
+        hasSafeZone: scheme !== null
       })
     }
     if (token === previewToken) previews.value = items
@@ -578,7 +650,7 @@ async function refreshPreview() {
 }
 
 watch(
-  [selectedSources, selectedPresets, fit, background, watermark],
+  [selectedSources, selectedPresets, fit, background, watermark, safeZone],
   () => {
     if (previewTimer) clearTimeout(previewTimer)
     previewTimer = setTimeout(refreshPreview, 300)
@@ -1051,6 +1123,74 @@ onBeforeUnmount(() => {
 
 .opacity-label input[type='range'] {
   max-width: 200px;
+}
+
+/* 平台安全区 */
+.safezone-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.safezone-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  color: var(--text-sub);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
+  user-select: none;
+}
+
+.safezone-toggle:hover:not(.selected) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+}
+
+.safezone-toggle.selected {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-fade);
+  font-weight: 600;
+}
+
+.safezone-check {
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-hover);
+  background: var(--bg-card);
+  color: transparent;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.safezone-toggle.selected .safezone-check {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
+.safezone-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.safezone-none {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
 /* 预览 */
