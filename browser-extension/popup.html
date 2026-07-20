@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>红墨剪藏</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="popup">
+    <header class="header">
+      <span class="logo" aria-hidden="true">红</span>
+      <div class="header-text">
+        <h1 class="title">红墨剪藏</h1>
+        <p class="subtitle">发送到本地 RedInk 剪藏收件箱</p>
+      </div>
+    </header>
+
+    <!-- 提取预览 -->
+    <section id="preview" class="preview hidden">
+      <div class="preview-row">
+        <span id="source-badge" class="badge">其他</span>
+        <span id="preview-author" class="author"></span>
+      </div>
+      <p id="preview-title" class="preview-title"></p>
+      <p id="preview-content" class="preview-content"></p>
+      <p id="preview-tags" class="preview-tags"></p>
+    </section>
+
+    <!-- 状态提示（提取中 / 提取失败 / 发送结果） -->
+    <p id="status" class="status">正在提取当前页面内容…</p>
+
+    <div class="actions">
+      <button id="send-btn" class="btn-primary" disabled>发送到 RedInk</button>
+    </div>
+
+    <!-- 设置区 -->
+    <details class="settings">
+      <summary>设置</summary>
+      <div class="settings-body">
+        <label class="field">
+          <span class="field-label">RedInk 端口</span>
+          <input id="port-input" type="number" min="1" max="65535" placeholder="12398" />
+        </label>
+        <label class="field">
+          <span class="field-label">访问令牌（选填）</span>
+          <input id="token-input" type="password" placeholder="启用 REDINK_ACCESS_TOKEN 时填写" />
+        </label>
+        <button id="save-settings-btn" class="btn-secondary">保存设置</button>
+        <p id="settings-saved" class="settings-saved hidden">已保存 ✓</p>
+      </div>
+    </details>
+
+    <footer class="footer">仅限剪藏你自己浏览的公开笔记，用于个人学习分析</footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

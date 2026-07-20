@@ -95,6 +95,7 @@
 
       <div class="submit-row">
         <button
+          ref="analyzeBtnEl"
           type="button"
           class="btn btn-primary benchmark-btn"
           :disabled="loading || !!sending || !canAnalyze"
@@ -104,6 +105,62 @@
           {{ loading ? '拆解中…' : '开始拆解' }}
         </button>
       </div>
+    </div>
+
+    <!-- 剪藏收件箱（浏览器插件进料；拉取失败时整块隐藏，不打扰无插件用户） -->
+    <div v-if="clipsLoaded" class="card history-card">
+      <button type="button" class="history-toggle" @click="showClips = !showClips">
+        <span class="history-title">
+          剪藏收件箱
+          <span class="clip-count-badge">{{ clips.length }}</span>
+        </span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showClips }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <template v-if="showClips">
+        <p v-if="clips.length === 0" class="clip-empty">
+          还没有剪藏。安装「红墨剪藏」浏览器插件后，在小红书 / 抖音的网页版笔记页
+          一键把标题正文发到这里——插件在项目 <code>browser-extension/</code> 目录，
+          安装步骤见其中的 README.md
+        </p>
+        <ul v-else class="history-list pattern-list">
+          <li v-for="clip in clips" :key="clip.id" class="pattern-item">
+            <div class="pattern-row clip-row">
+              <span class="clip-source-badge" :class="clip.source">
+                {{ clipSourceLabel(clip.source) }}
+              </span>
+              <span class="clip-title" :title="clip.title || clip.content">
+                {{ clipDisplayTitle(clip) }}
+              </span>
+              <span class="history-time">{{ formatTime(clip.created_at) }}</span>
+              <div class="pattern-actions">
+                <button
+                  type="button"
+                  class="pattern-action-btn"
+                  :disabled="loading || !!sending"
+                  title="把标题、正文和标签填入上方「粘贴内容」输入框（不自动拆解）"
+                  @click="useClip(clip)"
+                >
+                  拆解这条
+                </button>
+                <button
+                  type="button"
+                  class="pattern-action-btn danger"
+                  title="从收件箱删除"
+                  @click="removeClip(clip.id)"
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          </li>
+        </ul>
+      </template>
     </div>
 
     <!-- 最近拆解（本地历史） -->
@@ -406,6 +463,7 @@ import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { analyzeBenchmark, type BenchmarkAnalysis } from '../api/benchmark'
 import { getBrandList, type BrandKit } from '../api/brand'
+import { deleteClip, getClipList, type Clip, type ClipSource } from '../api/clips'
 import { linkToOutline } from '../api/link'
 import type { Page } from '../api/types'
 import { normalizeApiError, type AppError } from '../utils/errors'
@@ -454,6 +512,14 @@ const templateForCreation = ref('')
 const history = ref<BenchmarkHistoryEntry[]>(loadHistory())
 const showHistory = ref(false)
 
+// ==================== 剪藏收件箱状态（浏览器插件进料） ====================
+const clips = ref<Clip[]>([])
+// 只有列表拉取成功才展示收件箱区块（后端未启动/接口异常时静默隐藏）
+const clipsLoaded = ref(false)
+const showClips = ref(false)
+// 「开始拆解」按钮引用：「拆解这条」回填后滚动到这里
+const analyzeBtnEl = ref<HTMLButtonElement | null>(null)
+
 // 当前拆解结果的来源标题/摘要（存套路时的默认命名与来源字段）
 const analysisSource = ref('')
 
@@ -483,6 +549,14 @@ const brandsLoaded = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 
 onMounted(async () => {
+  // 剪藏收件箱与品牌列表并行拉取；收件箱失败静默（getClipList 内部兜错，不会 reject）
+  getClipList().then(clipRes => {
+    if (clipRes.success) {
+      clips.value = clipRes.clips
+      clipsLoaded.value = true
+    }
+  })
+
   const res = await getBrandList()
   if (res.success) {
     brands.value = res.brands
@@ -561,10 +635,58 @@ function restoreFromHistory(entry: BenchmarkHistoryEntry) {
   error.value = null
 }
 
-function formatTime(timestamp: number): string {
+function formatTime(timestamp: number | string): string {
   const d = new Date(timestamp)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// ==================== 剪藏收件箱 ====================
+
+const CLIP_SOURCE_LABELS: Record<ClipSource, string> = {
+  xiaohongshu: '小红书',
+  douyin: '抖音',
+  other: '其他',
+}
+
+function clipSourceLabel(source: ClipSource): string {
+  return CLIP_SOURCE_LABELS[source] || CLIP_SOURCE_LABELS.other
+}
+
+/** 列表展示标题：无标题的剪藏（如抖音纯文案）取正文前 30 字 */
+function clipDisplayTitle(clip: Clip): string {
+  if (clip.title) return clip.title
+  const text = (clip.content || '').replace(/\s+/g, ' ').trim()
+  return text.slice(0, 30) || '（无标题剪藏）'
+}
+
+/**
+ * 「拆解这条」：把标题 + 正文 + 标签回填到「粘贴内容」模式的输入框，
+ * 并滚动到「开始拆解」按钮——不自动触发拆解，让用户确认后再消耗额度
+ */
+function useClip(clip: Clip) {
+  if (loading.value || sending.value) return
+
+  const parts: string[] = []
+  if (clip.title) parts.push(clip.title)
+  if (clip.content) parts.push(clip.content)
+  if (clip.tags && clip.tags.length > 0) {
+    parts.push(clip.tags.map(t => `#${t}`).join(' '))
+  }
+
+  mode.value = 'paste'
+  content.value = parts.join('\n\n')
+  nextTick(() => {
+    analyzeBtnEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
+/** 删除单条剪藏：接口成功后本地移除（失败时保持原样，收件箱场景无需强提醒） */
+async function removeClip(clipId: string) {
+  const res = await deleteClip(clipId)
+  if (res.success) {
+    clips.value = clips.value.filter(c => c.id !== clipId)
+  }
 }
 
 // ==================== 一键送创作 ====================
@@ -1108,6 +1230,71 @@ function copyDraft() {
   color: var(--text-sub);
 }
 
+/* 剪藏收件箱（复用历史区/套路库样式，补充来源徽标与空态） */
+.clip-count-badge {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.clip-empty {
+  margin: var(--space-3) 0 var(--space-2);
+  font-size: 13px;
+  color: var(--text-sub);
+  line-height: 1.7;
+}
+
+.clip-empty code {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--gray-2);
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.clip-row {
+  padding: 8px 8px 8px 14px;
+  gap: var(--space-2);
+}
+
+.clip-source-badge {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--gray-2);
+  color: var(--text-sub);
+}
+
+.clip-source-badge.xiaohongshu {
+  background: var(--primary-fade);
+  color: var(--primary);
+}
+
+.clip-source-badge.douyin {
+  background: #ecebff;
+  color: #4b44c9;
+}
+
+.clip-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 我的套路库（在历史区样式基础上加操作按钮与详情展开） */
 .pattern-item {
   border: 1px solid var(--border-color);
@@ -1579,6 +1766,12 @@ function copyDraft() {
   .pattern-actions {
     width: 100%;
     justify-content: flex-end;
+  }
+
+  .clip-title {
+    flex-basis: 100%;
+    order: 1;
+    white-space: normal;
   }
 }
 </style>

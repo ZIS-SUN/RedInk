@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "红墨剪藏",
+  "version": "0.1.0",
+  "description": "在小红书/抖音笔记页一键剪藏标题、正文、标签与互动数据，发送到本地 RedInk 剪藏收件箱做对标拆解（仅限个人学习分析用途）",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://www.xiaohongshu.com/*",
+    "https://www.douyin.com/*",
+    "http://127.0.0.1:12398/*",
+    "http://localhost:12398/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "剪藏到 RedInk",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

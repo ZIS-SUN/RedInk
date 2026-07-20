@@ -97,6 +97,18 @@ def create_app():
             request.max_content_length = MAX_IMPORT_SIZE
 
     CORS(app, resources={
+        # 剪藏收件箱端点单独放行浏览器插件来源（chrome-extension://<id> /
+        # moz-extension://<id>）。安全边界：服务默认仅监听本机（127.0.0.1），
+        # 且该规则只覆盖 /api/clips* 这一收件箱端点——其余 /api/* 路径仍走
+        # 下面的原白名单；flask-cors 按路径规则从最长（最具体）开始匹配。
+        r"/api/clips*": {
+            "origins": Config.CORS_ORIGINS + [
+                r"^chrome-extension://.*$",
+                r"^moz-extension://.*$",
+            ],
+            "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Access-Token"],
+        },
         r"/api/*": {
             "origins": Config.CORS_ORIGINS,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
