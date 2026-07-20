@@ -23,6 +23,8 @@
 
 ### Type One Sentence, Get Complete Image & Text Posts
 
+The home page offers **sample topics** you can fill in with one click to get started quickly, plus a **Recent Works** section for quick access to what you've created — or jump to History for everything.
+
 <details open>
 <summary><b>Step 1: Smart Outline Generation</b></summary>
 
@@ -62,6 +64,8 @@
 - ⚡ Concurrent generation for all pages (up to 15 by default)
 - ⚠️ Disable high concurrency in settings if your API doesn't support it
 - 🔧 Regenerate individual pages you're not satisfied with
+- 📊 Real-time progress visualization: each image card shows queued / generating / done / failed states, with a per-image progress bar and elapsed time while generating
+- ⏱️ Overall progress advances smoothly, with estimated time remaining dynamically calculated from the actual duration of images already completed; failed images can be retried in one click
 
 </details>
 
@@ -73,20 +77,51 @@ Beyond the "one sentence → full post" main flow, the **Creator Tools** section
 
 | Stage | Tool | Description |
 |-------|------|-------------|
-| **Ideate** | Topic Inspiration | Enter your niche; AI generates topic ideas with angles, content formats, and estimated heat |
-| | Benchmark Breakdown | Paste a viral post to deconstruct why it worked (hook/structure/emotion/audience) and generate an original draft in the same pattern |
+| **Ideate** | Topic Inspiration | Enter your niche; AI generates topic ideas with angles, content formats, and estimated heat. Toggle "Use my account data" to inject real performance data logged in Analytics Review; selected topics carry their angle and suggested tags into the creation flow |
+| | Benchmark Breakdown | Paste a viral post or a web link to deconstruct why it worked (hook/structure/emotion/audience) and generate an original draft in the same pattern; send the imitation draft or structure template to the creation center as an outline in one click; the last 20 breakdowns are archived locally |
 | **Write** | Viral Titles | Generate candidate titles with attractiveness scores and viral-element tags |
-| | Multi-Platform Rewrite | Rewrite one piece of copy into Xiaohongshu / Douyin / WeChat / Bilibili / Weibo styles |
+| | Multi-Platform Rewrite | Rewrite one piece of copy into Xiaohongshu / Douyin / WeChat / Bilibili / Weibo styles; send any rewrite to the creation center as an outline in one click |
 | | Comment Assistant | Paste fan comments to generate high-engagement replies and a pinned guiding comment |
 | **Style & Visuals** | Brand Memory | Manage personal IP / brand profiles (tone, catchphrases, signature, banned words) for a consistent persona |
 | | Style Templates | Curated visual style library (with custom templates), applied to image generation in one click |
 | | Cover A/B | Generate multiple cover directions for one topic and compare estimated click appeal |
 | **Generate & Export** | Link to Post | Paste a URL or long text to auto-distill a multi-page outline and send it into the creation flow |
 | | Multi-Size Export | Adapt one image to 9:16 / 1:1 / 3:4 / WeChat banner / Bilibili cover and batch download |
-| **Plan & Review** | Content Calendar | Plan publishing cadence across platforms, manage plans and statuses, two-way linked with the creation flow / history |
-| | Analytics Review | Manually log published metrics, view performance stats, and get AI review insights |
+| **Plan & Review** | Content Calendar | Plan publishing cadence across platforms and manage plans and statuses; entries support publish times and linked works ("Add to Calendar" from history links automatically, with jump-to-view); new entries get a best-time-slot recommendation based on your account data; "AI Scheduling" generates a one-week content plan in one click (optionally using account data, with a preview to check off before saving) |
+| | Analytics Review | Log published metrics manually or bulk-paste from Excel / CSV (headers auto-detected, numbers like "1.2万" auto-converted), view SVG trend / comparison charts and publishing time-slot analysis, and get AI review insights |
 
 > Note: **Brand persona** and **visual style** flow through the entire main pipeline — once set, outlines, copy, titles, and image generation all apply them automatically. Copywriting tools require a configured text model; most visual/data tools (Style Templates, Multi-Size Export, Brand Memory, Content Calendar, Analytics) work without a model.
+>
+> The "Web Link" mode of Benchmark Breakdown only supports publicly accessible article pages. In-app links from Xiaohongshu / Douyin usually cannot be fetched directly — switch to "Paste Content" mode and copy the text instead.
+
+---
+
+## 🎛️ Fine-Tuning & Customization
+
+Generation is not the end — every stage can be polished further:
+
+### ✍️ Outline Page
+
+- **Per-page AI polish**: each outline page offers three one-click refinements — polish / shorten / make it punchier — with a side-by-side preview before applying, so you can discard results you don't like
+
+### 🖼️ Result Page
+
+- **Edit text**: every card has an "Edit Text" action — save the copy only, or save and redraw that page's image
+- **Inline editing for titles / copy / tags**: candidate titles, publishing copy, and tags are all directly editable, and edits are saved with the work in history
+- **Viral Review**: Result page → "Viral Review" — AI scores the finished post for viral potential, with a 0-100 overall score, five dimension reviews (cover hook / title appeal / content structure / emotional value / call to action), and up to 5 suggestions sorted by impact; suggestions that include rewritten text can be applied in one click
+- **One-click publishing package**: the "Download All" zip is upgraded to a publishing package — besides all images it includes a "发布文案.txt" file (candidate titles / body copy / tags / raw outline) ready to copy-paste when publishing
+- **Multi-size export entry**: a "Multi-Size Export" button at the top of the result page jumps straight to the multi-size export tool for platform-specific sizes
+
+### 🗂️ History Page
+
+- **Batch management**: enter batch mode to multi-select / select all on page, with batch download and batch delete (with live progress)
+- **Status filters**: filter records by All / Completed / Partial / Drafts / Failed
+- **Add to Calendar**: add any work to the content calendar in one click, automatically linked to the calendar entry
+
+### ⚙️ Settings Page
+
+- **Image generation parameters**: configure image concurrency (1-8), image size (OpenAI-compatible APIs), and aspect ratio (Google GenAI APIs)
+- **Image generation prompt template**: the entire image prompt template is fully customizable (with placeholders for page content / page type / user topic / full outline), and can be restored to default at any time
 
 ---
 
@@ -216,6 +251,18 @@ Visit: http://localhost:5173
 
 ---
 
+### Option 3: macOS Desktop App
+
+RedInk can be packaged as a native macOS desktop app (pywebview native window + PyInstaller bundle at `dist/RedInk.app`) that runs like a regular app:
+
+- 🖥️ Native window with app icon — no browser needed
+- 🔔 Native macOS notifications when image generation completes or fails
+- 📐 Window size and position are remembered across launches
+
+See [BUILD_DESKTOP.md](./BUILD_DESKTOP.md) for build instructions.
+
+---
+
 ## 🔧 Configuration
 
 ### Configuration Methods
@@ -303,6 +350,21 @@ If this project helps you, please give it a Star ⭐
 ---
 
 ## Changelog
+
+### Unreleased
+- ✨ Real-time generation progress visualization: queued / generating / done / failed image card states, per-image progress bar with elapsed time, smooth overall progress, and estimated time remaining based on actual completion times
+- ✨ Added macOS desktop app: pywebview native window packaged with PyInstaller as `dist/RedInk.app`, with app icon, native completion/failure notifications, and window size/position memory (see BUILD_DESKTOP.md)
+- ✨ Added "Edit Text" on the result page: save copy only or save and redraw; titles / copy / tags support inline editing and are saved with the work in history
+- ✨ Added per-page AI polish on the outline page: polish / shorten / punchier, with preview before applying
+- ✨ Settings page now supports image concurrency (1-8), image size, and aspect ratio; the image generation prompt template is fully customizable with one-click restore to default
+- ✨ Added "Viral Review" on the result page: AI review with a 0-100 overall score, five dimension reviews, and up to 5 suggestions — those with rewritten text can be applied in one click
+- ✨ Analytics Review upgrade: bulk paste import from Excel / CSV (auto header detection, "万" auto-conversion), SVG trend and comparison charts, publishing time-slot analysis with best-slot conclusion
+- ✨ Benchmark Breakdown upgrade: direct breakdown from web links, one-click send of imitation draft / structure template to the creation center as an outline, local archive of the last 20 breakdowns
+- ✨ Topic Inspiration upgrade: "Use my account data" injects real performance data, topics carry angle and tags into creation, and multi-platform rewrites can be sent to the creation center in one click
+- ✨ One-click publishing package: titles / copy / tags on the result page are saved with the work in history, the zip download is upgraded to a publishing package with a "发布文案.txt" file (candidate titles / body / tags / outline), and the result page gains a "Multi-Size Export" entry
+- ✨ Content Calendar upgrade: entries support publish times and linked works ("Add to Calendar" from history links automatically, with jump-to-view), new entries get best-time-slot recommendations from account data, and "AI Scheduling" generates a one-week plan (optionally using account data, preview and check off before saving)
+- ✨ History batch management: batch mode with multi-select / select all on page, batch delete (with progress), batch download, and status filters completed as All / Completed / Partial / Drafts / Failed
+- ✨ Home page onboarding: sample topics filled in with one click, plus a "Recent Works" quick-access section
 
 ### v1.4.3 (2026-06-30)
 - ✨ Default outline length changed to 5 pages when the user does not specify a page count

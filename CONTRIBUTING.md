@@ -51,6 +51,9 @@ uv run pytest tests/ -v
 # Frontend build check
 cd frontend
 pnpm build
+
+# API smoke test (all read-only GET endpoints, ~30s, no LLM cost)
+bash scripts/smoke-test.sh
 ```
 
 ## How to Contribute

@@ -68,6 +68,12 @@ history/*
 # Analytics data (user manually-entered performance metrics, local data)
 /analytics_data/
 
+# Publish assistant accounts (user local data)
+/publish_accounts.json
+
+# Playwright CLI artifacts
+.playwright-cli/
+
 # Logs
 *.log
 logs/
