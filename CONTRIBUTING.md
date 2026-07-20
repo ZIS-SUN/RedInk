@@ -48,8 +48,13 @@ pnpm dev
 # Backend tests
 uv run pytest tests/ -v
 
-# Frontend build check
+# Frontend tests (vitest), lint, and typecheck
 cd frontend
+pnpm test
+pnpm lint
+pnpm typecheck
+
+# Frontend build check
 pnpm build
 
 # API smoke test (all read-only GET endpoints, ~30s, no LLM cost)
