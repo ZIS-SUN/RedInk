@@ -1,5 +1,8 @@
 <template>
   <div class="container tools-page">
+    <!-- 未配置 AI 服务商引导（与首页共用组件，检测失败或已配置时不渲染） -->
+    <SetupGuideBanner />
+
     <header class="page-header">
       <div>
         <h1 class="page-title">创作工作台</h1>
@@ -49,6 +52,7 @@
 
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
+import SetupGuideBanner from '../components/common/SetupGuideBanner.vue'
 
 type ToolTone = 'primary' | 'info' | 'success' | 'warning'
 

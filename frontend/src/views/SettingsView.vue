@@ -11,10 +11,12 @@
     </div>
 
     <div v-else class="settings-container">
+      <!-- 已在设置页内，无需再显示"去设置"跳转 -->
       <ErrorCard
         v-if="feedback?.type === 'error'"
         :error="feedback.error"
         dismissible
+        :settings-action="false"
         @dismiss="clearFeedback"
         @retry="handleRetry"
         style="margin-bottom: 16px;"
@@ -28,6 +30,19 @@
       >
         <span>{{ feedback.message }}</span>
         <button type="button" @click="clearFeedback" aria-label="关闭提示">×</button>
+      </div>
+
+      <!-- 首配引导：没有任何已配置服务商时的"三步开始" -->
+      <div v-if="showFirstRunGuide" class="first-run-guide" role="note">
+        <div class="first-run-title">三步开始创作</div>
+        <ol class="first-run-steps">
+          <li><span class="step-num">1</span>在下方选择服务商，填好 API Key 并保存</li>
+          <li><span class="step-num">2</span>点击「测试」确认连接可用</li>
+          <li>
+            <span class="step-num">3</span>
+            <RouterLink to="/" class="step-link">回首页</RouterLink>输入主题开始创作
+          </li>
+        </ol>
       </div>
 
       <!-- 文本生成配置 -->
@@ -164,13 +179,15 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import ProviderTable from '../components/settings/ProviderTable.vue'
 import ProviderModal from '../components/settings/ProviderModal.vue'
 import ImageProviderModal from '../components/settings/ImageProviderModal.vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
 import { getImagePrompt, saveImagePrompt, resetImagePrompt } from '../api'
 import { normalizeApiError } from '../utils/errors'
+import { hasConfiguredProvider } from '../utils/providerConfig'
 import {
   useProviderForm,
   textTypeOptions,
@@ -235,6 +252,16 @@ const {
   testImageProviderInList,
   updateImageForm
 } = useProviderForm()
+
+/**
+ * 首配引导：文本和图片两个分区都没有任何已保存 API Key 的服务商时显示；
+ * 用户配好任意一个服务商（保存后配置回读）即自然消失
+ */
+const showFirstRunGuide = computed(
+  () =>
+    !hasConfiguredProvider(textConfig.value.providers) &&
+    !hasConfiguredProvider(imageConfig.value.providers)
+)
 
 /**
  * 错误重试：清除错误提示并重新加载配置
@@ -333,6 +360,65 @@ onMounted(() => {
 .settings-container {
   max-width: 900px;
   margin: 0 auto;
+}
+
+/* 首配引导：三步开始，克制的浅底卡片 */
+.first-run-guide {
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-4);
+  background: var(--primary-fade);
+  border: 1px solid var(--primary-fade);
+  border-radius: var(--radius-md);
+}
+
+.first-run-title {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--primary);
+  margin-bottom: var(--space-2);
+}
+
+.first-run-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.first-run-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-caption);
+  color: var(--text-sub);
+  line-height: 1.6;
+}
+
+.first-run-steps .step-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.first-run-steps .step-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.first-run-steps .step-link:hover {
+  text-decoration: underline;
 }
 
 .section-header {

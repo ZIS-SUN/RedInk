@@ -3,6 +3,9 @@
     <!-- 图片网格轮播背景 -->
     <ShowcaseBackground />
 
+    <!-- 未配置 AI 服务商引导（检测失败或已配置时不渲染） -->
+    <SetupGuideBanner />
+
     <!-- Hero Area -->
     <div class="hero-section">
       <div class="hero-content">
@@ -127,6 +130,7 @@ import { normalizeApiError, type AppError } from '../utils/errors'
 import ShowcaseBackground from '../components/home/ShowcaseBackground.vue'
 import ComposerInput from '../components/home/ComposerInput.vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
+import SetupGuideBanner from '../components/common/SetupGuideBanner.vue'
 
 const router = useRouter()
 const store = useGeneratorStore()

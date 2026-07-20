@@ -9,14 +9,19 @@
         </div>
         <p class="error-detail">{{ normalized.detail }}</p>
         <p v-if="normalized.suggestion" class="error-suggestion">{{ normalized.suggestion }}</p>
-        <button
-          v-if="normalized.retryable"
-          class="retry-btn"
-          type="button"
-          @click="$emit('retry')"
-        >
-          重试
-        </button>
+        <div v-if="normalized.retryable || showSettingsAction" class="error-actions">
+          <button
+            v-if="normalized.retryable"
+            class="retry-btn"
+            type="button"
+            @click="$emit('retry')"
+          >
+            重试
+          </button>
+          <RouterLink v-if="showSettingsAction" to="/settings" class="settings-btn">
+            去设置
+          </RouterLink>
+        </div>
       </div>
       <button v-if="dismissible" class="error-close" type="button" @click="$emit('dismiss')" aria-label="关闭错误提示">
         ×
@@ -35,17 +40,25 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import {
   diagnosticsText,
   normalizeApiError,
   type AppError,
   type ErrorLike
 } from '../../utils/errors'
+import { isConfigRelatedError } from '../../utils/providerConfig'
 
 const props = defineProps<{
   error: ErrorLike | null | undefined
   title?: string
   dismissible?: boolean
+  /**
+   * 是否显示"去设置"跳转按钮：
+   * - 不传（默认）：自动判定，仅当错误属于"未配置/认证类"时显示
+   * - true / false：强制显示 / 隐藏
+   */
+  settingsAction?: boolean
 }>()
 
 defineEmits<{
@@ -61,6 +74,12 @@ const normalized = computed<AppError | null>(() => {
 })
 
 const diagnostics = computed(() => normalized.value ? diagnosticsText(normalized.value) : '')
+
+const showSettingsAction = computed(() => {
+  if (!normalized.value) return false
+  if (props.settingsAction !== undefined) return props.settingsAction
+  return isConfigRelatedError(normalized.value)
+})
 
 async function copyDiagnostics() {
   if (!normalized.value) return
@@ -214,8 +233,38 @@ async function copyDiagnostics() {
   border-color: rgba(222, 59, 59, 0.4);
 }
 
-.retry-btn {
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin-top: 10px;
+}
+
+.settings-btn {
+  display: inline-block;
+  border: 1px solid rgba(222, 59, 59, 0.35);
+  background: var(--bg-card);
+  color: var(--color-danger);
+  border-radius: var(--radius-sm);
+  padding: 5px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.settings-btn:hover {
+  background: var(--gray-0);
+  border-color: rgba(222, 59, 59, 0.5);
+  transform: translateY(-1px);
+}
+
+.settings-btn:active {
+  transform: translateY(0);
+}
+
+.retry-btn {
   border: none;
   background: var(--color-danger);
   color: #fff;
