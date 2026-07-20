@@ -29,6 +29,47 @@ def load_preference_snippet() -> str:
         return ""
 
 
+def normalize_seo_keywords(seo_keywords) -> List[str]:
+    """
+    归一化目标搜索词（小红书搜索埋词）：
+    只保留非空字符串，去首尾空白、去重，最多取前 3 个。
+    非列表输入（None/脏数据）一律返回空列表，保证埋词是可选增强、
+    绝不影响生成主链路。
+    """
+    if not isinstance(seo_keywords, list):
+        return []
+    result: List[str] = []
+    for item in seo_keywords:
+        if not isinstance(item, str):
+            continue
+        word = item.strip()
+        if word and word not in result:
+            result.append(word)
+    return result[:3]
+
+
+def build_seo_keywords_constraint(seo_keywords) -> str:
+    """
+    组装「目标搜索词埋入要求」prompt 片段（大纲生成用）。
+
+    与品牌人设约束同模式：以字符串追加方式融入 prompt，
+    避免改动模板占位符；未提供有效搜索词时返回空字符串。
+    """
+    keywords = normalize_seo_keywords(seo_keywords)
+    if not keywords:
+        return ""
+    core = keywords[0]
+    all_words = "、".join(f"「{w}」" for w in keywords)
+    return (
+        "\n\n## 目标搜索词埋入要求（搜索流量优化）\n"
+        f"用户提供了目标搜索词：{all_words}，其中核心词是「{core}」。\n"
+        f"1. 封面页的标题文案必须自然包含核心词「{core}」，且核心词要出现在标题的前 15 个字以内\n"
+        f"2. 第一个内容页（第 2 页）的开头要自然出现一次核心词「{core}」\n"
+        "3. 其余搜索词在后续内容页中自然带到即可，不强求逐页出现\n"
+        "4. 严禁堆砌关键词、严禁生硬插入：读起来必须像正常表达，宁可少埋一次也不要影响可读性\n"
+    )
+
+
 def clean_llm_text(text: str) -> str:
     """清洗 LLM 返回的文本：去掉首尾空白，剥掉可能的 ``` 代码块包裹"""
     if not text:
@@ -168,7 +209,8 @@ class OutlineService:
         self,
         topic: str,
         images: Optional[List[bytes]] = None,
-        brand: Optional[Dict] = None
+        brand: Optional[Dict] = None,
+        seo_keywords: Optional[List[str]] = None
     ) -> str:
         """
         组装大纲生成 prompt（流式与非流式共用，保证两条链路产出完全一致）
@@ -177,6 +219,7 @@ class OutlineService:
             topic: 用户主题
             images: 参考图片列表（可选，仅影响 prompt 中的提示文案）
             brand: 品牌档案字典（可选），提供时追加品牌人设约束
+            seo_keywords: 目标搜索词列表（可选），提供时追加搜索埋词要求
         """
         prompt = self.prompt_template.format(topic=topic)
 
@@ -196,6 +239,13 @@ class OutlineService:
         if preference_snippet:
             logger.info("注入创作偏好画像片段")
             prompt += "\n\n" + preference_snippet
+
+        # 目标搜索词埋入要求（与品牌人设同模式）：
+        # 未提供有效搜索词时片段为空字符串，prompt 与旧行为完全一致
+        seo_constraint = build_seo_keywords_constraint(seo_keywords)
+        if seo_constraint:
+            logger.info(f"注入目标搜索词埋入要求: keywords={normalize_seo_keywords(seo_keywords)}")
+            prompt += seo_constraint
 
         return prompt
 
@@ -247,12 +297,15 @@ class OutlineService:
         self,
         topic: str,
         images: Optional[List[bytes]] = None,
-        brand: Optional[Dict] = None
+        brand: Optional[Dict] = None,
+        seo_keywords: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         try:
             logger.info(f"开始生成大纲: topic={topic[:50]}..., images={len(images) if images else 0}")
             # prompt 组装收敛到 build_outline_prompt，与流式端点共用同一逻辑
-            prompt = self.build_outline_prompt(topic, images=images, brand=brand)
+            prompt = self.build_outline_prompt(
+                topic, images=images, brand=brand, seo_keywords=seo_keywords
+            )
 
             # 从配置中获取模型参数
             model, temperature, max_output_tokens = self.get_generation_params()

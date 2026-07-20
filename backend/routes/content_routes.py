@@ -34,6 +34,7 @@ def create_content_blueprint():
         - topic: 主题文本
         - outline: 大纲内容
         - brand_id: 品牌档案 ID（可选），提供且有效时会把品牌人设约束注入生成 prompt
+        - seo_keywords: 目标搜索词列表（可选，最多取前 3 个），提供时注入搜索埋词要求
 
         返回：
         - success: 是否成功
@@ -48,6 +49,8 @@ def create_content_blueprint():
             topic = data.get('topic', '')
             outline = data.get('outline', '')
             brand_id = data.get('brand_id')
+            # 目标搜索词（可选），归一化交给服务层统一处理
+            seo_keywords = data.get('seo_keywords')
 
             log_request('/content', {'topic': topic[:50] if topic else '', 'outline_length': len(outline)})
 
@@ -72,7 +75,9 @@ def create_content_blueprint():
             # 调用内容生成服务
             logger.info(f"🔄 开始生成内容，主题: {topic[:50]}...")
             content_service = get_content_service()
-            result = content_service.generate_content(topic, outline, brand=brand)
+            result = content_service.generate_content(
+                topic, outline, brand=brand, seo_keywords=seo_keywords
+            )
 
             # 记录结果
             elapsed = time.time() - start_time

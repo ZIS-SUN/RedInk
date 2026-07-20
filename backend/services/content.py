@@ -16,9 +16,33 @@ from backend.utils.llm_utils import (
     resolve_generation_params,
 )
 from backend.services.rewrite import build_brand_constraint
+from backend.services.outline import normalize_seo_keywords
 from backend.utils.banned_words import scan_banned_words
 
 logger = logging.getLogger(__name__)
+
+
+def build_seo_content_constraint(seo_keywords) -> str:
+    """
+    组装「目标搜索词埋入要求」prompt 片段（标题/文案/标签生成用）。
+
+    与品牌人设约束同模式：以字符串追加方式融入 prompt，
+    避免改动模板占位符；未提供有效搜索词时返回空字符串。
+    """
+    keywords = normalize_seo_keywords(seo_keywords)
+    if not keywords:
+        return ""
+    core = keywords[0]
+    all_words = "、".join(f"「{w}」" for w in keywords)
+    return (
+        "\n\n## 目标搜索词埋入要求（搜索流量优化）\n"
+        f"用户提供了目标搜索词：{all_words}，其中核心词是「{core}」。\n"
+        f"1. 每个标题都必须自然包含核心词「{core}」，且核心词出现在标题的前 15 个字以内\n"
+        f"2. 正文（copywriting）的前 80 个字内自然出现核心词 1-2 次，其余搜索词在后文自然带到即可\n"
+        f"3. 标签（tags）必须包含核心词「{core}」本身，并另外给出 1-2 个由核心词延伸的长尾组合词标签"
+        "（核心词 + 人群/场景/痛点，例如「学生党」「通勤」「新手」这类修饰）\n"
+        "4. 严禁堆砌关键词、严禁生硬插入：表达必须自然流畅，宁可少埋一次也不要影响可读性\n"
+    )
 
 
 class ContentService:
@@ -51,7 +75,8 @@ class ContentService:
         self,
         topic: str,
         outline: str,
-        brand: Optional[Dict] = None
+        brand: Optional[Dict] = None,
+        seo_keywords: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         生成标题、文案和标签
@@ -60,6 +85,7 @@ class ContentService:
             topic: 用户输入的主题
             outline: 大纲内容
             brand: 品牌档案字典（可选），提供时会把品牌人设约束注入 prompt
+            seo_keywords: 目标搜索词列表（可选），提供时会把搜索埋词要求注入 prompt
 
         返回：
             包含 titles, copywriting, tags 的字典
@@ -78,6 +104,13 @@ class ContentService:
             if brand_constraint:
                 logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
                 prompt += brand_constraint
+
+            # 目标搜索词埋入要求（与品牌人设同模式）：
+            # 未提供有效搜索词时片段为空字符串，prompt 与旧行为完全一致
+            seo_constraint = build_seo_content_constraint(seo_keywords)
+            if seo_constraint:
+                logger.info(f"注入目标搜索词埋入要求: keywords={normalize_seo_keywords(seo_keywords)}")
+                prompt += seo_constraint
 
             # 从配置中获取模型参数
             model, temperature, max_output_tokens = resolve_generation_params(

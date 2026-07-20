@@ -56,7 +56,9 @@ def create_outline_blueprint():
            - images: base64 编码的图片数组（可选）
 
         两种格式均支持可选字段 brand_id（品牌档案 ID），
-        提供且有效时会把品牌人设约束注入生成 prompt。
+        提供且有效时会把品牌人设约束注入生成 prompt；
+        以及可选字段 seo_keywords（目标搜索词列表，最多取前 3 个），
+        提供时会把搜索埋词要求注入生成 prompt。
 
         返回：
         - success: 是否成功
@@ -67,7 +69,7 @@ def create_outline_blueprint():
 
         try:
             # 解析请求数据
-            topic, images, brand_id = _parse_outline_request()
+            topic, images, brand_id, seo_keywords = _parse_outline_request()
 
             log_request('/outline', {'topic': topic, 'images': images})
 
@@ -86,7 +88,8 @@ def create_outline_blueprint():
             logger.info(f"🔄 开始生成大纲，主题: {topic[:50]}...")
             outline_service = get_outline_service()
             result = outline_service.generate_outline(
-                topic, images if images else None, brand=brand
+                topic, images if images else None, brand=brand,
+                seo_keywords=seo_keywords
             )
 
             # 记录结果
@@ -115,6 +118,7 @@ def create_outline_blueprint():
         请求体（application/json，不支持图片；带图请走 POST /outline）：
         - topic: 主题文本（必填）
         - brand_id: 品牌档案 ID（可选），提供且有效时注入品牌人设约束
+        - seo_keywords: 目标搜索词列表（可选，最多取前 3 个），提供时注入搜索埋词要求
 
         返回 SSE 事件流（事件格式与图片管线一致）：
         - delta: {"text": "..."} 文本增量
@@ -132,6 +136,7 @@ def create_outline_blueprint():
             data = request.get_json(silent=True) or {}
             topic = data.get('topic')
             brand_id = data.get('brand_id')
+            seo_keywords = data.get('seo_keywords')
 
             log_request('/outline/stream', {'topic': topic})
 
@@ -174,7 +179,9 @@ def create_outline_blueprint():
                 ), context={"endpoint": "/api/outline/stream"})
 
             # prompt 组装复用 OutlineService，保证与非流式产出完全一致
-            prompt = outline_service.build_outline_prompt(topic, brand=brand)
+            prompt = outline_service.build_outline_prompt(
+                topic, brand=brand, seo_keywords=seo_keywords
+            )
             model, temperature, max_output_tokens = outline_service.get_generation_params()
 
             logger.info(f"🔄 开始流式生成大纲，主题: {topic[:50]}...")
@@ -352,12 +359,15 @@ def _parse_outline_request():
     2. application/json - 用于 base64 图片
 
     返回：
-        tuple: (topic, images, brand_id) - 主题、图片列表和品牌档案 ID（可能为 None）
+        tuple: (topic, images, brand_id, seo_keywords)
+        - 主题、图片列表、品牌档案 ID（可能为 None）、目标搜索词列表
     """
     # 检查是否是 multipart/form-data（带图片文件）
     if request.content_type and 'multipart/form-data' in request.content_type:
         topic = request.form.get('topic')
         brand_id = request.form.get('brand_id')
+        # 目标搜索词：前端逐个 append 同名字段，这里用 getlist 取回列表
+        seo_keywords = request.form.getlist('seo_keywords')
         images = []
 
         # 获取上传的图片文件
@@ -368,12 +378,14 @@ def _parse_outline_request():
                     image_data = file.read()
                     images.append(image_data)
 
-        return topic, images, brand_id
+        return topic, images, brand_id, seo_keywords
 
     # JSON 请求（无图片或 base64 图片）
     data = request.get_json()
     topic = data.get('topic')
     brand_id = data.get('brand_id')
+    # 目标搜索词（可选），归一化交给服务层统一处理
+    seo_keywords = data.get('seo_keywords')
     images = []
 
     # 支持 base64 格式的图片
@@ -385,4 +397,4 @@ def _parse_outline_request():
                 img_b64 = img_b64.split(',')[1]
             images.append(base64.b64decode(img_b64))
 
-    return topic, images, brand_id
+    return topic, images, brand_id, seo_keywords
