@@ -20,6 +20,7 @@ block_cipher = None
 datas = [
     ('frontend/dist', 'frontend/dist'),
     ('backend/prompts', 'backend/prompts'),
+    ('backend/data', 'backend/data'),
     ('text_providers.yaml.example', '.'),
     ('image_providers.yaml.example', '.'),
 ]

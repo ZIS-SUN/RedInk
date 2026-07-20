@@ -5,23 +5,40 @@
 - 标题长度、正文长度、标签数量、图片数量
 - 禁用词命中（调用方传入，通常来自品牌档案的 banned_words）
 - 通用敏感营销词软提示（广告法高风险词，warn 级）
+- 搜索埋词检查（请求携带 seo_keywords 时追加三项：标题前 15 字/
+  正文前 80 字/标签是否含目标搜索词，pass/warn 两态）
+- AIGC 标注合规提醒（常驻 warn 级：本产品内容均为 AI 生成，
+  发布时必须勾选平台的 AI 内容声明，未标注可能被限流甚至封号）
+
+平台规范数值外置在 backend/data/platform_rules.json（带 version /
+updated_at 元信息），模块加载时读取一次；读取/解析失败自动回退
+内置默认值，保证体检功能永远可用。
 
 所有规则均为纯函数计算，便于单元测试；字数按字符数统计（中文一个字
 算一个字符），统计前去除首尾空白。
 """
 
-from typing import Dict, List
+import json
+import logging
+from typing import Dict, List, Tuple
+
+from backend.paths import resource_path
+
+logger = logging.getLogger(__name__)
 
 # 检查项状态常量
 STATUS_PASS = "pass"
 STATUS_WARN = "warn"
 STATUS_FAIL = "fail"
 
-# 平台发布规范常量表
+# 平台规则 JSON 数据文件（随包分发；平台调整规则时只需更新该文件）
+_RULES_FILE_REL_PATH = "backend/data/platform_rules.json"
+
+# 内置默认平台规则（JSON 缺失/损坏时的回退值，须与 platform_rules.json 同步）
 # 注意：以下数值整理自各平台公开的发布规范常识（产品页面提示/帮助中心），
 # 并非官方 API 返回值，平台调整规则时需要同步维护。
 # - level 表示超限时的严重程度：fail=平台硬性限制，warn=建议值
-PLATFORM_RULES: Dict[str, Dict] = {
+_DEFAULT_PLATFORM_RULES: Dict[str, Dict] = {
     "xiaohongshu": {
         "name": "小红书",
         # 标题上限 20 字（平台硬限制）
@@ -79,6 +96,69 @@ PLATFORM_RULES: Dict[str, Dict] = {
     },
 }
 
+# 回退时的规则元信息（version 固定为 builtin，便于排查是否读到了 JSON）
+_DEFAULT_RULES_META = {"version": "builtin", "updated_at": "2026-07-20"}
+
+# 每个平台必须具备的规则字段：字段名 -> 必须为整数的数值键
+_REQUIRED_RULE_FIELDS = {
+    "title": ("max",),
+    "body": ("max",),
+    "tags": ("min", "max"),
+    "images": ("max",),
+}
+
+
+def _validate_rules_data(platforms) -> bool:
+    """校验 JSON 平台规则的结构完整性（缺字段/类型不对视为损坏，整体回退）。"""
+    if not isinstance(platforms, dict) or not platforms:
+        return False
+    for rules in platforms.values():
+        if not isinstance(rules, dict) or not str(rules.get("name") or "").strip():
+            return False
+        for field, int_keys in _REQUIRED_RULE_FIELDS.items():
+            rule = rules.get(field)
+            if not isinstance(rule, dict):
+                return False
+            # level 只能是 warn/fail（决定超限时的严重程度）
+            if rule.get("level") not in (STATUS_WARN, STATUS_FAIL):
+                return False
+            for key in int_keys:
+                if not isinstance(rule.get(key), int):
+                    return False
+    return True
+
+
+def _load_platform_rules() -> Tuple[Dict[str, Dict], Dict[str, str]]:
+    """
+    读取外置平台规则 JSON，返回 (规则表, 元信息 {version, updated_at})。
+
+    任何读取/解析/结构错误都整体回退到内置默认值——稍旧但完整的规则
+    好过残缺的规则，体检功能不能因数据文件问题而不可用。
+    """
+    try:
+        rules_path = resource_path(_RULES_FILE_REL_PATH)
+        with open(rules_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        platforms = data.get("platforms") if isinstance(data, dict) else None
+        if not _validate_rules_data(platforms):
+            raise ValueError("platform_rules.json 结构不完整或字段类型非法")
+        meta = {
+            "version": str(data.get("version") or "unknown"),
+            "updated_at": str(data.get("updated_at") or "unknown"),
+        }
+        logger.info(
+            "平台规则已从 JSON 加载: version=%s, updated_at=%s",
+            meta["version"], meta["updated_at"],
+        )
+        return platforms, meta
+    except Exception as e:
+        logger.warning("平台规则 JSON 读取失败，回退内置默认规则: %s", e)
+        return _DEFAULT_PLATFORM_RULES, dict(_DEFAULT_RULES_META)
+
+
+# 模块加载（启动）时读取一次；失败自动回退内置默认，保证服务可用
+PLATFORM_RULES, PLATFORM_RULES_META = _load_platform_rules()
+
 # 通用敏感营销词（广告法高风险用语，命中仅做 warn 级软提示）
 SENSITIVE_MARKETING_WORDS = (
     "最", "第一", "国家级", "百分百", "绝对",
@@ -89,6 +169,14 @@ SENSITIVE_MARKETING_WORDS = (
 _LOCATION_TITLE = "标题"
 _LOCATION_BODY = "正文"
 _LOCATION_TAGS = "标签"
+
+# 搜索埋词检查窗口：标题前 15 字、正文前 80 字须命中目标搜索词
+# （2026 年小红书搜索流量占比 50%+，标题前段与正文开头的关键词权重最高）
+SEO_TITLE_WINDOW = 15
+SEO_BODY_WINDOW = 80
+
+# 目标搜索词最多取前 3 个（与生成链路的归一化规则保持一致）
+_SEO_KEYWORDS_MAX = 3
 
 
 def _text_len(value: str) -> int:
@@ -113,6 +201,15 @@ def _normalize_str_list(value) -> List[str]:
         if text:
             result.append(text)
     return result
+
+
+def _normalize_seo_keywords(value) -> List[str]:
+    """归一化目标搜索词：复用字符串列表归一化，再去重并最多取前 3 个。"""
+    keywords: List[str] = []
+    for word in _normalize_str_list(value):
+        if word not in keywords:
+            keywords.append(word)
+    return keywords[:_SEO_KEYWORDS_MAX]
 
 
 def _find_word_locations(word: str, title: str, body: str, tags: List[str]) -> List[str]:
@@ -309,6 +406,137 @@ def _check_sensitive_words(title: str, body: str, tags: List[str]) -> Dict:
     }
 
 
+def _check_seo_title(seo_keywords: List[str], title: str) -> Dict:
+    """
+    搜索埋词·标题检查：标题前 15 字内是否含任一目标搜索词。
+
+    小红书搜索对标题前段的关键词权重最高，命中即 pass；
+    词在标题里但位置靠后、或完全没有，都给 warn 并附具体挪法。
+    """
+    core = seo_keywords[0]
+    if not title:
+        return {
+            "id": "seo_title",
+            "label": "搜索词·标题",
+            "status": STATUS_WARN,
+            "detail": f"尚未生成标题，建议在标题前 {SEO_TITLE_WINDOW} 字内自然埋入核心词「{core}」，才能吃到搜索流量。",
+        }
+
+    head = title[:SEO_TITLE_WINDOW]
+    hit = next((word for word in seo_keywords if word in head), None)
+    if hit:
+        return {
+            "id": "seo_title",
+            "label": "搜索词·标题",
+            "status": STATUS_PASS,
+            "detail": f"标题前 {SEO_TITLE_WINDOW} 字已包含搜索词「{hit}」，符合搜索埋词打法。",
+        }
+
+    # 区分「有词但位置靠后」和「完全没有」，给出不同的修改建议
+    in_title = next((word for word in seo_keywords if word in title), None)
+    if in_title:
+        detail = (
+            f"标题包含「{in_title}」但不在前 {SEO_TITLE_WINDOW} 字内，"
+            "搜索权重前置更高，建议把它挪到标题开头。"
+        )
+    else:
+        detail = (
+            f"标题前 {SEO_TITLE_WINDOW} 字未出现任何目标搜索词，"
+            f"建议把核心词「{core}」自然放进标题开头。"
+        )
+    return {
+        "id": "seo_title",
+        "label": "搜索词·标题",
+        "status": STATUS_WARN,
+        "detail": detail,
+    }
+
+
+def _check_seo_body(seo_keywords: List[str], body: str) -> Dict:
+    """搜索埋词·正文检查：正文前 80 字内是否含任一目标搜索词。"""
+    core = seo_keywords[0]
+    if not body:
+        return {
+            "id": "seo_body",
+            "label": "搜索词·正文",
+            "status": STATUS_WARN,
+            "detail": f"尚未生成正文，建议在正文前 {SEO_BODY_WINDOW} 字内自然出现核心词「{core}」1-2 次。",
+        }
+
+    head = body[:SEO_BODY_WINDOW]
+    hit = next((word for word in seo_keywords if word in head), None)
+    if hit:
+        return {
+            "id": "seo_body",
+            "label": "搜索词·正文",
+            "status": STATUS_PASS,
+            "detail": f"正文前 {SEO_BODY_WINDOW} 字已出现搜索词「{hit}」，符合搜索埋词打法。",
+        }
+
+    in_body = next((word for word in seo_keywords if word in body), None)
+    if in_body:
+        detail = (
+            f"正文出现了「{in_body}」但不在前 {SEO_BODY_WINDOW} 字内，"
+            "建议在开头第一段就自然带到一次。"
+        )
+    else:
+        detail = (
+            f"正文前 {SEO_BODY_WINDOW} 字未出现任何目标搜索词，"
+            f"建议在开头自然埋入核心词「{core}」1-2 次，不要堆砌。"
+        )
+    return {
+        "id": "seo_body",
+        "label": "搜索词·正文",
+        "status": STATUS_WARN,
+        "detail": detail,
+    }
+
+
+def _check_seo_tags(seo_keywords: List[str], tags: List[str]) -> Dict:
+    """搜索埋词·标签检查：标签中是否含目标搜索词（大词定赛道 + 长尾词定人群）。"""
+    core = seo_keywords[0]
+    hit = next(
+        (word for word in seo_keywords if any(word in tag for tag in tags)),
+        None,
+    )
+    if hit:
+        return {
+            "id": "seo_tags",
+            "label": "搜索词·标签",
+            "status": STATUS_PASS,
+            "detail": f"标签已覆盖搜索词「{hit}」，可再搭配长尾组合词拓宽搜索入口。",
+        }
+    return {
+        "id": "seo_tags",
+        "label": "搜索词·标签",
+        "status": STATUS_WARN,
+        "detail": (
+            f"标签未包含任何目标搜索词，建议加上核心词「{core}」定赛道，"
+            f"再加 1-2 个长尾组合词（核心词 + 人群/场景）定人群。"
+        ),
+    }
+
+
+def _check_aigc_declaration() -> Dict:
+    """
+    AIGC 标注合规提醒（常驻 warn 级，与内容无关，任何输入下都出现）。
+
+    本产品是纯 AI 生成工具，各平台已强制要求 AI 生成内容标注，
+    未标注可能被限流甚至封号，因此发布前必须提醒用户勾选平台声明。
+    """
+    return {
+        "id": "aigc_declaration",
+        "label": "AI 内容声明",
+        "status": STATUS_WARN,
+        "detail": (
+            "本内容由 AI 辅助生成，发布时请勾选平台的 AI 内容声明，"
+            "未标注可能被限流。小红书：发布页「高级选项」→「内容声明」"
+            "选「含 AI 创作内容」；抖音：发布页「更多选项」→ 勾选"
+            "「内容由 AI 生成」。"
+        ),
+    }
+
+
 def run_checklist(payload: Dict) -> Dict:
     """
     执行发布前体检清单（纯规则计算，不调用 LLM）
@@ -321,13 +549,17 @@ def run_checklist(payload: Dict) -> Dict:
             - tags: 标签列表（可选）
             - image_count: 已生成图片数（可选，默认 0）
             - banned_words: 禁用词列表（可选）
+            - seo_keywords: 目标搜索词列表（可选，最多取前 3 个）；
+              提供时追加 seo_title/seo_body/seo_tags 三项搜索埋词检查
+              （pass/warn 两态），不提供时这三项不出现
 
     Returns:
         Dict: {
             success: True,
             platform: 平台标识,
             items: [{id, label, status: 'pass'|'warn'|'fail', detail}],
-            summary: {pass: n, warn: n, fail: n}
+            summary: {pass: n, warn: n, fail: n},
+            rules_meta: {version, updated_at}  # 所依据平台规则表的整理版本与日期
         }
 
     Raises:
@@ -359,6 +591,18 @@ def run_checklist(payload: Dict) -> Dict:
         _check_sensitive_words(title, body, tags),
     ]
 
+    # 搜索埋词三项：仅在请求携带有效 seo_keywords 时出现（可选增强）
+    seo_keywords = _normalize_seo_keywords(payload.get("seo_keywords"))
+    if seo_keywords:
+        items.extend([
+            _check_seo_title(seo_keywords, title),
+            _check_seo_body(seo_keywords, body),
+            _check_seo_tags(seo_keywords, tags),
+        ])
+
+    # AIGC 标注合规提醒常驻在最后（无论内容如何都出现）
+    items.append(_check_aigc_declaration())
+
     summary = {STATUS_PASS: 0, STATUS_WARN: 0, STATUS_FAIL: 0}
     for item in items:
         summary[item["status"]] += 1
@@ -368,4 +612,6 @@ def run_checklist(payload: Dict) -> Dict:
         "platform": platform,
         "items": items,
         "summary": summary,
+        # 体现规则表的整理版本与日期（外置 JSON 或内置回退）
+        "rules_meta": dict(PLATFORM_RULES_META),
     }

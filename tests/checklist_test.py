@@ -4,11 +4,16 @@
 纯规则引擎不依赖 LLM：
 - 服务层：覆盖各平台标题超长、禁用词命中位置、标签数边界、
   图片数 0/超限、敏感营销词 warn、未知平台报错、summary 统计
+- AIGC 标注合规提醒：常驻 warn 项在任何输入下都存在
+- 平台规则外置：JSON 数据文件加载、结构校验与回退内置默认值
 - 路由层：覆盖参数校验 400、成功 200、禁用词品牌档案降级
 """
+import json
+
 import pytest
 
 from backend.routes import checklist_routes
+from backend.services import checklist as checklist_module
 from backend.services.checklist import (
     PLATFORM_RULES,
     STATUS_FAIL,
@@ -47,10 +52,12 @@ def test_all_pass_structure_and_summary():
 
     assert result["success"] is True
     assert result["platform"] == "xiaohongshu"
-    assert len(result["items"]) == 6
+    # 6 项内容检查 + 1 项常驻 AIGC 声明提醒
+    assert len(result["items"]) == 7
     for item in result["items"]:
         assert set(item.keys()) == {"id", "label", "status", "detail"}
-    assert result["summary"] == {"pass": 6, "warn": 0, "fail": 0}
+    # 内容全部合规时，唯一的 warn 是常驻 AIGC 声明提醒
+    assert result["summary"] == {"pass": 6, "warn": 1, "fail": 0}
 
 
 def test_summary_counts_match_items():
@@ -224,6 +231,149 @@ def test_sensitive_words_clean_content_passes():
     assert get_item(result, "sensitive_words")["status"] == STATUS_PASS
 
 
+# ==================== AIGC 标注合规提醒（常驻） ====================
+
+@pytest.mark.parametrize("overrides", [
+    {},                                                          # 各项全部合规
+    {"platform": "douyin"},                                      # 换平台
+    {"title": "", "body": "", "tags": [], "image_count": 0},     # 内容全空
+    {"banned_words": ["违禁词"], "title": "标题含违禁词"},        # 已有 fail 项
+    {"title": "字" * 99, "body": "字" * 9999},                   # 已有超限项
+])
+def test_aigc_declaration_always_present(overrides):
+    """无论内容如何，AIGC 声明提醒都以 warn 级常驻在检查项中"""
+    result = run_checklist(make_payload(**overrides))
+
+    item = get_item(result, "aigc_declaration")
+    assert item["status"] == STATUS_WARN
+    assert "AI 内容声明" in item["detail"]
+    assert "限流" in item["detail"]
+    # 双平台勾选路径提示
+    assert "小红书" in item["detail"] and "高级选项" in item["detail"]
+    assert "抖音" in item["detail"] and "更多选项" in item["detail"]
+
+
+def test_aigc_declaration_present_on_all_platforms():
+    """所有支持平台的体检结果都包含常驻 AIGC 声明提醒"""
+    for platform in PLATFORM_RULES:
+        result = run_checklist(make_payload(platform=platform))
+        assert get_item(result, "aigc_declaration")["status"] == STATUS_WARN
+
+
+# ==================== 平台规则外置 JSON 与回退（B15） ====================
+
+def test_checklist_platform_rules_json_exists_and_loaded():
+    """随包分发的规则 JSON 存在、带元信息，且启动时确实读取了它"""
+    from backend.paths import resource_path
+
+    path = resource_path("backend/data/platform_rules.json")
+    assert path.exists()
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] and data["updated_at"]
+    # 当前生效的规则来自 JSON（版本号不是内置回退标记）
+    assert checklist_module.PLATFORM_RULES_META["version"] == data["version"]
+    assert checklist_module.PLATFORM_RULES == data["platforms"]
+    # 内置回退默认值与 JSON 内容保持同步（防止只改一处导致回退行为漂移）
+    assert checklist_module._DEFAULT_PLATFORM_RULES == data["platforms"]
+
+
+def test_checklist_result_carries_rules_meta():
+    """检查结果携带规则表的整理版本与日期"""
+    result = run_checklist(make_payload())
+
+    meta = result["rules_meta"]
+    assert meta["version"]
+    assert meta["updated_at"]
+
+
+def test_checklist_rules_fallback_when_file_missing(monkeypatch, tmp_path):
+    """规则文件不存在时回退内置默认值"""
+    monkeypatch.setattr(
+        checklist_module, "resource_path", lambda rel: tmp_path / "不存在.json",
+    )
+
+    rules, meta = checklist_module._load_platform_rules()
+
+    assert rules == checklist_module._DEFAULT_PLATFORM_RULES
+    assert meta["version"] == "builtin"
+    assert meta["updated_at"]
+
+
+def test_checklist_rules_fallback_on_corrupt_json(monkeypatch, tmp_path):
+    """规则文件无法解析（坏 JSON）时回退内置默认值"""
+    bad_file = tmp_path / "platform_rules.json"
+    bad_file.write_text("{ 这不是合法 JSON", encoding="utf-8")
+    monkeypatch.setattr(checklist_module, "resource_path", lambda rel: bad_file)
+
+    rules, meta = checklist_module._load_platform_rules()
+
+    assert rules == checklist_module._DEFAULT_PLATFORM_RULES
+    assert meta["version"] == "builtin"
+
+
+@pytest.mark.parametrize("bad_platforms", [
+    {},                                                         # 平台表为空
+    "not-a-dict",                                               # 类型错误
+    {"xiaohongshu": {"name": "小红书"}},                         # 缺规则字段
+    {"xiaohongshu": {                                           # level 非法
+        "name": "小红书",
+        "title": {"max": 20, "level": "error"},
+        "body": {"max": 1000, "level": "fail"},
+        "tags": {"min": 3, "max": 10, "level": "warn"},
+        "images": {"max": 18, "level": "fail"},
+    }},
+    {"xiaohongshu": {                                           # 数值键类型错误
+        "name": "小红书",
+        "title": {"max": "20", "level": "fail"},
+        "body": {"max": 1000, "level": "fail"},
+        "tags": {"min": 3, "max": 10, "level": "warn"},
+        "images": {"max": 18, "level": "fail"},
+    }},
+])
+def test_checklist_rules_fallback_on_bad_structure(monkeypatch, tmp_path, bad_platforms):
+    """规则文件结构不完整/字段非法时整体回退内置默认值"""
+    bad_file = tmp_path / "platform_rules.json"
+    bad_file.write_text(
+        json.dumps(
+            {"version": "9.9", "updated_at": "2099-01-01", "platforms": bad_platforms},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(checklist_module, "resource_path", lambda rel: bad_file)
+
+    rules, meta = checklist_module._load_platform_rules()
+
+    assert rules == checklist_module._DEFAULT_PLATFORM_RULES
+    assert meta["version"] == "builtin"
+
+
+def test_checklist_rules_loads_valid_custom_json(monkeypatch, tmp_path):
+    """结构完整的自定义规则 JSON 能被正常加载并返回其元信息"""
+    custom = {
+        "version": "2099.01",
+        "updated_at": "2099-01-01",
+        "platforms": {
+            "xiaohongshu": {
+                "name": "小红书",
+                "title": {"max": 25, "level": "fail"},
+                "body": {"max": 1200, "level": "fail"},
+                "tags": {"min": 3, "max": 10, "level": "warn"},
+                "images": {"max": 18, "level": "fail"},
+            },
+        },
+    }
+    rules_file = tmp_path / "platform_rules.json"
+    rules_file.write_text(json.dumps(custom, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(checklist_module, "resource_path", lambda rel: rules_file)
+
+    rules, meta = checklist_module._load_platform_rules()
+
+    assert rules["xiaohongshu"]["title"]["max"] == 25
+    assert meta == {"version": "2099.01", "updated_at": "2099-01-01"}
+
+
 # ==================== 未知平台报错 ====================
 
 @pytest.mark.parametrize("platform", ["", None, "zhihu", "XIAOHONGSHU"])
@@ -272,7 +422,8 @@ def test_route_success_returns_checklist(client):
     assert response.status_code == 200
     assert data["success"] is True
     assert data["platform"] == "xiaohongshu"
-    assert len(data["items"]) == 6
+    # 6 项内容检查 + 1 项常驻 AIGC 声明提醒
+    assert len(data["items"]) == 7
     assert data["summary"]["fail"] == 0
 
 

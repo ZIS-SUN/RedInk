@@ -149,6 +149,8 @@ def test_zip_contains_publish_text_when_content_exists(tmp_path):
         assert "发布文案.txt" in names
 
         text = zf.read("发布文案.txt").decode("utf-8")
+        # 首行必须是 AIGC 标注合规提醒（B1 合规护栏）
+        assert "AI 辅助生成" in text.splitlines()[0]
         assert "【标题候选】\n推荐标题\n备选标题" in text
         assert "【正文文案】\n正文文案第一段\n第二段" in text
         assert "【标签】\n#穿搭 #秋季" in text
@@ -183,6 +185,25 @@ def test_zip_outline_only_record_still_gets_publish_text(tmp_path):
         assert "【正文文案】" not in text
         assert "【标签】" not in text
         assert "【大纲原文】\n原始大纲文本" in text
+
+
+def test_publish_text_starts_with_aigc_notice():
+    """发布文案.txt 首行是 AIGC 标注提醒；无内容时依旧不产出文件（B1）"""
+    record = {"outline": SAMPLE_OUTLINE, "content": SAMPLE_CONTENT}
+    text = _build_publish_text(record)
+
+    first_line = text.splitlines()[0]
+    assert "AI 辅助生成" in first_line
+    assert "AI 内容声明" in first_line
+    assert "限流" in first_line
+
+    # 只有大纲的旧记录同样带提醒
+    outline_only = _build_publish_text({"outline": SAMPLE_OUTLINE})
+    assert "AI 辅助生成" in outline_only.splitlines()[0]
+
+    # 完全没有可用内容时仍返回空串（不会只输出一行提醒）
+    assert _build_publish_text(None) == ""
+    assert _build_publish_text({}) == ""
 
 
 def test_build_publish_text_skips_missing_sections():

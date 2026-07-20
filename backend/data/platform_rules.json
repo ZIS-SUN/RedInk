@@ -1,0 +1,42 @@
+{
+  "version": "2026.07",
+  "updated_at": "2026-07-20",
+  "comment": "各平台发布规范数值表（整理自各平台公开的产品页提示/帮助中心，非官方 API）。平台调整规则时直接更新本文件并同步 version/updated_at，无需改代码；level 表示超限时的严重程度：fail=平台硬性限制，warn=建议值。读取失败时 checklist.py 会回退到内置默认值。",
+  "platforms": {
+    "xiaohongshu": {
+      "name": "小红书",
+      "title": { "max": 20, "level": "fail" },
+      "body": { "max": 1000, "level": "fail" },
+      "tags": { "min": 3, "max": 10, "level": "warn" },
+      "images": { "max": 18, "level": "fail" }
+    },
+    "douyin": {
+      "name": "抖音",
+      "title": { "max": 30, "level": "warn" },
+      "body": { "max": 300, "level": "warn" },
+      "tags": { "min": 1, "max": 5, "level": "warn" },
+      "images": { "max": 35, "level": "fail" }
+    },
+    "weixin": {
+      "name": "微信公众号",
+      "title": { "max": 64, "level": "fail" },
+      "body": { "max": 20000, "level": "warn" },
+      "tags": { "min": 0, "max": 5, "level": "warn" },
+      "images": { "max": 20, "level": "warn" }
+    },
+    "bilibili": {
+      "name": "B站",
+      "title": { "max": 80, "level": "fail" },
+      "body": { "max": 2000, "level": "warn" },
+      "tags": { "min": 1, "max": 10, "level": "warn" },
+      "images": { "max": 9, "level": "warn" }
+    },
+    "weibo": {
+      "name": "微博",
+      "title": { "max": 30, "level": "fail" },
+      "body": { "max": 2000, "level": "fail" },
+      "tags": { "min": 0, "max": 3, "level": "warn" },
+      "images": { "max": 18, "level": "warn" }
+    }
+  }
+}

@@ -48,6 +48,7 @@ def create_checklist_blueprint():
         - tags: 标签列表（可选）
         - image_count: 已生成图片数（可选，默认 0）
         - banned_words: 禁用词列表（可选；未传时自动读取当前启用品牌档案的禁用词）
+        - seo_keywords: 目标搜索词列表（可选；提供时追加搜索埋词三项检查）
 
         返回：
         - success: 是否成功
@@ -91,6 +92,8 @@ def create_checklist_blueprint():
                     'tags': data.get('tags'),
                     'image_count': data.get('image_count'),
                     'banned_words': banned_words,
+                    # 目标搜索词（可选）：携带时服务层追加搜索埋词三项检查
+                    'seo_keywords': data.get('seo_keywords'),
                 })
             except ValueError as e:
                 # 未知平台等参数错误返回 400

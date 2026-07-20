@@ -239,6 +239,9 @@ def test_prepare_exports_images_and_publish_text(client, publish_env):
 
     # 发布文案.txt 内容与 zip 发布包同源
     text = (folder / "发布文案.txt").read_text(encoding="utf-8")
+    # 首行是 AIGC 标注合规提醒（B1 合规护栏）
+    assert "AI 辅助生成" in text.splitlines()[0]
+    assert "AI 内容声明" in text.splitlines()[0]
     assert "【标题候选】\n推荐标题\n备选标题" in text
     assert "【正文文案】\n正文文案第一段\n第二段" in text
     assert "【标签】\n#穿搭 #秋季" in text

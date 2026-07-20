@@ -553,7 +553,8 @@ def _create_images_zip(task_dir: str, record: dict = None) -> io.BytesIO:
 
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
         # 遍历任务目录中的所有图片（排除缩略图）
-        for filename in os.listdir(task_dir):
+        used_names: set[str] = set()
+        for filename in sorted(os.listdir(task_dir)):
             # 跳过缩略图文件
             if filename.startswith('thumb_'):
                 continue
@@ -562,11 +563,18 @@ def _create_images_zip(task_dir: str, record: dict = None) -> io.BytesIO:
                 file_path = os.path.join(task_dir, filename)
 
                 # 生成归档文件名（page_N.png 格式）
+                # 兼容重绘产生的版本化文件名（如 3_v1721450000000.png）
                 try:
-                    index = int(filename.split('.')[0])
+                    stem = filename.split('.')[0]
+                    index = int(stem.split('_v')[0])
                     archive_name = f"page_{index + 1}.png"
                 except ValueError:
                     archive_name = filename
+
+                # 同页残留多个版本时避免 zip 内重名（正常清理后不会发生）
+                if archive_name in used_names:
+                    archive_name = filename
+                used_names.add(archive_name)
 
                 zf.write(file_path, archive_name)
 
@@ -580,13 +588,20 @@ def _create_images_zip(task_dir: str, record: dict = None) -> io.BytesIO:
     return memory_file
 
 
+# AIGC 标注合规提醒：本产品内容均为 AI 生成，置于发布文案首行避免用户漏看
+_AIGC_PUBLISH_NOTICE = (
+    "⚠ 本内容由 AI 辅助生成，发布时请勾选平台的 AI 内容声明（未标注可能被限流）"
+)
+
+
 def _build_publish_text(record: dict = None) -> str:
     """
     从历史记录拼装「发布文案.txt」的文本内容
 
-    小节顺序：标题候选（每行一个）、正文文案、标签（#tag 空格连接）、
-    ——分隔线——、大纲原文。任何字段缺失则跳过对应小节；
-    全部缺失时返回空字符串（调用方不加文件）。
+    首行固定为 AIGC 标注合规提醒；其后小节顺序：标题候选（每行一个）、
+    正文文案、标签（#tag 空格连接）、——分隔线——、大纲原文。
+    任何字段缺失则跳过对应小节；全部缺失时返回空字符串（调用方不加文件，
+    此时也不单独输出提醒行）。
 
     Args:
         record: 历史记录（可为 None）
@@ -627,7 +642,8 @@ def _build_publish_text(record: dict = None) -> str:
     if not sections:
         return ""
 
-    return "\n\n".join(sections) + "\n"
+    # 头部附 AIGC 声明提醒后再拼接各小节
+    return _AIGC_PUBLISH_NOTICE + "\n\n" + "\n\n".join(sections) + "\n"
 
 
 def _sanitize_filename(title: str) -> str:
