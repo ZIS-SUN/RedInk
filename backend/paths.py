@@ -4,8 +4,10 @@
 统一提供三类路径，兼容开发/网页模式与 PyInstaller 冻结（打包成 .app）环境：
 
 - get_data_root(): 可写目录，存放配置（text_providers.yaml / image_providers.yaml）
-  与用户数据（history/ brand_kits/ content_calendar/ analytics_data/）。
-  非冻结环境下即项目根目录，保持现有行为；冻结环境下按平台分支：
+  与用户数据（数据资产清单见 backend/data_catalog.py）。
+  环境变量 REDINK_DATA_DIR 非空时优先生效（冻结/非冻结均适用），
+  指向非法或不可创建的路径时抛 DataRootError；
+  未设置时非冻结环境返回项目根目录（保持现有行为），冻结环境按平台分支：
   macOS 为 ~/Library/Application Support/RedInk，
   Windows 为 %APPDATA%/RedInk（无 APPDATA 时回退 ~/AppData/Roaming/RedInk），
   其他平台（Linux 等）为 $XDG_DATA_HOME/RedInk（无 XDG_DATA_HOME 时回退
@@ -14,22 +16,24 @@
   *.yaml.example），随包分发。非冻结环境下以项目根目录为基准；
   冻结环境下以 PyInstaller 解包目录（sys._MEIPASS）为基准。
 - seed_user_data(): 冻结环境首次运行时，把示例配置拷贝到可写目录并
-  创建各数据目录；非冻结环境下为空操作。
+  创建各数据目录（清单从 backend/data_catalog.py 派生）；
+  非冻结环境下为空操作。
 """
 
 import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
-# get_data_root() 下需要保证存在的数据目录
-_DATA_DIR_NAMES = ("history", "brand_kits", "content_calendar", "analytics_data")
+from backend.data_catalog import config_seed_examples, seeded_dir_names
 
-# 配置文件名 -> 随包分发的示例文件名
-_CONFIG_SEEDS = {
-    "text_providers.yaml": "text_providers.yaml.example",
-    "image_providers.yaml": "image_providers.yaml.example",
-}
+# 数据根目录覆盖用环境变量
+DATA_DIR_ENV_VAR = "REDINK_DATA_DIR"
+
+
+class DataRootError(RuntimeError):
+    """REDINK_DATA_DIR 指向非法或不可创建的路径时抛出。"""
 
 
 def is_frozen() -> bool:
@@ -52,13 +56,49 @@ def _frozen_data_root() -> Path:
     return base / "RedInk"
 
 
+def _env_data_root() -> Optional[Path]:
+    """
+    解析 REDINK_DATA_DIR 环境变量。
+
+    Returns:
+        未设置或为空白时返回 None；否则返回已创建好的目录路径。
+
+    Raises:
+        DataRootError: 路径无法创建（已存在同名文件、父级不可写等）
+            或创建后不是目录时抛出，附带清晰的排查信息。
+    """
+    raw = os.environ.get(DATA_DIR_ENV_VAR)
+    if raw is None or not raw.strip():
+        return None
+
+    root = Path(raw.strip()).expanduser()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise DataRootError(
+            f"环境变量 {DATA_DIR_ENV_VAR} 指向的数据目录无法创建: "
+            f"{raw!r}（{e}）。请确认该路径可写，或改用其他目录。"
+        ) from e
+    if not root.is_dir():
+        raise DataRootError(
+            f"环境变量 {DATA_DIR_ENV_VAR} 指向的路径不是目录: {raw!r}。"
+            "请指向一个目录路径。"
+        )
+    return root
+
+
 def get_data_root() -> Path:
     """
     可写数据根目录：配置 + 用户数据。
 
-    非冻结环境返回项目根目录（保持现有行为）；
-    冻结环境按平台分支，见 _frozen_data_root()。
+    优先级：REDINK_DATA_DIR 环境变量（非空时，冻结/非冻结均生效）>
+    冻结环境平台分支（见 _frozen_data_root()）> 非冻结环境项目根目录
+    （保持现有行为）。
     """
+    env_root = _env_data_root()
+    if env_root is not None:
+        return env_root
+
     if is_frozen():
         root = _frozen_data_root()
     else:
@@ -84,10 +124,11 @@ def seed_user_data() -> None:
     """
     冻结环境首次运行时初始化可写目录：
 
-    - 若 get_data_root() 下缺少 text_providers.yaml / image_providers.yaml，
-      从随包分发的 *.yaml.example 拷贝一份作为初始配置；
-    - 确保 history/ brand_kits/ content_calendar/ analytics_data/ 存在。
+    - 若 get_data_root() 下缺少需播种的配置文件（text_providers.yaml /
+      image_providers.yaml），从随包分发的 *.yaml.example 拷贝一份作为初始配置；
+    - 确保注册表中标记播种的数据目录存在。
 
+    播种清单统一从 backend/data_catalog.py 派生。
     非冻结环境下为空操作（保持现有行为）。
     """
     if not is_frozen():
@@ -95,7 +136,7 @@ def seed_user_data() -> None:
 
     data_root = get_data_root()
 
-    for config_name, example_name in _CONFIG_SEEDS.items():
+    for config_name, example_name in config_seed_examples().items():
         target = data_root / config_name
         if target.exists():
             continue
@@ -103,5 +144,5 @@ def seed_user_data() -> None:
         if source.exists():
             shutil.copyfile(source, target)
 
-    for dir_name in _DATA_DIR_NAMES:
+    for dir_name in seeded_dir_names():
         (data_root / dir_name).mkdir(parents=True, exist_ok=True)
