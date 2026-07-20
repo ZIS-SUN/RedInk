@@ -12,6 +12,23 @@ from backend.services.rewrite import build_brand_constraint
 logger = logging.getLogger(__name__)
 
 
+def load_preference_snippet() -> str:
+    """
+    获取创作偏好画像的提示词片段（样本不足时为空字符串）。
+
+    画像读取失败一律降级为空字符串——偏好注入是可选增强，
+    绝不允许它影响大纲生成主链路。
+    """
+    # 惰性导入，避免服务模块间的循环依赖
+    from backend.services.preference import get_preference_service
+
+    try:
+        return get_preference_service().build_prompt_snippet()
+    except Exception as e:
+        logger.warning(f"获取创作偏好画像失败，忽略偏好注入: {e}")
+        return ""
+
+
 def clean_llm_text(text: str) -> str:
     """清洗 LLM 返回的文本：去掉首尾空白，剥掉可能的 ``` 代码块包裹"""
     if not text:
@@ -172,6 +189,13 @@ class OutlineService:
         if brand_constraint:
             logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
             prompt += brand_constraint
+
+        # 创作偏好画像以可选段落追加（与品牌人设同模式）：
+        # 样本不足/读取失败时片段为空字符串，完全不影响现有 prompt
+        preference_snippet = load_preference_snippet()
+        if preference_snippet:
+            logger.info("注入创作偏好画像片段")
+            prompt += "\n\n" + preference_snippet
 
         return prompt
 

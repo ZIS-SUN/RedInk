@@ -236,6 +236,53 @@
           </div>
         </div>
       </div>
+
+      <!-- 创作偏好画像：从作品评分与编辑留痕聚合的用户偏好 -->
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">创作偏好画像</h2>
+            <p class="section-desc">
+              根据你的作品评分与文案编辑习惯自动聚合，生成大纲时会参考这些偏好。
+            </p>
+          </div>
+        </div>
+
+        <div v-if="profileLoading" class="loading-container">
+          <div class="spinner"></div>
+          <p>加载画像中...</p>
+        </div>
+
+        <p v-else-if="profileError" class="preference-hint">
+          画像加载失败，请稍后重试。
+        </p>
+
+        <p v-else-if="!profile || profile.insufficient" class="preference-hint">
+          多给作品打分，AI 会越来越懂你（当前样本
+          {{ profile?.sample_count ?? 0 }}/{{ profile?.min_samples ?? 3 }}）
+        </p>
+
+        <div v-else class="preference-rows">
+          <div class="preference-row">
+            <span class="preference-label">已评分作品</span>
+            <span class="preference-value">
+              {{ profile.sample_count }} 个（其中高分 {{ profile.liked_count }} 个）
+            </span>
+          </div>
+          <div v-if="profile.preferred_page_count" class="preference-row">
+            <span class="preference-label">偏好篇幅</span>
+            <span class="preference-value">{{ profile.preferred_page_count }} 页左右</span>
+          </div>
+          <div v-if="profile.liked_topics.length" class="preference-row">
+            <span class="preference-label">满意的主题</span>
+            <span class="preference-value">{{ profile.liked_topics.join('、') }}</span>
+          </div>
+          <div v-if="editingSignalText" class="preference-row">
+            <span class="preference-label">编辑习惯</span>
+            <span class="preference-value">{{ editingSignalText }}</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 文本服务商弹窗 -->
@@ -281,7 +328,9 @@ import {
   exportBackup,
   importBackup,
   exportDiagnostics,
-  downloadBlob
+  downloadBlob,
+  getPreferenceProfile,
+  type PreferenceProfile
 } from '../api'
 import { normalizeApiError } from '../utils/errors'
 import { hasConfiguredProvider } from '../utils/providerConfig'
@@ -550,9 +599,48 @@ async function handleExportDiagnostics() {
   }
 }
 
+// ==================== 创作偏好画像 ====================
+
+const profileLoading = ref(true)
+const profileError = ref(false)
+const profile = ref<PreferenceProfile | null>(null)
+
+/** 编辑习惯信号 -> 展示文案 */
+const editingSignalText = computed(() => {
+  switch (profile.value?.editing_signal?.tendency) {
+    case 'shorten':
+      return '常把文案改短，偏好精炼的口语化短句'
+    case 'expand':
+      return '常把文案改长，偏好充实具体的内容'
+    case 'neutral':
+      return '有少量编辑，改动幅度不大'
+    default:
+      return ''
+  }
+})
+
+/** 加载创作偏好画像（失败只在卡片内提示，不打断页面其他功能） */
+async function loadPreferenceProfile() {
+  profileLoading.value = true
+  profileError.value = false
+  try {
+    const result = await getPreferenceProfile()
+    if (result.success && result.profile) {
+      profile.value = result.profile
+    } else {
+      profileError.value = true
+    }
+  } catch {
+    profileError.value = true
+  } finally {
+    profileLoading.value = false
+  }
+}
+
 onMounted(() => {
   loadConfig()
   loadImagePrompt()
+  loadPreferenceProfile()
 })
 </script>
 
@@ -788,6 +876,45 @@ onMounted(() => {
 
 .data-admin-file-input {
   display: none;
+}
+
+/* 创作偏好画像卡片 */
+.preference-hint {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.preference-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.preference-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+}
+
+.preference-row + .preference-row {
+  border-top: 1px solid var(--border-color);
+}
+
+.preference-label {
+  flex-shrink: 0;
+  width: 90px;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.preference-value {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  min-width: 0;
 }
 
 /* 按钮样式 */

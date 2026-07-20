@@ -43,6 +43,7 @@ def create_api_blueprint():
     from .insight_routes import create_insight_blueprint
     from .hotspot_routes import create_hotspot_blueprint
     from .data_routes import create_data_blueprint
+    from .preference_routes import create_preference_blueprint
 
     # 创建主 API 蓝图
     api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -71,6 +72,8 @@ def create_api_blueprint():
     api_bp.register_blueprint(create_hotspot_blueprint())
     # 数据管理中心（备份导出/导入恢复/诊断包）
     api_bp.register_blueprint(create_data_blueprint())
+    # 创作偏好画像
+    api_bp.register_blueprint(create_preference_blueprint())
 
     return api_bp
 
