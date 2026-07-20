@@ -2,6 +2,7 @@ import hmac
 import logging
 import os
 import sys
+from logging.handlers import RotatingFileHandler
 from flask import Flask, request, send_from_directory
 from flask_cors import CORS
 from backend.config import Config
@@ -15,7 +16,12 @@ def setup_logging():
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
 
-    # 清除已有的处理器
+    # 清除已有的处理器（先 close 释放文件句柄，兼容测试中多次 create_app）
+    for handler in root_logger.handlers:
+        try:
+            handler.close()
+        except Exception:
+            pass
     root_logger.handlers.clear()
 
     # 控制台处理器 - 详细格式
@@ -28,6 +34,29 @@ def setup_logging():
     )
     console_handler.setFormatter(console_format)
     root_logger.addHandler(console_handler)
+
+    # 文件处理器：写入 data_root/logs/redink.log（5MB × 3 份轮转）。
+    # 桌面版（console=False）没有 stdout，文件日志是用户报障时唯一的现场；
+    # 日志内容不含 API Key（启动日志只打印配置状态，见 _validate_config_on_startup）。
+    try:
+        log_dir = get_data_root() / 'logs'
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            log_dir / 'redink.log',
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+            encoding='utf-8',
+        )
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(logging.Formatter(
+            '\n%(asctime)s | %(levelname)-8s | %(name)s\n'
+            '  └─ %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
+        root_logger.addHandler(file_handler)
+    except OSError as e:
+        # 日志目录不可写（只读盘/权限问题）时降级为仅控制台，不阻断启动
+        root_logger.warning(f"⚠️  文件日志初始化失败，仅使用控制台日志: {e}")
 
     # 设置各模块的日志级别
     logging.getLogger('backend').setLevel(logging.DEBUG)
@@ -59,6 +88,13 @@ def create_app():
 
     # 请求体大小上限（50MB），防止超大请求耗尽内存
     app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+
+    # 数据备份导入接口单独放宽到 500MB（备份 zip 含全部历史图片，可能远超 50MB）
+    @app.before_request
+    def _bump_import_size_limit():
+        if request.path == '/api/data/import':
+            from backend.services.data_admin import MAX_IMPORT_SIZE
+            request.max_content_length = MAX_IMPORT_SIZE
 
     CORS(app, resources={
         r"/api/*": {

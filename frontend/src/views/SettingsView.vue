@@ -147,6 +147,95 @@
           </div>
         </template>
       </div>
+
+      <!-- 数据管理：一键备份 / 导入恢复 / 诊断包 -->
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">数据管理</h2>
+            <p class="section-desc">
+              所有数据（历史记录、品牌库、内容日历、表现数据、发布账号与浏览器内的风格模板等）均存储在本机，可在此一键备份、迁移与导出诊断包。
+            </p>
+          </div>
+        </div>
+
+        <div class="data-admin-rows">
+          <!-- 导出备份 -->
+          <div class="data-admin-row">
+            <div class="data-admin-info">
+              <div class="data-admin-label">导出备份</div>
+              <p class="data-admin-desc">
+                打包全部本地数据为 zip 文件，可用于换机迁移或定期备份。默认不包含 API 密钥。
+              </p>
+              <p class="data-admin-danger">
+                「含密钥」会把服务商 API Key 明文写入备份文件，请妥善保管，切勿分享给他人。
+              </p>
+            </div>
+            <div class="data-admin-actions">
+              <button
+                class="btn btn-primary btn-small"
+                :disabled="exporting"
+                @click="handleExportBackup(false)"
+              >
+                {{ exporting ? '导出中...' : '导出备份' }}
+              </button>
+              <button
+                class="btn btn-secondary btn-small"
+                :disabled="exporting"
+                @click="handleExportBackup(true)"
+              >
+                导出备份（含密钥）
+              </button>
+            </div>
+          </div>
+
+          <!-- 导入恢复 -->
+          <div class="data-admin-row">
+            <div class="data-admin-info">
+              <div class="data-admin-label">导入恢复</div>
+              <p class="data-admin-desc">
+                选择此前导出的备份 zip 恢复数据。导入前会自动把现有数据备份到数据目录的
+                .pre_import_backup_ 文件夹，再进行覆盖。
+              </p>
+            </div>
+            <div class="data-admin-actions">
+              <input
+                ref="importFileInput"
+                type="file"
+                accept=".zip,application/zip"
+                class="data-admin-file-input"
+                @change="handleImportFileSelected"
+              />
+              <button
+                class="btn btn-secondary btn-small"
+                :disabled="importing"
+                @click="importFileInput?.click()"
+              >
+                {{ importing ? '导入中...' : '选择备份文件导入' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 导出诊断包 -->
+          <div class="data-admin-row">
+            <div class="data-admin-info">
+              <div class="data-admin-label">导出诊断包</div>
+              <p class="data-admin-desc">
+                打包运行日志与版本、平台信息，用于反馈问题。配置信息已脱敏，不包含任何 API 密钥。
+              </p>
+            </div>
+            <div class="data-admin-actions">
+              <button
+                class="btn btn-secondary btn-small"
+                :disabled="diagnosing"
+                @click="handleExportDiagnostics"
+              >
+                {{ diagnosing ? '导出中...' : '导出诊断包' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 文本服务商弹窗 -->
@@ -185,9 +274,18 @@ import ProviderTable from '../components/settings/ProviderTable.vue'
 import ProviderModal from '../components/settings/ProviderModal.vue'
 import ImageProviderModal from '../components/settings/ImageProviderModal.vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
-import { getImagePrompt, saveImagePrompt, resetImagePrompt } from '../api'
+import {
+  getImagePrompt,
+  saveImagePrompt,
+  resetImagePrompt,
+  exportBackup,
+  importBackup,
+  exportDiagnostics,
+  downloadBlob
+} from '../api'
 import { normalizeApiError } from '../utils/errors'
 import { hasConfiguredProvider } from '../utils/providerConfig'
+import { collectLocalBackup, restoreLocalBackup } from '../utils/localBackup'
 import {
   useProviderForm,
   textTypeOptions,
@@ -348,6 +446,108 @@ async function handleResetPrompt() {
 
 function setPromptError(error: unknown, fallbackTitle: string) {
   feedback.value = { type: 'error', error: normalizeApiError(error, fallbackTitle) }
+}
+
+// ==================== 数据管理（备份 / 恢复 / 诊断包） ====================
+
+const exporting = ref(false)
+const importing = ref(false)
+const diagnosing = ref(false)
+const importFileInput = ref<HTMLInputElement | null>(null)
+
+function backupTimestamp(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  )
+}
+
+/** 导出备份：前端收集 localStorage 数据 POST 给后端合入 zip */
+async function handleExportBackup(includeKeys: boolean) {
+  if (includeKeys && !confirm(
+    '含密钥备份会把服务商 API Key 明文写入 zip 文件。\n\n'
+    + '请确认该文件仅用于自己迁移或备份，切勿分享给他人。是否继续？'
+  )) {
+    return
+  }
+
+  exporting.value = true
+  try {
+    const blob = await exportBackup(includeKeys, collectLocalBackup())
+    downloadBlob(blob, `redink_backup_${backupTimestamp()}.zip`)
+    feedback.value = {
+      type: 'success',
+      message: includeKeys
+        ? '备份已导出（含 API 密钥，请妥善保管该文件）'
+        : '备份已导出（不含 API 密钥）'
+    }
+  } catch (e) {
+    setPromptError(e, '导出备份失败')
+  } finally {
+    exporting.value = false
+  }
+}
+
+/** 导入恢复：确认后上传 zip，成功后写回 localStorage 并提示刷新 */
+async function handleImportFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  // 允许下次选择同一文件仍触发 change
+  input.value = ''
+  if (!file) return
+
+  if (!confirm(
+    `确定要导入备份「${file.name}」吗？\n\n`
+    + '导入会用备份内容覆盖现有数据。覆盖前会先把现有数据自动备份到数据目录的 '
+    + '.pre_import_backup_ 文件夹，如需回退可从中手动恢复。'
+  )) {
+    return
+  }
+
+  importing.value = true
+  try {
+    const result = await importBackup(file)
+    if (!result.success) {
+      setPromptError(result.error || result.error_message || '导入备份失败', '导入备份失败')
+      return
+    }
+
+    // 备份包内的前端 localStorage 数据（风格模板/水印设置等）写回浏览器
+    if (result.local_storage) {
+      restoreLocalBackup(result.local_storage)
+    }
+
+    const restored = result.restored?.length
+      ? `已恢复：${result.restored.join('、')}。`
+      : ''
+    feedback.value = {
+      type: 'success',
+      message: `导入完成。${restored}原数据已备份到 ${result.pre_import_backup || '数据目录'}。请刷新页面使数据生效。`
+    }
+    if (confirm('导入完成，需要刷新页面才能看到恢复后的数据。现在刷新吗？')) {
+      location.reload()
+    }
+  } catch (e) {
+    setPromptError(e, '导入备份失败')
+  } finally {
+    importing.value = false
+  }
+}
+
+/** 导出诊断包（日志 + 版本/平台信息 + 脱敏配置） */
+async function handleExportDiagnostics() {
+  diagnosing.value = true
+  try {
+    const blob = await exportDiagnostics()
+    downloadBlob(blob, `redink_diagnostics_${backupTimestamp()}.zip`)
+    feedback.value = { type: 'success', message: '诊断包已导出，不含任何 API 密钥，可放心用于问题反馈' }
+  } catch (e) {
+    setPromptError(e, '导出诊断包失败')
+  } finally {
+    diagnosing.value = false
+  }
 }
 
 onMounted(() => {
@@ -535,6 +735,61 @@ onMounted(() => {
   opacity: 0.7;
 }
 
+/* 数据管理卡片 */
+.data-admin-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.data-admin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+}
+
+.data-admin-row + .data-admin-row {
+  border-top: 1px solid var(--border-color);
+}
+
+.data-admin-info {
+  min-width: 0;
+}
+
+.data-admin-label {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: var(--space-1);
+}
+
+.data-admin-desc {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.data-admin-danger {
+  font-size: var(--font-size-caption);
+  color: var(--color-danger);
+  margin: var(--space-1) 0 0;
+  line-height: 1.6;
+}
+
+.data-admin-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.data-admin-file-input {
+  display: none;
+}
+
 /* 按钮样式 */
 .btn-small {
   padding: 6px 14px;
@@ -571,6 +826,11 @@ onMounted(() => {
   .section-header {
     flex-direction: column;
     gap: 10px;
+  }
+
+  .data-admin-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 </style>
