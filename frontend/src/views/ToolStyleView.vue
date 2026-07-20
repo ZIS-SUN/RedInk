@@ -7,7 +7,10 @@
         <h1 class="page-title">风格模板</h1>
         <p class="page-desc">挑选一种视觉风格，一键应用到你的图文创作</p>
       </div>
-      <button class="create-btn" @click="openCreateForm">+ 新建风格</button>
+      <div class="header-actions">
+        <button class="import-btn" @click="openImportDialog">导入分享码</button>
+        <button class="create-btn" @click="openCreateForm">+ 新建风格</button>
+      </div>
     </div>
 
     <!-- 当前已应用风格 -->
@@ -98,6 +101,7 @@
           </div>
           <div v-if="tpl.custom" class="style-actions custom-actions">
             <button class="card-btn" @click.stop="openEditForm(tpl)">编辑</button>
+            <button class="card-btn" @click.stop="shareStyle(tpl)">分享</button>
             <button class="card-btn card-btn-danger" @click.stop="deleteTarget = tpl">删除</button>
           </div>
         </div>
@@ -250,6 +254,79 @@
       </div>
     </div>
 
+    <!-- 分享码手动复制弹窗（剪贴板不可用时的降级方案） -->
+    <div v-if="shareFallback" class="preview-mask" @click.self="shareFallback = null">
+      <div class="preview-modal confirm-modal" role="dialog" aria-modal="true">
+        <button class="preview-close" aria-label="关闭分享码弹窗" @click="shareFallback = null">×</button>
+        <div class="form-content">
+          <h2 class="form-title">分享「{{ shareFallback.name }}」</h2>
+          <p class="confirm-text">自动复制失败，请手动全选下方分享码并复制发给好友：</p>
+          <textarea
+            ref="shareCodeTextarea"
+            class="form-input form-textarea share-code-box"
+            rows="5"
+            readonly
+            :value="shareFallback.code"
+            aria-label="风格分享码"
+            @focus="selectShareCode"
+          ></textarea>
+          <div class="preview-actions">
+            <button class="card-btn" @click="shareFallback = null">关闭</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 导入分享码弹窗 -->
+    <div v-if="importVisible" class="preview-mask" @click.self="closeImportDialog">
+      <div class="preview-modal form-modal" role="dialog" aria-modal="true">
+        <button class="preview-close" aria-label="关闭导入弹窗" @click="closeImportDialog">×</button>
+        <div class="form-content">
+          <h2 class="form-title">导入风格分享码</h2>
+
+          <div class="form-field">
+            <label class="form-label" for="import-code">分享码</label>
+            <textarea
+              id="import-code"
+              v-model="importText"
+              class="form-input form-textarea share-code-box"
+              rows="4"
+              placeholder="粘贴好友发来的分享码（以 RINK 开头）"
+            ></textarea>
+            <p v-if="importError" class="form-error">{{ importError }}</p>
+          </div>
+
+          <!-- 校验通过后的预览 -->
+          <div v-if="importPreview" class="import-preview">
+            <div class="preview-label">导入预览</div>
+            <div class="import-preview-head">
+              <div class="active-style-swatches">
+                <span
+                  v-for="color in importPreview.style.colors"
+                  :key="color"
+                  class="swatch"
+                  :style="{ background: color }"
+                ></span>
+              </div>
+              <span class="import-preview-name">{{ importPreview.finalName }}</span>
+              <span class="category-chip">{{ importPreview.style.category }}</span>
+            </div>
+            <p v-if="importPreview.renamed" class="import-rename-hint">
+              已存在同名风格，导入后将命名为「{{ importPreview.finalName }}」
+            </p>
+            <p class="import-preview-prompt">{{ importPreview.promptExcerpt }}</p>
+          </div>
+
+          <div class="preview-actions">
+            <button class="card-btn card-btn-primary" :disabled="!importPreview" @click="confirmImport">
+              确认导入
+            </button>
+            <button class="card-btn" @click="closeImportDialog">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 轻提示 -->
     <transition name="toast-fade">
       <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
@@ -259,9 +336,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed, onUnmounted, nextTick } from 'vue'
 import { styleCategories, type StyleCategory, type StyleTemplate } from '../data/styleTemplates'
 import { useStyleLibrary } from '../composables/useStyleLibrary'
+import {
+  encodeStyleShareCode,
+  decodeStyleShareCode,
+  resolveDuplicateName
+} from '../utils/styleShareCode'
 
 const {
   activeStyle,
@@ -386,6 +468,79 @@ function confirmDelete() {
   showToast(`已删除「${name}」`)
 }
 
+// ===== 自定义风格：生成分享码 =====
+/** 剪贴板不可用时降级展示的分享码（null 表示弹窗关闭） */
+const shareFallback = ref<{ name: string; code: string } | null>(null)
+const shareCodeTextarea = ref<HTMLTextAreaElement | null>(null)
+
+/** 生成分享码并复制；剪贴板不可用时弹出可手动复制的文本框 */
+async function shareStyle(template: StyleTemplate) {
+  const code = encodeStyleShareCode(template)
+  try {
+    await navigator.clipboard.writeText(code)
+    showToast(`「${template.name}」分享码已复制，发给好友即可导入`)
+  } catch {
+    // 降级方案：兼容不支持 Clipboard API（如非 https）的环境
+    shareFallback.value = { name: template.name, code }
+    nextTick(() => shareCodeTextarea.value?.select())
+  }
+}
+
+function selectShareCode(event: FocusEvent) {
+  ;(event.target as HTMLTextAreaElement).select()
+}
+
+// ===== 导入分享码 =====
+const importVisible = ref(false)
+const importText = ref('')
+
+/** 实时解析粘贴的分享码：成功给出预览，失败给出具体原因 */
+const importParsed = computed(() => {
+  const text = importText.value.trim()
+  if (!text) return null
+  return decodeStyleShareCode(text)
+})
+
+const importError = computed(() => {
+  const parsed = importParsed.value
+  return parsed && !parsed.ok ? parsed.message : ''
+})
+
+const importPreview = computed(() => {
+  const parsed = importParsed.value
+  if (!parsed?.ok) return null
+  const style = parsed.style
+  const finalName = resolveDuplicateName(
+    style.name,
+    allTemplates.value.map(t => t.name)
+  )
+  return {
+    style,
+    finalName,
+    renamed: finalName !== style.name,
+    promptExcerpt:
+      style.stylePrompt.length > 120 ? `${style.stylePrompt.slice(0, 120)}…` : style.stylePrompt
+  }
+})
+
+function openImportDialog() {
+  importText.value = ''
+  importVisible.value = true
+}
+
+function closeImportDialog() {
+  importVisible.value = false
+  importText.value = ''
+}
+
+function confirmImport() {
+  const preview = importPreview.value
+  if (!preview) return
+  addCustomStyle({ ...preview.style, name: preview.finalName })
+  closeImportDialog()
+  showToast(`已导入「${preview.finalName}」，可在自定义风格中查看`)
+}
+
 // 轻提示
 const toast = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -478,6 +633,35 @@ async function copyPrompt(prompt: string, key: string) {
 .create-btn:hover {
   background: var(--primary-hover);
   border-color: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.header-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.import-btn {
+  padding: 9px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.import-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
 }
@@ -1062,6 +1246,62 @@ async function copyPrompt(prompt: string, key: string) {
   margin: 0 0 var(--space-4);
 }
 
+/* ===== 分享码 / 导入分享码 ===== */
+.share-code-box {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+  resize: vertical;
+}
+
+.import-preview {
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  background: var(--gray-1);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.import-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.import-preview-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-main);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.category-chip {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-sub);
+  background: var(--gray-2);
+  border-radius: var(--radius-full);
+}
+
+.import-rename-hint {
+  margin: 0 0 var(--space-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.import-preview-prompt {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-sub);
+  line-height: 1.7;
+  word-break: break-all;
+}
+
 /* ===== 轻提示 ===== */
 .toast {
   position: fixed;
@@ -1129,7 +1369,8 @@ async function copyPrompt(prompt: string, key: string) {
     text-align: center;
   }
 
-  .create-btn {
+  .create-btn,
+  .import-btn {
     padding: 8px 16px;
     font-size: 13px;
   }
