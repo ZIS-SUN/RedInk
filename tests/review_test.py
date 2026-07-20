@@ -49,7 +49,7 @@ class FakeTextClient:
         self.response_text = response_text
         self.calls = []
 
-    def generate_text(self, prompt, model, temperature, max_output_tokens):
+    def generate_text(self, prompt, model, temperature, max_output_tokens, **kwargs):
         self.calls.append({"prompt": prompt, "model": model})
         return self.response_text
 

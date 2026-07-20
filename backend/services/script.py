@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from backend.services.rewrite import build_brand_constraint
 from backend.utils.llm_utils import (
     classify_llm_error,
+    generate_and_parse_json,
     get_text_client,
     load_prompt_template,
     load_text_config,
@@ -142,17 +143,16 @@ class ScriptService:
             )
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
-            response_text = self.client.generate_text(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                max_output_tokens=max_output_tokens
+            # 生成 + 解析 JSON（json_mode 约束输出格式；解析失败自动带纠正提示重试一次）
+            script_data = generate_and_parse_json(
+                lambda prompt_suffix: self.client.generate_text(
+                    prompt=prompt + prompt_suffix,
+                    model=model,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    json_mode=True
+                )
             )
-
-            logger.debug(f"API 返回文本长度: {len(response_text)} 字符")
-
-            # 解析 JSON 响应
-            script_data = self._parse_json_response(response_text)
 
             segments = normalize_segments(script_data.get('segments'))
             if not segments:

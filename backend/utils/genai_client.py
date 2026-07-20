@@ -64,6 +64,19 @@ def retry_on_429(max_retries=3, base_delay=2):
     return decorator
 
 
+def _is_json_mime_type_unsupported(error: Exception) -> bool:
+    """
+    判断异常是否是"上游不支持 response_mime_type=application/json"类错误。
+
+    仅在主动开启 json_mode 时调用；错误文本点名该参数（或其取值）
+    即认为是参数不被支持，与文本侧 response_format 的降级判定思路一致。
+    """
+    text = str(error).lower()
+    return "response_mime_type" in text or "responsemimetype" in text or (
+        "mime" in text and "json" in text
+    )
+
+
 class GenAIClient:
     """GenAI 客户端封装类（已弃用，请使用 GoogleGenAIGenerator）"""
 
@@ -115,6 +128,7 @@ class GenAIClient:
         use_thinking: bool = False,
         images: list = None,
         system_prompt: str = None,
+        json_mode: bool = False,
         **kwargs
     ) -> str:
         """
@@ -129,6 +143,9 @@ class GenAIClient:
             use_thinking: 是否启用思考模式
             images: 图片列表（暂不支持）
             system_prompt: 系统提示词（暂不支持）
+            json_mode: 是否注入 response_mime_type="application/json"
+                要求模型只输出 JSON；上游返回"不支持该参数"类错误时
+                自动移除后重试一次（与文本侧 response_format 降级策略一致）
 
         Returns:
             生成的文本
@@ -167,19 +184,32 @@ class GenAIClient:
         if use_thinking:
             config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="HIGH")
 
-        generate_content_config = types.GenerateContentConfig(**config_kwargs)
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
 
-        result = ""
-        for chunk in self.client.models.generate_content_stream(
-            model=model,
-            contents=contents,
-            config=generate_content_config,
-        ):
-            if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
-                continue
-            result += chunk.text
+        def _stream_once(kwargs_for_config: dict) -> str:
+            generate_content_config = types.GenerateContentConfig(**kwargs_for_config)
+            text = ""
+            for chunk in self.client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=generate_content_config,
+            ):
+                if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
+                    continue
+                text += chunk.text
+            return text
 
-        return result
+        try:
+            return _stream_once(config_kwargs)
+        except Exception as e:
+            # 上游不支持 response_mime_type：移除后降级重试一次
+            if json_mode and _is_json_mime_type_unsupported(e):
+                logger.warning("上游不支持 response_mime_type，移除后重试一次")
+                downgraded_kwargs = dict(config_kwargs)
+                downgraded_kwargs.pop("response_mime_type", None)
+                return _stream_once(downgraded_kwargs)
+            raise
 
     @retry_on_429(max_retries=5, base_delay=3)  # 图片生成重试更多次
     def generate_image(

@@ -33,6 +33,7 @@ from typing import Dict, List, Optional
 from backend.paths import get_data_root
 from backend.utils.llm_utils import (
     classify_llm_error,
+    generate_and_parse_json,
     get_text_client,
     load_prompt_template,
     load_text_config,
@@ -710,14 +711,16 @@ def generate_week_plan(
         )
 
         logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
-        response_text = client.generate_text(
-            prompt=prompt,
-            model=model,
-            temperature=temperature,
-            max_output_tokens=max_output_tokens,
+        # 生成 + 解析 JSON（json_mode 约束输出格式；解析失败自动带纠正提示重试一次）
+        plan_data = generate_and_parse_json(
+            lambda prompt_suffix: client.generate_text(
+                prompt=prompt + prompt_suffix,
+                model=model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                json_mode=True,
+            )
         )
-
-        plan_data = parse_llm_json(response_text)
 
         raw_plans = plan_data.get("plans", [])
         if not isinstance(raw_plans, list):

@@ -5,17 +5,16 @@ AI 审稿：对已完成的图文作品（页面文案 + 可选标题/文案/标
 封面钩子、标题吸引力、内容结构、情绪价值、行动引导五个维度打分，
 并给出最多 5 条可执行的修改建议（含可直接应用的改写文本）
 
-注意：_load_text_config/_get_client/_parse_json_response 与其他文本服务
-（如 benchmark.py）保持一致的自包含实现，等待后续统一重构收编，
-不要在这里 import 其他服务的私有函数。
+注意：_load_text_config/_get_client 与其他文本服务（如 benchmark.py）
+保持一致的自包含实现，等待后续统一重构收编，不要在这里 import
+其他服务的私有函数；JSON 解析已收归共享的 parse_llm_json。
 """
 
-import json
 import logging
-import re
 import yaml
 from typing import Any, Dict, List, Optional, Tuple
 from backend.paths import get_data_root, resource_path
+from backend.utils.llm_utils import generate_and_parse_json, parse_llm_json
 from backend.utils.text_client import get_text_chat_client
 from backend.services.rewrite import build_brand_constraint
 
@@ -116,32 +115,8 @@ class ReviewService:
             return f.read()
 
     def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
-        """解析 AI 返回的 JSON 响应"""
-        # 尝试直接解析
-        try:
-            return json.loads(response_text)
-        except json.JSONDecodeError:
-            pass
-
-        # 尝试从 markdown 代码块中提取
-        json_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', response_text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-
-        # 尝试找到 JSON 对象的开始和结束
-        start_idx = response_text.find('{')
-        end_idx = response_text.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            try:
-                return json.loads(response_text[start_idx:end_idx + 1])
-            except json.JSONDecodeError:
-                pass
-
-        logger.error(f"无法解析 JSON 响应: {response_text[:200]}...")
-        raise ValueError("AI 返回的内容格式不正确，无法解析")
+        """解析 AI 返回的 JSON 响应（收归共享的 parse_llm_json）"""
+        return parse_llm_json(response_text)
 
     # ==================== 输入构建 ====================
 
@@ -358,16 +333,16 @@ class ReviewService:
             max_output_tokens = provider_config.get('max_output_tokens', 8000)
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
-            response_text = self.client.generate_text(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                max_output_tokens=max_output_tokens
+            # 生成 + 解析 JSON（json_mode 约束输出格式；解析失败自动带纠正提示重试一次）
+            data = generate_and_parse_json(
+                lambda prompt_suffix: self.client.generate_text(
+                    prompt=prompt + prompt_suffix,
+                    model=model,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    json_mode=True
+                )
             )
-
-            logger.debug(f"API 返回文本长度: {len(response_text)} 字符")
-
-            data = self._parse_json_response(response_text)
             review = self._normalize_review(
                 data, include_brand_dimension=bool(brand_section)
             )

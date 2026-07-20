@@ -9,6 +9,7 @@ import logging
 from typing import Dict, Any, Optional
 from backend.utils.llm_utils import (
     classify_llm_error,
+    generate_and_parse_json,
     get_text_client,
     load_prompt_template,
     load_text_config,
@@ -245,17 +246,16 @@ class TopicService:
             )
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
-            response_text = self.client.generate_text(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                max_output_tokens=max_output_tokens
+            # 生成 + 解析 JSON（json_mode 约束输出格式；解析失败自动带纠正提示重试一次）
+            topic_data = generate_and_parse_json(
+                lambda prompt_suffix: self.client.generate_text(
+                    prompt=prompt + prompt_suffix,
+                    model=model,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    json_mode=True
+                )
             )
-
-            logger.debug(f"API 返回文本长度: {len(response_text)} 字符")
-
-            # 解析 JSON 响应
-            topic_data = self._parse_json_response(response_text)
 
             raw_topics = topic_data.get('topics', [])
             if not isinstance(raw_topics, list):

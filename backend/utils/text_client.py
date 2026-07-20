@@ -54,6 +54,18 @@ def retry_on_429(max_retries=3, base_delay=2):
     return decorator
 
 
+def _is_response_format_unsupported(error_detail: str) -> bool:
+    """
+    判断 4xx 错误是否是"上游不支持 response_format 参数"类错误。
+
+    仅在我们主动发送了 response_format 时调用；错误文本点名该参数
+    （或其取值 json_object）即认为是参数不被支持，与图片侧
+    ImageApiClient 的降级判定思路一致。
+    """
+    text = error_detail.lower()
+    return "response_format" in text or "json_object" in text
+
+
 class TextChatClient:
     """Text API 客户端封装类"""
 
@@ -127,6 +139,7 @@ class TextChatClient:
         max_output_tokens: int = 8000,
         images: List[Union[bytes, str]] = None,
         system_prompt: str = None,
+        json_mode: bool = False,
         **kwargs
     ) -> str:
         """
@@ -139,6 +152,10 @@ class TextChatClient:
             max_output_tokens: 最大输出 token
             images: 图片列表（可选）
             system_prompt: 系统提示词（可选）
+            json_mode: 是否注入 response_format={"type": "json_object"}
+                要求上游只输出 JSON；上游返回"不支持该参数"类 4xx 错误时
+                自动移除该参数重试一次（与图片侧 ImageApiClient 的
+                response_format 降级策略一致）
 
         Returns:
             生成的文本
@@ -166,6 +183,8 @@ class TextChatClient:
             "max_tokens": max_output_tokens,
             "stream": False
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
         headers = {
             "Content-Type": "application/json",
@@ -173,14 +192,30 @@ class TextChatClient:
             "Authorization": f"Bearer {self.api_key}"
         }
 
-        response = requests.post(
-            self.chat_endpoint,
-            json=payload,
-            headers=headers,
-            timeout=300  # 5分钟超时
-        )
+        downgraded_response_format = False
+        while True:
+            response = requests.post(
+                self.chat_endpoint,
+                json=payload,
+                headers=headers,
+                timeout=300  # 5分钟超时
+            )
 
-        if response.status_code != 200:
+            if response.status_code == 200:
+                break
+
+            # 上游不支持 response_format：移除后降级重试一次
+            if (
+                "response_format" in payload
+                and not downgraded_response_format
+                and 400 <= response.status_code < 500
+                and _is_response_format_unsupported(response.text[:500])
+            ):
+                logger.warning("上游不支持 response_format，移除后重试一次")
+                payload.pop("response_format", None)
+                downgraded_response_format = True
+                continue
+
             error_detail = response.text[:500]
             status_code = response.status_code
 

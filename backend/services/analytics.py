@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional
 from backend.paths import get_data_root
 from backend.utils.llm_utils import (
     classify_llm_error,
+    generate_and_parse_json,
     get_text_client,
     load_prompt_template,
     load_text_config,
@@ -695,14 +696,16 @@ class AnalyticsService:
             )
 
             logger.info("调用 AI 复盘洞察: model=%s, records=%d", model, len(records))
-            response_text = client.generate_text(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                max_output_tokens=max_output_tokens,
+            # 生成 + 解析 JSON（json_mode 约束输出格式；解析失败自动带纠正提示重试一次）
+            insight_data = generate_and_parse_json(
+                lambda prompt_suffix: client.generate_text(
+                    prompt=prompt + prompt_suffix,
+                    model=model,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    json_mode=True,
+                )
             )
-
-            insight_data = self._parse_json_response(response_text)
 
             insight = {
                 "summary": str(insight_data.get("summary") or "").strip(),
