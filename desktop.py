@@ -1,7 +1,8 @@
 """RedInk 桌面入口。
 
 用 pywebview 打开原生窗口，内部在守护线程中运行 Flask 后端。
-被 PyInstaller 打包为 macOS 的 RedInk.app（见 redink.spec）。
+被 PyInstaller 打包为 macOS 的 RedInk.app 或 Windows 的 RedInk.exe
+（见 redink.spec，按 sys.platform 条件化）。
 """
 
 import json
@@ -25,7 +26,7 @@ MIN_WINDOW_WIDTH, MAX_WINDOW_WIDTH = 1024, 4000
 MIN_WINDOW_HEIGHT, MAX_WINDOW_HEIGHT = 700, 3000
 WINDOW_STATE_FILENAME = "window_state.json"
 
-# osascript 通知文案的最大长度
+# 系统通知文案的最大长度（各平台通用）
 NOTIFY_MAX_LENGTH = 200
 
 # 桌面 app 面向国内直连（siliconflow / 用户中转站），
@@ -46,7 +47,7 @@ def _strip_proxy_env() -> None:
         os.environ.pop(name.lower(), None)
 
 
-# ==================== macOS 原生通知 ====================
+# ==================== 系统原生通知（按平台分支） ====================
 
 
 def _escape_osascript(text: str) -> str:
@@ -59,22 +60,90 @@ def _escape_osascript(text: str) -> str:
     return cleaned[:NOTIFY_MAX_LENGTH]
 
 
+def _escape_powershell(text: str) -> str:
+    """
+    清洗要嵌入 PowerShell 单引号字符串的文本：
+
+    去掉单/双引号、反引号、$ 与反斜杠（防注入与转义歧义），
+    换行折叠为空格，再截断到 NOTIFY_MAX_LENGTH。
+    """
+    cleaned = str(text)
+    for ch in ("'", '"', "`", "$", "\\"):
+        cleaned = cleaned.replace(ch, "")
+    cleaned = cleaned.replace("\r", " ").replace("\n", " ")
+    return cleaned[:NOTIFY_MAX_LENGTH]
+
+
+def _notify_macos(title: str, message: str) -> bool:
+    script = (
+        f'display notification "{_escape_osascript(message)}" '
+        f'with title "{_escape_osascript(title)}"'
+    )
+    result = subprocess.run(
+        ["osascript", "-e", script],
+        capture_output=True,
+        timeout=5,
+    )
+    return result.returncode == 0
+
+
+def _notify_windows(title: str, message: str) -> bool:
+    """
+    Windows Toast 通知（PowerShell 调用 WinRT ToastNotificationManager）。
+
+    注意：未经 Windows 真机验证；任何失败由调用方兜底返回 False。
+    """
+    ps_script = (
+        "$null = [Windows.UI.Notifications.ToastNotificationManager, "
+        "Windows.UI.Notifications, ContentType = WindowsRuntime];"
+        "$template = [Windows.UI.Notifications.ToastNotificationManager]::"
+        "GetTemplateContent("
+        "[Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
+        "$texts = $template.GetElementsByTagName('text');"
+        f"$null = $texts.Item(0).AppendChild("
+        f"$template.CreateTextNode('{_escape_powershell(title)}'));"
+        f"$null = $texts.Item(1).AppendChild("
+        f"$template.CreateTextNode('{_escape_powershell(message)}'));"
+        "$toast = [Windows.UI.Notifications.ToastNotification]::new($template);"
+        "[Windows.UI.Notifications.ToastNotificationManager]::"
+        "CreateToastNotifier('RedInk').Show($toast)"
+    )
+    # CREATE_NO_WINDOW：避免打包后弹出黑色控制台窗口（仅 Windows 有此常量）
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+        capture_output=True,
+        timeout=10,
+        creationflags=creationflags,
+    )
+    return result.returncode == 0
+
+
+def _notify_linux(title: str, message: str) -> bool:
+    """Linux 桌面通知：notify-send 不存在或失败时由调用方兜底。"""
+    result = subprocess.run(
+        [
+            "notify-send",
+            str(title)[:NOTIFY_MAX_LENGTH],
+            str(message)[:NOTIFY_MAX_LENGTH],
+        ],
+        capture_output=True,
+        timeout=5,
+    )
+    return result.returncode == 0
+
+
 class DesktopApi:
     """暴露给前端的 pywebview js_api（window.pywebview.api.*）。"""
 
     def notify(self, title: str, message: str) -> bool:
-        """发送 macOS 系统通知；任何异常兜底返回 False。"""
+        """发送系统通知（按平台分支）；任何异常兜底返回 False。"""
         try:
-            script = (
-                f'display notification "{_escape_osascript(message)}" '
-                f'with title "{_escape_osascript(title)}"'
-            )
-            result = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True,
-                timeout=5,
-            )
-            return result.returncode == 0
+            if sys.platform == "darwin":
+                return _notify_macos(title, message)
+            if sys.platform == "win32":
+                return _notify_windows(title, message)
+            return _notify_linux(title, message)
         except Exception:
             return False
 
@@ -147,7 +216,10 @@ def _save_window_state(state: dict, path: Path | None = None) -> None:
 
 def _port_is_free(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Windows 上 SO_REUSEADDR 允许绑定到正被占用的端口，会误报"空闲"，
+        # 因此只在非 Windows 平台设置（macOS 行为不变）。
+        if sys.platform != "win32":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
             return True

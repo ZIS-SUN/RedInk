@@ -1,8 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller 配置：把 RedInk 打包成 macOS 的 windowed .app
+# PyInstaller 配置：按平台打包 RedInk 桌面版
+# - macOS：windowed .app（BUNDLE）
+# - Windows：windowed RedInk.exe（COLLECT 目录，未经真机验证）
 # 构建：uv run pyinstaller redink.spec --noconfirm
 
+import sys
+
 from PyInstaller.utils.hooks import collect_submodules
+
+IS_MACOS = sys.platform == 'darwin'
+IS_WINDOWS = sys.platform == 'win32'
 
 block_cipher = None
 
@@ -30,7 +37,12 @@ hiddenimports = (
         # 图片处理
         'PIL',
         'PIL.Image',
-        # pywebview 在 macOS 上依赖 pyobjc / WebKit
+    ]
+)
+
+if IS_MACOS:
+    # pywebview 在 macOS 上依赖 pyobjc / WebKit
+    hiddenimports += [
         'objc',
         'Foundation',
         'AppKit',
@@ -38,7 +50,28 @@ hiddenimports = (
         'Security',
         'CoreFoundation',
     ]
-)
+elif IS_WINDOWS:
+    # pywebview 在 Windows 上默认走 EdgeChromium（WebView2）后端：
+    # webview.platforms.winforms / edgechromium 已由 collect_submodules('webview')
+    # 覆盖，但底层的 pythonnet / clr 桥接是动态导入，PyInstaller 静态分析
+    # 发现不了，必须显式声明（见 pywebview 冻结文档与 issue #225 / #1316）。
+    hiddenimports += [
+        'clr',
+        'clr_loader',
+        'pythonnet',
+    ]
+
+# Windows 图标：仓库中暂无 .ico 文件。可用 scripts/make_icns.py 的姊妹脚本
+# （scripts/make_ico.py，待创建）从 images/logo.png 生成 build/icon.ico，
+# 生成后把下面的 icon 参数指向它（详见 BUILD_DESKTOP.md「Windows 构建」）。
+_WINDOWS_ICON = 'build/icon.ico'  # 占位路径：文件存在时才传给 EXE
+
+if IS_WINDOWS:
+    import os
+
+    _exe_icon = _WINDOWS_ICON if os.path.exists(_WINDOWS_ICON) else None
+else:
+    _exe_icon = None
 
 a = Analysis(
     ['desktop.py'],
@@ -74,6 +107,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_exe_icon,
 )
 
 coll = COLLECT(
@@ -86,18 +120,19 @@ coll = COLLECT(
     name='RedInk',
 )
 
-app = BUNDLE(
-    coll,
-    name='RedInk.app',
-    # 由 scripts/make_icns.py 从 images/logo.png 生成
-    icon='build/icon.icns',
-    bundle_identifier='com.redink.desktop',
-    info_plist={
-        'CFBundleName': 'RedInk',
-        'CFBundleDisplayName': '红墨 RedInk',
-        'CFBundleShortVersionString': '0.1.0',
-        'NSHighResolutionCapable': True,
-        # 允许 http://127.0.0.1 本地明文请求
-        'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True},
-    },
-)
+if IS_MACOS:
+    app = BUNDLE(
+        coll,
+        name='RedInk.app',
+        # 由 scripts/make_icns.py 从 images/logo.png 生成
+        icon='build/icon.icns',
+        bundle_identifier='com.redink.desktop',
+        info_plist={
+            'CFBundleName': 'RedInk',
+            'CFBundleDisplayName': '红墨 RedInk',
+            'CFBundleShortVersionString': '0.1.0',
+            'NSHighResolutionCapable': True,
+            # 允许 http://127.0.0.1 本地明文请求
+            'NSAppTransportSecurity': {'NSAllowsLocalNetworking': True},
+        },
+    )

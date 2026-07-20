@@ -215,3 +215,113 @@ rm -rf ~/Library/Application\ Support/RedInk
 - 打包配置见 `redink.spec`：`frontend/dist`、`backend/prompts`、两个
   `*.yaml.example` 会作为只读资源打进 app，运行时通过
   `backend.paths.resource_path()` 读取。
+
+## 发版流程
+
+发版由 tag 驱动，推送 `v*` tag 后 `.github/workflows/release.yml` 会自动
+构建 DMG 并创建 GitHub Release（changelog 由 [git-cliff](https://git-cliff.org/)
+按 conventional commits 自动生成，分组规则见仓库根目录 `cliff.toml`）。
+
+步骤：
+
+1. **bump 版本号（三处，必须一致）**：
+   - `pyproject.toml` 的 `[project] version`；
+   - `frontend/package.json` 的 `version`；
+   - `redink.spec` 的 `CFBundleShortVersionString`。
+
+   本地自查（三处不一致会非零退出）：
+
+   ```bash
+   uv run python scripts/check-version.py
+   ```
+
+2. **提交** 版本号变更到 `main`；
+
+3. **打 tag 并推送**（tag 必须是 `v` + 版本号，例如版本 `0.2.0` 对应 `v0.2.0`）：
+
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+4. **CI 自动完成剩余工作**：校验 tag 与三处版本号一致（不一致直接失败）
+   → macOS runner 上跑 `scripts/build-macos-app.sh` + `scripts/make-dmg.sh`
+   → 生成 changelog → 创建 GitHub Release 并附上
+   `RedInk-v<版本>.dmg`。同时既有的 `docker-publish.yml` 也会被同一 tag
+   触发，发布对应版本的 Docker 镜像。
+
+注意：
+
+- CI 产出的 DMG 与本地构建一致，仅有 **ad-hoc 签名**，未做 Developer ID
+  签名与公证（证书与公证凭据只在本地钥匙串中）。如需分发签名公证版本，
+  仍需在本地对 CI 产物或本地构建产物执行
+  `bash scripts/sign-and-notarize.sh`（见上文[「代码签名与公证」](#代码签名与公证可选)），
+  再手动替换 Release 附件；
+- `backend/app.py` 中另有一处硬编码版本号，`check-version.py` 会核对并在
+  不一致时打印警告（不阻断），发版前请顺手确认。
+
+## Windows 构建
+
+打包链路（pywebview + PyInstaller）已做跨平台适配：`redink.spec` 按
+`sys.platform` 条件化（Windows 分支产出 windowed `RedInk.exe`），
+`backend/paths.py` 与 `desktop.py` 的平台相关逻辑均已分支处理。
+**以下流程在 macOS 上编写，未经 Windows 真机验证**，见文末清单。
+
+### 前置要求
+
+| 工具 | 用途 | 安装 |
+| --- | --- | --- |
+| [uv](https://docs.astral.sh/uv/) | Python 依赖与运行 | `winget install astral-sh.uv` 或官网脚本 |
+| [pnpm](https://pnpm.io/) | 前端构建 | `winget install pnpm.pnpm` 或 `npm i -g pnpm` |
+| [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) | pywebview 的 EdgeChromium 后端（运行时必需） | Win11 已内置；Win10 需手动安装 Evergreen Runtime |
+
+Python 侧的 Windows 专属依赖（`pythonnet` / `clr-loader`）已通过
+pywebview 的平台 marker 声明在锁文件中，`uv sync` 会在 Windows 上自动安装。
+
+### 构建命令
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1
+```
+
+脚本依次：前端构建（`pnpm install && pnpm run build`）→ `uv sync` →
+`uv run pyinstaller redink.spec --noconfirm`。产物为目录形式：
+
+```text
+dist\RedInk\RedInk.exe
+```
+
+数据与配置目录为 `%APPDATA%\RedInk\`（首次运行自动初始化示例配置）。
+
+### 应用图标（可选）
+
+仓库当前没有 `.ico` 图标文件。`redink.spec` 的 Windows 分支只在
+`build/icon.ico` 存在时才为 EXE 设置图标，否则使用 PyInstaller 默认图标，
+不影响构建。如需图标，可参照 `scripts/make_icns.py` 编写姊妹脚本
+`scripts/make_ico.py`：复用其从 `images/logo.png` 合成 1024x1024 图标图像
+的逻辑，最后用 Pillow 直接导出多尺寸 `.ico`
+（`img.save('build/icon.ico', sizes=[(16,16),(32,32),(48,48),(256,256)])`），
+无需 macOS 专属的 `iconutil`。
+
+### 系统通知
+
+Windows 下 `DesktopApi.notify()` 通过 PowerShell 调用 WinRT
+`ToastNotificationManager` 发送 Toast 通知，失败时静默返回 False，
+不影响主流程。
+
+### 已知未验证项清单
+
+以下内容因缺少 Windows 真机，仅做了代码层面的适配与 macOS 侧回归，
+首次在 Windows 构建/运行时请重点确认：
+
+- [ ] `scripts/build-windows.ps1` 的 PowerShell 语法与执行流程；
+- [ ] PyInstaller Windows 分支 hiddenimports（`clr` / `clr_loader` /
+      `pythonnet`）是否足够——若启动报
+      `Failed to resolve Python.Runtime`，参考 pywebview issue #1316/#1638
+      （常见原因：`Python.Runtime.dll` 被 Windows 安全机制 Block，
+      需 `Unblock-File`；或 pythonnet 非预编译 wheel）；
+- [ ] WebView2 Runtime 缺失时 pywebview 的报错表现；
+- [ ] Toast 通知在打包后（windowed、无控制台）能否正常弹出；
+- [ ] 端口探测：Windows 分支不设置 `SO_REUSEADDR`（避免误报端口空闲），
+      逻辑上正确但未实测端口冲突场景；
+- [ ] 首次运行时 `%APPDATA%\RedInk\` 的种子配置拷贝。

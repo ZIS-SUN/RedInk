@@ -5,8 +5,11 @@
 
 - get_data_root(): 可写目录，存放配置（text_providers.yaml / image_providers.yaml）
   与用户数据（history/ brand_kits/ content_calendar/ analytics_data/）。
-  非冻结环境下即项目根目录，保持现有行为；冻结环境下为
-  ~/Library/Application Support/RedInk。
+  非冻结环境下即项目根目录，保持现有行为；冻结环境下按平台分支：
+  macOS 为 ~/Library/Application Support/RedInk，
+  Windows 为 %APPDATA%/RedInk（无 APPDATA 时回退 ~/AppData/Roaming/RedInk），
+  其他平台（Linux 等）为 $XDG_DATA_HOME/RedInk（无 XDG_DATA_HOME 时回退
+  ~/.local/share/RedInk）。
 - resource_path(rel): 只读资源（backend/prompts/*.txt、frontend/dist、
   *.yaml.example），随包分发。非冻结环境下以项目根目录为基准；
   冻结环境下以 PyInstaller 解包目录（sys._MEIPASS）为基准。
@@ -14,6 +17,7 @@
   创建各数据目录；非冻结环境下为空操作。
 """
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -33,15 +37,30 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def _frozen_data_root() -> Path:
+    """冻结环境下的可写数据根目录（不含 mkdir），按平台分支。"""
+    if sys.platform == "darwin":
+        # macOS 路径必须与历史行为逐字节一致
+        return Path.home() / "Library" / "Application Support" / "RedInk"
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return base / "RedInk"
+    # Linux 及其他类 Unix：遵循 XDG Base Directory 规范
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(xdg_data_home) if xdg_data_home else Path.home() / ".local" / "share"
+    return base / "RedInk"
+
+
 def get_data_root() -> Path:
     """
     可写数据根目录：配置 + 用户数据。
 
     非冻结环境返回项目根目录（保持现有行为）；
-    冻结环境返回 ~/Library/Application Support/RedInk。
+    冻结环境按平台分支，见 _frozen_data_root()。
     """
     if is_frozen():
-        root = Path.home() / "Library" / "Application Support" / "RedInk"
+        root = _frozen_data_root()
     else:
         root = Path(__file__).resolve().parent.parent  # 项目根目录
     root.mkdir(parents=True, exist_ok=True)
