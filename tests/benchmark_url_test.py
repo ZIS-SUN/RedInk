@@ -32,8 +32,8 @@ class FakeBenchmarkService:
             "draft": "",
         }
 
-    def analyze_benchmark(self, content, my_topic=None):
-        self.calls.append({"content": content, "my_topic": my_topic})
+    def analyze_benchmark(self, content, my_topic=None, brand=None):
+        self.calls.append({"content": content, "my_topic": my_topic, "brand": brand})
         return self.result
 
 

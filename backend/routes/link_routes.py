@@ -9,6 +9,7 @@ import time
 import logging
 from flask import Blueprint, request, jsonify
 from backend.services.link_extract import get_link_extract_service
+from .rewrite_routes import resolve_brand
 from .utils import (
     api_error_response,
     log_request,
@@ -36,6 +37,8 @@ def create_link_blueprint():
         请求格式（application/json，url 与 text 二选一，优先 url）：
         - url: 网页链接（http/https，禁止私网/环回/保留地址）
         - text: 用户直接粘贴的长文本
+        - brand_id: 品牌档案 ID（可选），提供且有效时会把品牌人设约束注入生成
+          prompt（与 /outline 主流程行为一致）；档案不存在则忽略
 
         返回：
         - success: 是否成功
@@ -49,10 +52,12 @@ def create_link_blueprint():
             data = request.get_json(silent=True) or {}
             url = (data.get('url') or '').strip()
             text = (data.get('text') or '').strip()
+            brand_id = str(data.get('brand_id') or '').strip()
 
             log_request('/link/outline', {
                 'url': url[:100] if url else '',
                 'text_length': len(text),
+                'brand_id': brand_id,
             })
 
             if not url and not text:
@@ -76,11 +81,15 @@ def create_link_blueprint():
                     context={"endpoint": "/api/link/outline"},
                 )
 
+            # 解析品牌档案（可选，取不到时静默忽略）
+            brand = resolve_brand(brand_id)
+
             logger.info(f"🔄 开始链接/长文转大纲: url={url[:80] if url else '(无)'}, text_len={len(text)}")
             service = get_link_extract_service()
             result = service.extract_outline(
                 url=url or None,
                 raw_text=text or None,
+                brand=brand,
             )
 
             elapsed = time.time() - start_time

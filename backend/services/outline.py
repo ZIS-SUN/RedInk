@@ -54,7 +54,8 @@ class OutlineService:
         content: str,
         page_type: str = "content",
         topic: str = "",
-        instruction: str = ""
+        instruction: str = "",
+        brand: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         单页 AI 润色：对大纲中某一页的文案按指令重写
@@ -64,6 +65,7 @@ class OutlineService:
             page_type: 页面类型（cover/content/summary）
             topic: 整篇主题（可为空）
             instruction: 润色指令（已经过路由层白名单映射的中文描述）
+            brand: 品牌档案字典（可选），提供时约束润色结果保持人设语气、不引入禁用词
 
         返回：
             {"success": True, "content": "润色后的文案"} 或 {"success": False, "error": "..."}
@@ -78,6 +80,15 @@ class OutlineService:
                 user_topic=topic.strip() if topic and topic.strip() else "未提供",
                 instruction=instruction,
             )
+
+            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
+            brand_constraint = build_brand_constraint(brand)
+            if brand_constraint:
+                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
+                prompt += brand_constraint + (
+                    "\n\n润色后的文案必须保持以上人设的语气风格（不要把人设语气洗掉），"
+                    "并且绝对不得引入任何禁用词。"
+                )
 
             # 与大纲生成使用同一 provider/model 配置
             model, temperature, max_output_tokens = resolve_generation_params(

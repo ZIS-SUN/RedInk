@@ -291,7 +291,14 @@ const runPolish = async (page: Page, instruction: PolishInstruction) => {
   polishingKey.value = key
 
   try {
-    const result = await polishPage(page.content, page.type, store.topic, instruction)
+    // 本次创作选了品牌人设时，润色也带上，避免润色洗掉人设语气或引入禁用词
+    const result = await polishPage(
+      page.content,
+      page.type,
+      store.topic,
+      instruction,
+      store.brandId || undefined
+    )
     if (result.success && result.content) {
       polishPreviews.value[key] = result.content
     } else {

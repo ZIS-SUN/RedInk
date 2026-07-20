@@ -52,16 +52,26 @@ export async function generateOutline(
 
 /**
  * 单页 AI 润色：对大纲中某一页的文案按指令重写
+ *
+ * @param brandId 品牌档案 ID（可选），提供时后端约束润色结果保持人设语气、不引入禁用词
  */
 export async function polishPage(
   content: string,
   pageType: string,
   topic: string,
-  instruction: PolishInstruction
+  instruction: PolishInstruction,
+  brandId?: string
 ): Promise<PolishPageResponse> {
   const response = await http.post<PolishPageResponse>(
     '/outline/polish',
-    { content, page_type: pageType, topic, instruction },
+    {
+      content,
+      page_type: pageType,
+      topic,
+      instruction,
+      // 不使用品牌人设时不携带 brand_id 键，保持向后兼容
+      ...(brandId ? { brand_id: brandId } : {})
+    },
     // 单页润色走 LLM，耗时较长
     { timeout: LLM_TIMEOUT }
   )

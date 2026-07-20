@@ -111,6 +111,8 @@ def create_outline_blueprint():
         - page_type: 页面类型 cover/content/summary（默认 "content"）
         - topic: 整篇主题（默认 ""）
         - instruction: 润色指令 key：polish/shorten/punchier（其他值按 polish 处理）
+        - brand_id: 品牌档案 ID（可选），提供且有效时约束润色结果保持人设语气、
+          不引入禁用词；档案不存在则忽略
 
         返回：
         - success: 是否成功
@@ -133,6 +135,7 @@ def create_outline_blueprint():
             if not isinstance(topic, str):
                 topic = str(topic)
             instruction_key = data.get('instruction') or DEFAULT_POLISH_INSTRUCTION
+            brand_id = data.get('brand_id')
 
             log_request('/outline/polish', {
                 'content_length': len(content),
@@ -152,6 +155,9 @@ def create_outline_blueprint():
                 instruction_key, POLISH_INSTRUCTIONS[DEFAULT_POLISH_INSTRUCTION]
             )
 
+            # 按 brand_id 取品牌档案（取不到/异常一律置 None，静默忽略）
+            brand = _load_brand(brand_id)
+
             logger.info(f"🔄 开始单页润色，指令: {instruction_key}")
             outline_service = get_outline_service()
             result = outline_service.polish_page(
@@ -159,6 +165,7 @@ def create_outline_blueprint():
                 page_type=page_type,
                 topic=topic,
                 instruction=instruction,
+                brand=brand,
             )
 
             elapsed = time.time() - start_time

@@ -320,8 +320,8 @@ class FakeInsightService:
             "comment_count": 4,
         }
 
-    def mine_insights(self, comments, niche=""):
-        self.calls.append({"comments": comments, "niche": niche})
+    def mine_insights(self, comments, niche="", brand=None):
+        self.calls.append({"comments": comments, "niche": niche, "brand": brand})
         return self.result
 
 
@@ -338,6 +338,8 @@ def insight_client():
 def fake_insight(monkeypatch):
     service = FakeInsightService()
     monkeypatch.setattr(insight_routes, "get_insight_service", lambda: service)
+    # 路由层测试不依赖真实品牌数据：品牌解析固定返回 None
+    monkeypatch.setattr(insight_routes, "resolve_brand_for_prompt", lambda brand_id=None: None)
     return service
 
 

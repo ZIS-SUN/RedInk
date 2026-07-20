@@ -24,6 +24,7 @@ from backend.utils.llm_utils import (
     load_text_config,
     resolve_generation_params,
 )
+from backend.services.rewrite import build_brand_constraint
 
 logger = logging.getLogger(__name__)
 
@@ -338,7 +339,8 @@ class LinkExtractService:
     def extract_outline(
         self,
         url: Optional[str] = None,
-        raw_text: Optional[str] = None
+        raw_text: Optional[str] = None,
+        brand: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         链接或长文 → 图文大纲。
@@ -346,6 +348,8 @@ class LinkExtractService:
         参数：
             url: 网页链接（与 raw_text 二选一，优先 url）
             raw_text: 用户直接粘贴的长文本
+            brand: 品牌档案字典（可选），提供时会把品牌人设约束注入 prompt
+                （与主流程 OutlineService.generate_outline 行为一致）
 
         返回：
             成功: {"success": True, "topic": str, "outline": str, "pages": [{index,type,content}]}
@@ -368,6 +372,12 @@ class LinkExtractService:
                 article_text = article_text[:MAX_ARTICLE_CHARS]
 
             prompt = self.prompt_template.format(article_text=article_text)
+
+            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
+            brand_constraint = build_brand_constraint(brand)
+            if brand_constraint:
+                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
+                prompt += brand_constraint
 
             model, temperature, max_output_tokens = resolve_generation_params(
                 self.text_config, default_max_output_tokens=8000

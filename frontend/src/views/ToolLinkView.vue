@@ -54,6 +54,25 @@
         <div class="input-hint text-count">{{ text.length }} 字</div>
       </div>
 
+      <div class="brand-row">
+        <label class="brand-label" for="brand-select">品牌人设（可选）</label>
+        <select
+          v-if="brands.length > 0"
+          id="brand-select"
+          v-model="selectedBrandId"
+          class="brand-select"
+          :disabled="loading"
+        >
+          <option value="">不使用品牌人设</option>
+          <option v-for="b in brands" :key="b.id" :value="b.id">
+            {{ b.name }}{{ b.id === activeBrandId ? '（当前启用）' : '' }}
+          </option>
+        </select>
+        <span v-else-if="brandsLoaded" class="brand-empty-hint">
+          还没有品牌档案，<RouterLink to="/tools/brand" class="brand-link">去创建</RouterLink>
+        </span>
+      </div>
+
       <button
         class="btn btn-primary generate-btn"
         :disabled="loading || !canGenerate"
@@ -148,10 +167,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { linkToOutline } from '../api/link'
+import { getBrandList, type BrandKit } from '../api/brand'
 import type { Page } from '../api/types'
 import { normalizeApiError, type AppError } from '../utils/errors'
 import ErrorCard from '../components/common/ErrorCard.vue'
@@ -164,6 +184,24 @@ const url = ref('')
 const text = ref('')
 const loading = ref(false)
 const error = ref<AppError | null>(null)
+
+// 品牌人设选择：'' 表示不使用，默认选中当前启用档案
+const brands = ref<BrandKit[]>([])
+const activeBrandId = ref<string | null>(null)
+const selectedBrandId = ref('')
+const brandsLoaded = ref(false)
+
+onMounted(async () => {
+  const res = await getBrandList()
+  if (res.success) {
+    brands.value = res.brands
+    activeBrandId.value = res.active_id
+    if (res.active_id && res.brands.some(b => b.id === res.active_id)) {
+      selectedBrandId.value = res.active_id
+    }
+  }
+  brandsLoaded.value = true
+})
 
 // 生成结果（本地可编辑，确认后才写入 store）
 const topic = ref('')
@@ -185,11 +223,12 @@ async function handleGenerate() {
   error.value = null
 
   try {
-    const result = await linkToOutline(
-      mode.value === 'url'
+    const result = await linkToOutline({
+      ...(mode.value === 'url'
         ? { url: url.value.trim() }
-        : { text: text.value.trim() }
-    )
+        : { text: text.value.trim() }),
+      brandId: selectedBrandId.value || undefined
+    })
 
     if (result.success && result.pages && result.pages.length > 0) {
       topic.value = result.topic || ''
@@ -327,6 +366,53 @@ function sendToCreation() {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 8px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.brand-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-sub);
+  flex-shrink: 0;
+}
+
+.brand-select {
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--text-main);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.brand-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.brand-empty-hint {
+  font-size: 14px;
+  color: var(--text-sub);
+}
+
+.brand-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.brand-link:hover {
+  text-decoration: underline;
 }
 
 .text-count {
@@ -624,6 +710,16 @@ function sendToCreation() {
 
   .mode-tab {
     padding: 8px 14px;
+  }
+
+  .brand-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .brand-select {
+    width: 100%;
   }
 
   .preview-grid {

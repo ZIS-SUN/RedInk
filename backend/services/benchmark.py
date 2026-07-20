@@ -15,6 +15,7 @@ from backend.utils.llm_utils import (
     parse_llm_json,
     resolve_generation_params,
 )
+from backend.services.rewrite import build_brand_constraint
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,8 @@ class BenchmarkService:
     def analyze_benchmark(
         self,
         content: str,
-        my_topic: Optional[str] = None
+        my_topic: Optional[str] = None,
+        brand: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         拆解对标内容，可选生成仿写草稿
@@ -101,6 +103,8 @@ class BenchmarkService:
         参数：
             content: 对标/爆款内容（标题+正文）
             my_topic: 用户自己的主题（可选），提供时按拆解出的套路生成原创仿写草稿
+            brand: 品牌档案字典（可选），提供且本次需要仿写（有 my_topic）时，
+                把品牌人设约束注入仿写草稿的生成 prompt，避免草稿"变成别人"
 
         返回：
             包含 analysis（拆解结果）和 draft（仿写草稿，无 my_topic 时为空串）的字典
@@ -113,6 +117,17 @@ class BenchmarkService:
                 content=content,
                 draft_section=self._build_draft_section(my_topic)
             )
+
+            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符。
+            # 只在生成仿写草稿时注入（无 my_topic 时不产出内容，注入反而可能干扰拆解的客观性）
+            brand_constraint = build_brand_constraint(brand) if my_topic else ""
+            if brand_constraint:
+                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
+                prompt += brand_constraint + (
+                    "\n\n以上品牌人设约束作用于「仿写草稿」（draft 字段）的写作："
+                    "草稿只借鉴对标内容的套路与结构，语气、口头禅、结尾话术必须遵循该人设，"
+                    "并且绝对不出现任何禁用词；对标内容本身的拆解分析仍保持客观中立。"
+                )
 
             # 从配置中获取模型参数
             model, temperature, max_output_tokens = resolve_generation_params(

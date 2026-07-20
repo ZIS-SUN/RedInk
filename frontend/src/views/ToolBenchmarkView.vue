@@ -72,6 +72,27 @@
         />
       </div>
 
+      <div class="field-block">
+        <label class="field-label" for="brand-select">
+          品牌人设（可选）
+          <span class="field-hint">仿写草稿会按你的人设语气生成，避免"写成别人"</span>
+        </label>
+        <select
+          v-if="brands.length > 0"
+          id="brand-select"
+          v-model="selectedBrandId"
+          class="brand-select"
+        >
+          <option value="">不使用品牌人设</option>
+          <option v-for="b in brands" :key="b.id" :value="b.id">
+            {{ b.name }}{{ b.id === activeBrandId ? '（当前启用）' : '' }}
+          </option>
+        </select>
+        <span v-else-if="brandsLoaded" class="brand-empty-hint">
+          还没有品牌档案，<RouterLink to="/tools/brand" class="brand-link">去创建</RouterLink>
+        </span>
+      </div>
+
       <div class="submit-row">
         <button
           type="button"
@@ -284,10 +305,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import { analyzeBenchmark, type BenchmarkAnalysis } from '../api/benchmark'
+import { getBrandList, type BrandKit } from '../api/brand'
 import { linkToOutline } from '../api/link'
 import type { Page } from '../api/types'
 import { normalizeApiError, type AppError } from '../utils/errors'
@@ -325,7 +347,25 @@ const topicDialogInputEl = ref<HTMLInputElement | null>(null)
 const history = ref<BenchmarkHistoryEntry[]>(loadHistory())
 const showHistory = ref(false)
 
+// 品牌人设选择：'' 表示不使用，默认选中当前启用档案
+const brands = ref<BrandKit[]>([])
+const activeBrandId = ref<string | null>(null)
+const selectedBrandId = ref('')
+const brandsLoaded = ref(false)
+
 let copyTimer: ReturnType<typeof setTimeout> | undefined
+
+onMounted(async () => {
+  const res = await getBrandList()
+  if (res.success) {
+    brands.value = res.brands
+    activeBrandId.value = res.active_id
+    if (res.active_id && res.brands.some(b => b.id === res.active_id)) {
+      selectedBrandId.value = res.active_id
+    }
+  }
+  brandsLoaded.value = true
+})
 
 onUnmounted(() => {
   if (copyTimer !== undefined) clearTimeout(copyTimer)
@@ -350,6 +390,7 @@ async function handleAnalyze() {
       content: mode.value === 'paste' ? input : undefined,
       url: mode.value === 'url' ? input : undefined,
       myTopic: myTopic.value.trim() || undefined,
+      brandId: selectedBrandId.value || undefined,
     })
 
     if (result.success && result.analysis) {
@@ -642,6 +683,39 @@ function copyDraft() {
 
 .topic-input::placeholder {
   color: var(--text-placeholder);
+}
+
+.brand-select {
+  align-self: flex-start;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  color: var(--text-main);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.brand-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.brand-empty-hint {
+  font-size: 14px;
+  color: var(--text-sub);
+}
+
+.brand-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.brand-link:hover {
+  text-decoration: underline;
 }
 
 .submit-row {
@@ -1063,6 +1137,11 @@ function copyDraft() {
 
   .benchmark-btn,
   .creation-btn {
+    width: 100%;
+  }
+
+  .brand-select {
+    align-self: stretch;
     width: 100%;
   }
 

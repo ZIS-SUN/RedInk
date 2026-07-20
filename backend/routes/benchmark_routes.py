@@ -11,6 +11,7 @@ import logging
 from flask import Blueprint, request, jsonify
 from backend.services.benchmark import get_benchmark_service
 from backend.services.link_extract import MAX_ARTICLE_CHARS, get_link_extract_service
+from .rewrite_routes import resolve_brand
 from .utils import (
     api_error_response,
     log_request,
@@ -38,6 +39,7 @@ def create_benchmark_blueprint():
         - content: 对标/爆款内容（标题+正文）
         - url: 对标内容的网页链接（无 content 时，服务端先抓取正文再分析）
         - my_topic: 用户自己的主题（可选），提供时按拆解出的套路生成原创仿写草稿
+        - brand_id: 品牌档案 ID（可选），提供时仿写草稿按人设约束生成；档案不存在则忽略
 
         返回：
         - success: 是否成功
@@ -51,6 +53,7 @@ def create_benchmark_blueprint():
             content = data.get('content', '')
             url = data.get('url', '')
             my_topic = data.get('my_topic', '')
+            brand_id = str(data.get('brand_id') or '').strip()
 
             if not isinstance(content, str):
                 content = str(content) if content is not None else ''
@@ -65,7 +68,8 @@ def create_benchmark_blueprint():
             log_request('/benchmark', {
                 'content_length': len(content),
                 'url': url[:100] if url else '',
-                'my_topic': my_topic[:50] if my_topic else ''
+                'my_topic': my_topic[:50] if my_topic else '',
+                'brand_id': brand_id,
             })
 
             # 验证必填参数：content 与 url 至少提供一个
@@ -113,10 +117,13 @@ def create_benchmark_blueprint():
                     logger.info(f"对标正文过长（{len(content)} 字符），截断至 {MAX_ARTICLE_CHARS}")
                     content = content[:MAX_ARTICLE_CHARS]
 
+            # 解析品牌档案（可选，取不到时静默忽略）
+            brand = resolve_brand(brand_id)
+
             # 调用对标拆解服务
             logger.info(f"🔄 开始对标拆解，内容长度: {len(content)}")
             benchmark_service = get_benchmark_service()
-            result = benchmark_service.analyze_benchmark(content, my_topic or None)
+            result = benchmark_service.analyze_benchmark(content, my_topic or None, brand=brand)
 
             # 记录结果
             elapsed = time.time() - start_time

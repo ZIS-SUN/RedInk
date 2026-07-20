@@ -8,7 +8,7 @@
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.utils.llm_utils import (
     classify_llm_error,
@@ -18,6 +18,7 @@ from backend.utils.llm_utils import (
     parse_llm_json,
     resolve_generation_params,
 )
+from backend.services.rewrite import build_brand_constraint
 # 复用选题灵感服务的内容形式合法取值，保证选题 schema 与 topic 服务一致
 from backend.services.topic import VALID_FORMATS
 
@@ -149,13 +150,19 @@ class InsightService:
             'topics': topics
         }
 
-    def mine_insights(self, comments: List[str], niche: str = "") -> Dict[str, Any]:
+    def mine_insights(
+        self,
+        comments: List[str],
+        niche: str = "",
+        brand: Optional[Dict] = None
+    ) -> Dict[str, Any]:
         """
         从粉丝评论中挖掘痛点主题与选题
 
         参数：
             comments: 粉丝评论列表（已去空行），最多处理 MAX_COMMENTS 条
             niche: 创作者的领域/赛道（可选），提供时帮助 AI 聚焦
+            brand: 品牌档案字典（可选），提供时会把品牌人设约束注入 prompt
 
         返回：
             {
@@ -193,6 +200,15 @@ class InsightService:
                 niche=niche_text,
                 comments=comments_text
             )
+
+            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
+            brand_constraint = build_brand_constraint(brand)
+            if brand_constraint:
+                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
+                prompt += brand_constraint + (
+                    "\n\n请确保每个痛点下生成的选题切入角度贴合以上品牌人设的定位与目标人群，"
+                    "选题标题的措辞风格也要符合该人设的语气，并且不出现任何禁用词。"
+                )
 
             # 从配置中获取模型参数
             model, temperature, max_output_tokens = resolve_generation_params(

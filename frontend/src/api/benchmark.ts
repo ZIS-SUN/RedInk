@@ -37,6 +37,8 @@ export interface AnalyzeBenchmarkParams {
   url?: string
   /** 用户自己的主题（可选），提供时返回仿写草稿 */
   myTopic?: string
+  /** 品牌档案 ID（可选），提供时后端按品牌人设约束生成仿写草稿 */
+  brandId?: string
 }
 
 /**
@@ -50,6 +52,8 @@ export async function analyzeBenchmark(
   if (params.url) body.url = params.url
   // 不做仿写时不携带 my_topic 键
   if (params.myTopic) body.my_topic = params.myTopic
+  // 不使用品牌人设时不携带 brand_id 键，保持向后兼容
+  if (params.brandId) body.brand_id = params.brandId
 
   const response = await http.post<BenchmarkResponse>(
     '/benchmark',

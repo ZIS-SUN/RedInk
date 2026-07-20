@@ -18,12 +18,13 @@ class FakePolishService:
         self.calls = []
         self.result = result or {"success": True, "content": "润色后的文案"}
 
-    def polish_page(self, content, page_type, topic, instruction):
+    def polish_page(self, content, page_type, topic, instruction, brand=None):
         self.calls.append({
             "content": content,
             "page_type": page_type,
             "topic": topic,
             "instruction": instruction,
+            "brand": brand,
         })
         return self.result
 
