@@ -17,6 +17,7 @@ import logging
 from flask import Blueprint, request, jsonify, Response, send_from_directory
 from backend.errors import AppErrorException, ensure_app_error
 from backend.paths import get_data_root
+from backend.services.history import validate_safe_id
 from backend.services.image import get_image_service
 from .utils import (
     api_error_response,
@@ -74,7 +75,7 @@ def create_image_blueprint():
         - complete: 全部完成
         """
         try:
-            data = request.get_json()
+            data = _get_json_dict()
             pages = data.get('pages')
             task_id = data.get('task_id')
             record_id = data.get('record_id')
@@ -101,6 +102,12 @@ def create_image_blueprint():
                     validation_error("pages 不能为空", "请提供要生成的页面列表数据。"),
                     context={"endpoint": "/api/generate", "record_id": record_id},
                 )
+
+            # 在进入 SSE 流之前完成 ID 校验：一旦流开始，200/text/event-stream
+            # 响应头已发出，AppErrorException 只能以连接中断的形式逃逸
+            validate_safe_id(task_id, "task_id")
+            if record_id:
+                validate_safe_id(record_id, "record_id")
 
             logger.info(f"🖼️  开始图片生成任务: {task_id}, 共 {len(pages)} 页")
             image_service = get_image_service()
@@ -240,7 +247,7 @@ def create_image_blueprint():
         - image_url: 新图片 URL
         """
         try:
-            data = request.get_json()
+            data = _get_json_dict()
             task_id = data.get('task_id')
             page = data.get('page')
             use_reference = data.get('use_reference', True)
@@ -299,7 +306,7 @@ def create_image_blueprint():
         SSE 事件流
         """
         try:
-            data = request.get_json()
+            data = _get_json_dict()
             task_id = data.get('task_id')
             pages = data.get('pages')
             record_id = data.get('record_id')
@@ -317,6 +324,11 @@ def create_image_blueprint():
                     validation_error("task_id 和 pages 不能为空", "请提供任务 ID 和要重试的页面列表。"),
                     context={"endpoint": "/api/retry-failed", "task_id": task_id, "record_id": record_id},
                 )
+
+            # 进入 SSE 流之前完成 ID 校验（同 /generate）
+            validate_safe_id(task_id, "task_id")
+            if record_id:
+                validate_safe_id(record_id, "record_id")
 
             logger.info(f"🔄 批量重试失败图片: task={task_id}, 共 {len(pages)} 页")
             image_service = get_image_service()
@@ -370,7 +382,7 @@ def create_image_blueprint():
         - image_url: 新图片 URL
         """
         try:
-            data = request.get_json()
+            data = _get_json_dict()
             task_id = data.get('task_id')
             page = data.get('page')
             use_reference = data.get('use_reference', True)
@@ -481,6 +493,21 @@ def create_image_blueprint():
 
 
 # ==================== 辅助函数 ====================
+
+def _get_json_dict() -> dict:
+    """
+    读取请求体并确保是 JSON 对象。
+
+    请求体为 JSON null / 数组 / 标量时抛 400 校验错误，
+    避免后续 data.get 抛 AttributeError 被兜底成 500。
+    """
+    data = request.get_json()
+    if not isinstance(data, dict):
+        raise AppErrorException(validation_error(
+            "请求体必须是 JSON 对象", "请以 JSON 对象格式提交请求参数。"
+        ))
+    return data
+
 
 def _parse_base64_images(images_base64: list) -> list:
     """
