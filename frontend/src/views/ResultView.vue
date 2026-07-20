@@ -6,6 +6,24 @@
       <div>
         <h1 class="page-title">创作完成</h1>
         <p class="page-subtitle">恭喜！你的小红书图文已生成完毕，共 {{ store.images.length }} 张，当前作品已保存到历史记录</p>
+        <!-- 作品评分：点星保存，再点同一颗星清除 -->
+        <div v-if="store.recordId" class="rating-row" role="group" aria-label="为这次生成质量打分">
+          <span class="rating-label">这次生成质量</span>
+          <button
+            v-for="star in 5"
+            :key="star"
+            type="button"
+            class="star-btn"
+            :class="{ filled: rating !== null && star <= rating }"
+            :disabled="ratingSaving"
+            :aria-pressed="rating !== null && star <= rating"
+            :title="rating === star ? '再点一次清除评分' : `${star} 星`"
+            :aria-label="rating === star ? '清除评分' : `${star} 星`"
+            @click="handleRate(star)"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" :fill="rating !== null && star <= rating ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          </button>
+        </div>
       </div>
       <div style="display: flex; gap: 12px;">
         <button class="btn btn-secondary" @click="showResetConfirm = true">
@@ -156,6 +174,50 @@
   }
 }
 
+/* 作品评分：克制的星级行，复用语义 warning 色 */
+.rating-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+.rating-label {
+  font-size: 12px;
+  color: var(--text-sub);
+  margin-right: 6px;
+}
+
+.star-btn {
+  border: none;
+  background: none;
+  padding: 2px;
+  line-height: 0;
+  cursor: pointer;
+  color: var(--gray-4);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.star-btn:hover:not(:disabled) {
+  color: var(--color-warning);
+  transform: scale(1.12);
+}
+
+.star-btn.filled {
+  color: var(--color-warning);
+}
+
+.star-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .star-btn:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 .action-link {
   border: none;
   background: none;
@@ -199,10 +261,11 @@
 </style>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore, type GeneratedImage } from '../stores/generator'
-import { regenerateImage, updateHistory } from '../api'
+import { getHistory, regenerateImage, updateHistory, updateHistoryRating } from '../api'
+import { buildEditTrace, resolveNextRating } from '../utils/contentEdit'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
 import ReviewPanel from '../components/result/ReviewPanel.vue'
 import ChecklistPanel from '../components/result/ChecklistPanel.vue'
@@ -229,6 +292,33 @@ function onImgError(e: Event) {
   const img = e.target as HTMLImageElement
   if (img.src !== FALLBACK_IMG) {
     img.src = FALLBACK_IMG
+  }
+}
+
+// ==================== 作品评分 ====================
+// 当前评分（null 表示未评分）；挂载时从历史记录回显
+const rating = ref<number | null>(null)
+const ratingSaving = ref(false)
+
+onMounted(async () => {
+  if (!store.recordId) return
+  const res = await getHistory(store.recordId)
+  if (res.success && res.record) {
+    rating.value = res.record.rating ?? null
+  }
+})
+
+// 点星保存、再点同一颗星清除；乐观更新，失败回滚并提示
+const handleRate = async (star: number) => {
+  if (!store.recordId || ratingSaving.value) return
+  const prev = rating.value
+  rating.value = resolveNextRating(prev, star)
+  ratingSaving.value = true
+  const res = await updateHistoryRating(store.recordId, rating.value)
+  ratingSaving.value = false
+  if (!res.success) {
+    rating.value = prev
+    error.value = normalizeApiError(res.error || res.error_message || '保存评分失败', '保存评分失败')
   }
 }
 
@@ -344,11 +434,15 @@ const openEditModal = (image: GeneratedImage) => {
 
 // 保存文案到 store，并在有历史记录时同步大纲到服务器
 const savePageText = async (index: number, content: string) => {
+  // 更新 store 前捕获该页原文，用于编辑留痕（AI 原文 → 用户终稿）
+  const originalText = store.outline.pages.find(p => p.index === index)?.content ?? ''
   store.updatePage(index, content)
   if (store.recordId) {
+    const trace = buildEditTrace(index, originalText, content, 'manual')
     // 同步失败不阻断本地编辑（store 已持久化到 localStorage）
     await updateHistory(store.recordId, {
-      outline: { raw: store.outline.raw, pages: store.outline.pages }
+      outline: { raw: store.outline.raw, pages: store.outline.pages },
+      ...(trace ? { edit_trace: trace } : {})
     })
   }
 }

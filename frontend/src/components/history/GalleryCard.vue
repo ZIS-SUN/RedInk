@@ -37,6 +37,11 @@
         <span>{{ record.page_count }}P</span>
         <span class="dot">·</span>
         <span>{{ formattedDate }}</span>
+        <!-- 作品评分：有 rating 才显示星标 -->
+        <span v-if="record.rating" class="rating-badge" :title="`已评 ${record.rating} 星`">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+          {{ record.rating }}
+        </span>
 
         <!-- 常显操作区（触屏可达，不依赖 hover 遮罩） -->
         <div class="footer-actions">
@@ -78,6 +83,8 @@ interface GalleryRecord {
   updated_at: string
   thumbnail?: string | null
   task_id?: string | null
+  /** 作品评分（1-5）；旧记录/未评分时缺失或为 null */
+  rating?: number | null
 }
 
 // 定义 Props
@@ -307,6 +314,17 @@ const formattedDate = computed(() => {
 
 .dot {
   margin: 0 6px;
+}
+
+/* 作品评分星标：语义 warning 色，与状态徽章同为轻量提示 */
+.rating-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  color: var(--color-warning);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 常显操作区 */

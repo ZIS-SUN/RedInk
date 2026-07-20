@@ -140,6 +140,10 @@ def create_history_blueprint():
                     context={"endpoint": "/api/history/<id>", "record_id": record_id},
                 )
 
+            # 旧记录没有 rating / edit_history 字段：显式补默认值，前端无需判空
+            record.setdefault("rating", None)
+            record.setdefault("edit_history", [])
+
             return jsonify({
                 "success": True,
                 "record": record
@@ -192,6 +196,8 @@ def create_history_blueprint():
         - status: 状态（draft/generating/partial/completed/error）
         - thumbnail: 缩略图文件名
         - content: 发布内容 { titles: [], copywriting: "", tags: [] }（坏结构静默忽略）
+        - edit_trace: 编辑留痕 { page_index, original_text, edited_text,
+          source: 'manual'|'polish' }，追加到 edit_history（坏结构静默忽略）
 
         返回：
         - success: 是否成功
@@ -226,6 +232,7 @@ def create_history_blueprint():
             status = data.get('status')
             thumbnail = data.get('thumbnail')
             content = data.get('content')
+            edit_trace = data.get('edit_trace')
 
             history_service = get_history_service()
             success = history_service.update_record(
@@ -234,7 +241,8 @@ def create_history_blueprint():
                 images=images,
                 status=status,
                 thumbnail=thumbnail,
-                content=content
+                content=content,
+                edit_trace=edit_trace
             )
 
             if not success:
@@ -250,6 +258,49 @@ def create_history_blueprint():
 
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/history/<id>", "record_id": record_id})
+
+    @history_bp.route('/history/<record_id>/rating', methods=['PATCH'])
+    def rate_history(record_id):
+        """
+        设置或清除作品评分
+
+        路径参数：
+        - record_id: 记录 ID
+
+        请求体：
+        - rating: 1-5 的整数保存评分，null 清除评分（其他值返回 400）
+
+        返回：
+        - success: 是否成功
+        - rating: 保存后的评分（清除后为 null）
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            if 'rating' not in data:
+                return api_error_response(
+                    validation_error("缺少 rating 字段", "请传 1-5 的整数或 null。"),
+                    context={"endpoint": "/api/history/<id>/rating", "record_id": record_id},
+                )
+            rating = data.get('rating')
+
+            history_service = get_history_service()
+            # rating 非法时 set_rating 抛 AppErrorException，统一转 400
+            success = history_service.set_rating(record_id, rating)
+
+            if not success:
+                return api_error_response(
+                    f"历史记录不存在：{record_id}",
+                    status=404,
+                    context={"endpoint": "/api/history/<id>/rating", "record_id": record_id},
+                )
+
+            return jsonify({
+                "success": True,
+                "rating": rating
+            }), 200
+
+        except Exception as e:
+            return api_error_response(e, context={"endpoint": "/api/history/<id>/rating", "record_id": record_id})
 
     @history_bp.route('/history/<record_id>', methods=['DELETE'])
     def delete_history(record_id):

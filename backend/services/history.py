@@ -30,6 +30,38 @@ _LOCK_INIT_GUARD = threading.Lock()
 # record_id 为 uuid4（含连字符），task_id 为 "task_" 前缀 + 短 hex）
 _SAFE_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 
+# 编辑留痕：每条记录最多保留最近 N 条（防记录文件无限膨胀）
+MAX_EDIT_HISTORY = 50
+
+# 编辑留痕的合法来源：manual（用户手改）/ polish（AI 润色后应用）
+EDIT_TRACE_SOURCES = {"manual", "polish"}
+
+
+def validate_rating(value: Any) -> Optional[int]:
+    """
+    校验作品评分：仅接受 1-5 的整数或 None（清除评分）。
+
+    注意 bool 是 int 的子类，需要显式排除（True/False 不是合法评分）。
+
+    Returns:
+        Optional[int]: 校验通过的原值
+
+    Raises:
+        AppErrorException: 评分非法时抛出（路由层统一转为 400 响应）
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not (1 <= value <= 5):
+        raise AppErrorException(AppError(
+            code="INVALID_REQUEST",
+            title="请求参数不合法",
+            detail="rating 必须是 1-5 的整数或 null",
+            suggestion="传 1-5 的整数保存评分，传 null 清除评分。",
+            status=400,
+            retryable=False,
+        ))
+    return value
+
 
 def validate_safe_id(value: Any, field_name: str = "ID") -> str:
     """
@@ -218,6 +250,40 @@ class HistoryService:
             "tags": tags,
         }
 
+    @staticmethod
+    def sanitize_edit_trace(trace: Any) -> Optional[Dict]:
+        """
+        宽松校验单条编辑留痕结构。
+
+        合法结构：{ page_index: int>=0, original_text: str,
+        edited_text: str, source: 'manual'|'polish' }。
+        结构不合法或原文与新文相同（无 diff 价值）时返回 None，
+        调用方直接忽略，不报错。
+        """
+        if not isinstance(trace, dict):
+            return None
+
+        page_index = trace.get("page_index")
+        original_text = trace.get("original_text")
+        edited_text = trace.get("edited_text")
+        source = trace.get("source")
+
+        if isinstance(page_index, bool) or not isinstance(page_index, int) or page_index < 0:
+            return None
+        if not isinstance(original_text, str) or not isinstance(edited_text, str):
+            return None
+        if source not in EDIT_TRACE_SOURCES:
+            return None
+        if original_text == edited_text:
+            return None
+
+        return {
+            "page_index": page_index,
+            "original_text": original_text,
+            "edited_text": edited_text,
+            "source": source,
+        }
+
     def create_record(
         self,
         topic: str,
@@ -346,7 +412,8 @@ class HistoryService:
         images: Optional[Dict] = None,
         status: Optional[str] = None,
         thumbnail: Optional[str] = None,
-        content: Optional[Dict] = None
+        content: Optional[Dict] = None,
+        edit_trace: Optional[Dict] = None
     ) -> bool:
         """
         更新历史记录
@@ -362,6 +429,9 @@ class HistoryService:
             thumbnail: 缩略图文件名（可选）
             content: 发布内容（可选），{ titles: [str], copywriting: str, tags: [str] }，
                 结构不合法时静默忽略（不报错、不覆盖已有值）
+            edit_trace: 编辑留痕（可选），{ page_index, original_text,
+                edited_text, source: 'manual'|'polish' }，追加到 edit_history
+                数组（保留最近 MAX_EDIT_HISTORY 条）；结构不合法时静默忽略
 
         Returns:
             bool: 更新是否成功，记录不存在时返回 False
@@ -382,6 +452,7 @@ class HistoryService:
                 status=status,
                 thumbnail=thumbnail,
                 content=content,
+                edit_trace=edit_trace,
             )
             if record is None:
                 return False
@@ -399,7 +470,8 @@ class HistoryService:
         images: Optional[Dict] = None,
         status: Optional[str] = None,
         thumbnail: Optional[str] = None,
-        content: Optional[Dict] = None
+        content: Optional[Dict] = None,
+        edit_trace: Optional[Dict] = None
     ) -> Optional[Dict]:
         """
         更新记录文件（不写索引），返回更新后的完整记录。
@@ -441,6 +513,17 @@ class HistoryService:
             if safe_content is not None:
                 record["content"] = safe_content
 
+        # 追加编辑留痕：坏结构静默忽略；数组只保留最近 MAX_EDIT_HISTORY 条
+        if edit_trace is not None:
+            safe_trace = self.sanitize_edit_trace(edit_trace)
+            if safe_trace is not None:
+                safe_trace["edited_at"] = now
+                existing_traces = record.get("edit_history")
+                if not isinstance(existing_traces, list):
+                    existing_traces = []
+                existing_traces.append(safe_trace)
+                record["edit_history"] = existing_traces[-MAX_EDIT_HISTORY:]
+
         # 保存完整记录（原子写）
         record_path = self._get_record_path(record_id)
         self._atomic_write_json(record_path, record)
@@ -472,6 +555,11 @@ class HistoryService:
                 # 更新缩略图
                 idx_record["thumbnail"] = record.get("thumbnail")
 
+                # 同步评分（仅在记录出现过评分字段后写入索引，
+                # 旧索引条目缺该字段时读取方按无评分处理，保持向后兼容）
+                if "rating" in record:
+                    idx_record["rating"] = record.get("rating")
+
                 # 更新页数（如果大纲被修改）
                 if outline:
                     idx_record["page_count"] = len(outline.get("pages", []))
@@ -481,6 +569,40 @@ class HistoryService:
                     idx_record["task_id"] = record.get("images", {}).get("task_id")
 
                 break
+
+    def set_rating(self, record_id: str, rating: Optional[int]) -> bool:
+        """
+        设置或清除作品评分。
+
+        Args:
+            record_id: 记录 ID
+            rating: 1-5 的整数保存评分，None 清除评分
+
+        Returns:
+            bool: 是否成功，记录不存在时返回 False
+
+        Raises:
+            AppErrorException: rating 非法时抛出（路由层统一转为 400 响应）
+        """
+        validate_rating(rating)
+
+        with self._lock:
+            record = self.get_record(record_id)
+            if not record:
+                return False
+
+            # 清除评分时保留键（值为 None），索引同步据此把 rating 置空
+            record["rating"] = rating
+            record["updated_at"] = datetime.now().isoformat()
+
+            record_path = self._get_record_path(record_id)
+            self._atomic_write_json(record_path, record)
+
+            # 索引冗余 rating，便于列表页直接展示星标
+            index = self._load_index()
+            self._apply_index_entry_update(index, record_id, record)
+            self._save_index(index)
+            return True
 
     def merge_generated_image(
         self,

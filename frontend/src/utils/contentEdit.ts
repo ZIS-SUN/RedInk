@@ -30,3 +30,44 @@ export function removeAt<T>(list: T[], index: number): T[] {
   if (index < 0 || index >= list.length) return list
   return list.filter((_, i) => i !== index)
 }
+
+/** 编辑留痕来源：manual-用户手改，polish-AI 润色后应用 */
+export type EditTraceSource = 'manual' | 'polish'
+
+/**
+ * 单条编辑留痕（「AI 原文 → 用户终稿」的 diff 记录）
+ * 与后端 PUT /api/history/:id 的 edit_trace 参数同构，edited_at 由后端补
+ */
+export interface EditTrace {
+  page_index: number
+  original_text: string
+  edited_text: string
+  source: EditTraceSource
+}
+
+/**
+ * 构建编辑留痕：原文与新文相同（无 diff 价值）或索引非法时返回 null，
+ * 调用方据此跳过上报
+ */
+export function buildEditTrace(
+  pageIndex: number,
+  originalText: string,
+  editedText: string,
+  source: EditTraceSource = 'manual'
+): EditTrace | null {
+  if (!Number.isInteger(pageIndex) || pageIndex < 0) return null
+  if (originalText === editedText) return null
+  return {
+    page_index: pageIndex,
+    original_text: originalText,
+    edited_text: editedText,
+    source
+  }
+}
+
+/**
+ * 五星评分的点击语义：点已选中的星 = 清除评分，点其他星 = 改为该分值
+ */
+export function resolveNextRating(current: number | null, clicked: number): number | null {
+  return clicked === current ? null : clicked
+}

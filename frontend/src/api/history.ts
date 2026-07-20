@@ -9,6 +9,17 @@ import type {
   UpdateHistoryParams
 } from './types'
 import type { AppError } from '../utils/errors'
+import type { EditTrace } from '../utils/contentEdit'
+
+export type { EditTrace, EditTraceSource } from '../utils/contentEdit'
+
+/** 历史详情的反馈闭环扩展字段（旧后端/旧记录可能缺失） */
+export interface HistoryFeedbackFields {
+  /** 作品评分：1-5 或 null（未评分） */
+  rating?: number | null
+  /** 编辑留痕（后端最多保留最近 50 条） */
+  edit_history?: Array<EditTrace & { edited_at: string }>
+}
 
 /**
  * 历史记录 API
@@ -68,7 +79,7 @@ export async function getHistoryList(
 
 export async function getHistory(recordId: string): Promise<{
   success: boolean
-  record?: HistoryDetail
+  record?: HistoryDetail & HistoryFeedbackFields
   error?: AppError | string
   error_message?: string
 }> {
@@ -82,13 +93,34 @@ export async function getHistory(recordId: string): Promise<{
 
 export async function updateHistory(
   recordId: string,
-  data: UpdateHistoryParams
+  data: UpdateHistoryParams & { edit_trace?: EditTrace }
 ): Promise<{ success: boolean; error?: AppError | string; error_message?: string }> {
   try {
     const response = await http.put(`/history/${recordId}`, data)
     return response.data
   } catch (error: unknown) {
     return { success: false, ...getApiErrorPayload(error, '更新历史记录失败') }
+  }
+}
+
+/**
+ * 设置或清除作品评分
+ * @param rating 1-5 保存评分，null 清除评分
+ */
+export async function updateHistoryRating(
+  recordId: string,
+  rating: number | null
+): Promise<{
+  success: boolean
+  rating?: number | null
+  error?: AppError | string
+  error_message?: string
+}> {
+  try {
+    const response = await http.patch(`/history/${recordId}/rating`, { rating })
+    return response.data
+  } catch (error: unknown) {
+    return { success: false, ...getApiErrorPayload(error, '保存评分失败') }
   }
 }
 

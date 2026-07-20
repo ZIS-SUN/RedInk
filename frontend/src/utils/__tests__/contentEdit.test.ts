@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { addTag, normalizeTag, removeAt } from '../contentEdit'
+import {
+  addTag,
+  buildEditTrace,
+  normalizeTag,
+  removeAt,
+  resolveNextRating
+} from '../contentEdit'
 
 describe('normalizeTag', () => {
   it('去掉首尾空白', () => {
@@ -69,5 +75,41 @@ describe('removeAt', () => {
     const list = ['a', 'b']
     removeAt(list, 0)
     expect(list).toEqual(['a', 'b'])
+  })
+})
+
+describe('buildEditTrace', () => {
+  it('构建 manual 编辑留痕', () => {
+    expect(buildEditTrace(2, 'AI 原文', '用户终稿')).toEqual({
+      page_index: 2,
+      original_text: 'AI 原文',
+      edited_text: '用户终稿',
+      source: 'manual'
+    })
+  })
+
+  it('支持 polish 来源', () => {
+    expect(buildEditTrace(0, '原文', '润色后', 'polish')?.source).toBe('polish')
+  })
+
+  it('原文与新文相同时返回 null（无 diff 价值）', () => {
+    expect(buildEditTrace(0, '一样', '一样')).toBeNull()
+  })
+
+  it('索引非法时返回 null', () => {
+    expect(buildEditTrace(-1, 'a', 'b')).toBeNull()
+    expect(buildEditTrace(1.5, 'a', 'b')).toBeNull()
+    expect(buildEditTrace(NaN, 'a', 'b')).toBeNull()
+  })
+})
+
+describe('resolveNextRating', () => {
+  it('点未选中的星改为该分值', () => {
+    expect(resolveNextRating(null, 4)).toBe(4)
+    expect(resolveNextRating(2, 5)).toBe(5)
+  })
+
+  it('点已选中的星清除评分', () => {
+    expect(resolveNextRating(3, 3)).toBeNull()
   })
 })
