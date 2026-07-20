@@ -53,6 +53,17 @@
       </div>
 
       <div class="toolbar-right">
+        <button
+          type="button"
+          class="btn btn-mini hotspot-toggle"
+          :class="{ active: hotspotLayerEnabled }"
+          :aria-pressed="hotspotLayerEnabled"
+          title="在日历上叠加节日/电商/季节营销节点"
+          @click="toggleHotspotLayer"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>
+          节点图层
+        </button>
         <button type="button" class="btn btn-mini btn-ai" @click="openAiModal">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
           AI 排期
@@ -106,6 +117,18 @@
             @click="cell.inMonth && openCreateModal(cell.date)"
           >
             <span class="day-num">{{ cell.day }}</span>
+            <div
+              v-if="hotspotLayerEnabled && (hotspotsByDate[cell.date] || []).length > 0"
+              class="day-hotspots"
+            >
+              <span
+                v-for="node in hotspotsByDate[cell.date]"
+                :key="node.id"
+                class="hotspot-mark"
+                :class="`hotspot-${node.type}`"
+                :title="`${node.name} · ${hotspotTypeLabel(node.type)}节点\n${node.platform_hint}`"
+              >{{ node.name }}</span>
+            </div>
             <div class="day-plans">
               <button
                 v-for="plan in plansByDate[cell.date] || []"
@@ -191,7 +214,75 @@
           </div>
         </div>
       </template>
+
+      <!-- 即将到来的营销节点（未来 30 天，按临近排序） -->
+      <div v-if="hotspotLayerEnabled && upcomingNodes.length > 0" class="card hotspot-upcoming">
+        <div class="hotspot-upcoming-head">
+          <h3 class="hotspot-upcoming-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path></svg>
+            即将到来的节点（未来 30 天）
+          </h3>
+          <span class="hotspot-upcoming-sub">提前备稿，抢占节点流量</span>
+        </div>
+        <div class="hotspot-node-list">
+          <div v-for="node in upcomingNodes" :key="node.id" class="hotspot-node-row">
+            <div class="hotspot-node-date">
+              <span class="hotspot-node-countdown">{{ countdownText(node, todayDate) }}</span>
+              <span class="hotspot-node-day">{{ node.date.slice(5) }}</span>
+            </div>
+            <div class="hotspot-node-main">
+              <div class="hotspot-node-title">
+                <span class="hotspot-mark" :class="`hotspot-${node.type}`">{{ hotspotTypeLabel(node.type) }}</span>
+                <span class="hotspot-node-name">{{ node.name }}</span>
+                <span class="hotspot-node-prep">{{ prepWindowText(node, todayDate) }}</span>
+              </div>
+              <div class="hotspot-node-hint">{{ node.platform_hint }}</div>
+              <div class="hotspot-node-niche">适配赛道：{{ node.niche_hint }}</div>
+            </div>
+            <div class="hotspot-node-actions">
+              <button
+                type="button"
+                class="btn btn-mini btn-create"
+                :disabled="hotspotTopicGeneratingId !== null"
+                :aria-label="`为「${node.name}」生成节点选题`"
+                @click="handleHotspotTopics(node)"
+              >
+                {{ hotspotTopicGeneratingId === node.id ? '生成中...' : '生成节点选题' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </template>
+
+    <!-- 节点选题结果弹窗 -->
+    <Teleport to="body">
+      <div v-if="hotspotTopicNode" class="plan-modal-overlay" @click.self="closeHotspotTopicModal">
+        <div class="plan-modal" role="dialog" aria-modal="true" :aria-label="`「${hotspotTopicNode.name}」节点选题`">
+          <div class="plan-modal-head">
+            <h3>「{{ hotspotTopicNode.name }}」节点选题</h3>
+            <button type="button" class="close-btn" aria-label="关闭" @click="closeHotspotTopicModal">×</button>
+          </div>
+          <div class="plan-modal-body">
+            <p class="log-hint">已结合节点的平台侧重提示生成，点选题即可进入创作。</p>
+            <div class="hotspot-topic-list">
+              <div v-for="idea in hotspotTopicIdeas" :key="idea.title" class="hotspot-topic-item">
+                <div class="hotspot-topic-main">
+                  <div class="hotspot-topic-title">{{ idea.title }}</div>
+                  <div v-if="idea.angle" class="hotspot-topic-angle">{{ idea.angle }}</div>
+                </div>
+                <button type="button" class="btn btn-mini btn-create" @click="useHotspotTopic(idea)">
+                  用这个创作
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="plan-modal-foot">
+            <button type="button" class="btn" @click="closeHotspotTopicModal">关闭</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 新建/编辑弹窗 -->
     <Teleport to="body">
@@ -472,7 +563,21 @@ import {
   type WeekPlanPreviewItem
 } from '../api/calendar'
 import { getAnalyticsStats, type AnalyticsTimeSlot } from '../api/analytics'
+import { getHotspots, type HotspotNode } from '../api/hotspot'
+import { generateTopics, type TopicIdea } from '../api/topic'
 import { pickBestTimeSlot, slotToSuggestedTime } from '../utils/calendarSuggest'
+import {
+  addDays,
+  buildHotspotTopicNiche,
+  calendarGridRange,
+  countdownText,
+  groupHotspotsByDate,
+  hotspotTypeLabel,
+  loadHotspotLayerEnabled,
+  prepWindowText,
+  saveHotspotLayerEnabled,
+  upcomingHotspots
+} from '../utils/hotspotLayer'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
@@ -489,6 +594,8 @@ import { normalizeApiError, type AppError } from '../utils/errors'
  * - 标记「已发布」后一键转录到数据复盘（标题/平台/日期预填，补充指标即可）
  * - 按平台 / 状态筛选
  * - 本月统计（计划总数 + 各状态数量）
+ * - 热点节点图层（可开关，偏好存 localStorage）：月历叠加节日/电商/季节节点，
+ *   「即将到来的节点」区块展示未来 30 天倒计时与备稿窗口，可一键生成节点选题
  */
 
 const PLATFORM_OPTIONS: Array<{ value: PlanPlatform; label: string; color: string }> = [
@@ -919,6 +1026,96 @@ async function handleLogSubmit() {
   }
 }
 
+// ==================== 热点节点图层 ====================
+
+/** 图层开关（偏好持久化到 localStorage，默认开启） */
+const hotspotLayerEnabled = ref(loadHotspotLayerEnabled())
+
+/** 已拉取的节点（覆盖当前月历网格 + 未来 30 天） */
+const hotspotNodes = ref<HotspotNode[]>([])
+
+/** 按日期分组，供月历叠加图层渲染 */
+const hotspotsByDate = computed(() => groupHotspotsByDate(hotspotNodes.value))
+
+/** 未来 30 天的节点，按临近排序（侧栏区块） */
+const upcomingNodes = computed(() => upcomingHotspots(hotspotNodes.value, todayDate, 30))
+
+function toggleHotspotLayer() {
+  hotspotLayerEnabled.value = !hotspotLayerEnabled.value
+  saveHotspotLayerEnabled(hotspotLayerEnabled.value)
+}
+
+/**
+ * 拉取节点数据：区间覆盖当前月历网格与未来 30 天。
+ * 静态数据接口不依赖 AI 模型；拉取失败静默（不影响日历主功能）。
+ */
+async function loadHotspots() {
+  const grid = calendarGridRange(currentMonth.value)
+  const start = grid.start < todayDate ? grid.start : todayDate
+  const upcomingEnd = addDays(todayDate, 30)
+  const end = grid.end > upcomingEnd ? grid.end : upcomingEnd
+
+  const res = await getHotspots({ start, end })
+  if (res.success) {
+    hotspotNodes.value = res.hotspots
+  }
+}
+
+// ==================== 节点选题（调现有选题 API） ====================
+
+/** 正在生成选题的节点 ID（同一时间只允许一个请求） */
+const hotspotTopicGeneratingId = ref<string | null>(null)
+
+/** 选题结果弹窗对应的节点（null 表示关闭） */
+const hotspotTopicNode = ref<HotspotNode | null>(null)
+const hotspotTopicIdeas = ref<TopicIdea[]>([])
+
+/**
+ * 为节点生成选题：把节点名称 + 平台侧重提示拼进选题请求。
+ * 未配置模型等失败场景走页面现有的 ErrorCard 展示，不影响节点数据展示。
+ */
+async function handleHotspotTopics(node: HotspotNode) {
+  if (hotspotTopicGeneratingId.value) return
+  hotspotTopicGeneratingId.value = node.id
+  error.value = null
+
+  try {
+    const res = await generateTopics({
+      niche: buildHotspotTopicNiche(node),
+      platform: '小红书'
+    })
+
+    if (res.success && res.topics?.length) {
+      hotspotTopicIdeas.value = res.topics
+      hotspotTopicNode.value = node
+    } else {
+      error.value = normalizeApiError(
+        res.error || res.error_message || '生成节点选题失败',
+        '生成节点选题失败'
+      )
+    }
+  } catch (err: unknown) {
+    error.value = normalizeApiError(err, '生成节点选题失败')
+  } finally {
+    hotspotTopicGeneratingId.value = null
+  }
+}
+
+function closeHotspotTopicModal() {
+  hotspotTopicNode.value = null
+  hotspotTopicIdeas.value = []
+}
+
+/** 选中一条节点选题进入创作流程（与选题工具的「用这个选题创作」一致） */
+function useHotspotTopic(idea: TopicIdea) {
+  const lines = [idea.title]
+  if (idea.angle.trim()) {
+    lines.push(`切入角度：${idea.angle.trim()}`)
+  }
+  generatorStore.setTopic(lines.join('\n'))
+  router.push({ name: 'home' })
+}
+
 // ==================== AI 一周排期 ====================
 
 /** 预览条目（在预览列表中可勾选，默认全选） */
@@ -1047,8 +1244,18 @@ watch([currentMonth, filterPlatform, filterStatus], () => {
   loadData()
 })
 
+// 月份切换时同步刷新节点图层数据；开关打开且尚无数据时补拉
+watch(currentMonth, () => {
+  if (hotspotLayerEnabled.value) loadHotspots()
+})
+
+watch(hotspotLayerEnabled, enabled => {
+  if (enabled && hotspotNodes.value.length === 0) loadHotspots()
+})
+
 onMounted(() => {
   loadData()
+  if (hotspotLayerEnabled.value) loadHotspots()
 })
 </script>
 
@@ -1887,6 +2094,194 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 
+/* ==================== 热点节点图层 ==================== */
+
+/* 工具栏「节点图层」开关按钮 */
+.hotspot-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hotspot-toggle.active {
+  color: var(--color-danger);
+  border-color: var(--color-danger) !important;
+  background: var(--color-danger-soft);
+}
+
+/* 月历格子上的节点标记（虚线边框色条，与实心的计划 chip 视觉区分） */
+.day-hotspots {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hotspot-mark {
+  display: inline-block;
+  max-width: 100%;
+  padding: 1px 6px;
+  border: 1px dashed currentColor;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotspot-festival { color: var(--color-danger); background: var(--color-danger-soft); }
+.hotspot-ecommerce { color: var(--color-warning); background: var(--color-warning-soft); }
+.hotspot-season { color: var(--color-success); background: var(--color-success-soft); }
+
+/* 即将到来的节点区块 */
+.hotspot-upcoming {
+  padding: 16px;
+  margin-bottom: 40px;
+}
+
+.hotspot-upcoming-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.hotspot-upcoming-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.hotspot-upcoming-title svg {
+  color: var(--color-danger);
+}
+
+.hotspot-upcoming-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.hotspot-node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hotspot-node-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-0);
+}
+
+.hotspot-node-date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  min-width: 72px;
+}
+
+.hotspot-node-countdown {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-danger);
+  white-space: nowrap;
+}
+
+.hotspot-node-day {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.hotspot-node-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hotspot-node-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hotspot-node-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.hotspot-node-prep {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.hotspot-node-hint,
+.hotspot-node-niche {
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hotspot-node-actions {
+  flex-shrink: 0;
+}
+
+/* 节点选题结果弹窗 */
+.hotspot-topic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hotspot-topic-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-0);
+}
+
+.hotspot-topic-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hotspot-topic-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.hotspot-topic-angle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* 移动端适配 */
 @media (max-width: 640px) {
   .stats-row {
@@ -1926,6 +2321,31 @@ onMounted(() => {
 
   .plan-chip .chip-title {
     display: none;
+  }
+
+  /* 移动端月历格子里节点名太长，缩成小圆点色标 */
+  .day-cell .hotspot-mark {
+    padding: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    align-self: center;
+    font-size: 0;
+  }
+
+  .hotspot-node-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .hotspot-node-main {
+    flex-basis: calc(100% - 90px);
+  }
+
+  .hotspot-node-actions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
   }
 
   .plan-chip {
