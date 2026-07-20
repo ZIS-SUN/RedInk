@@ -207,7 +207,10 @@
 **最简单的部署方式，一行命令即可启动：**
 
 ```bash
-docker run -d -p 12398:12398 -v ./history:/app/history -v ./output:/app/output histonemax/redink:latest
+# Linux 原生 Docker 请先执行这行（macOS / Windows Docker Desktop 可跳过）：
+mkdir -p data && sudo chown -R 10001 data
+
+docker run -d -p 127.0.0.1:12398:12398 -v ./data:/app/data -e REDINK_ALLOW_INSECURE=1 histonemax/redink:latest
 ```
 
 访问 http://localhost:12398，在 Web 界面的**设置页面**配置你的 API Key 即可使用。
@@ -222,9 +225,31 @@ docker-compose up -d
 
 **Docker 部署说明：**
 - 容器内不包含任何 API Key，需要在 Web 界面配置
-- 使用 `-v ./history:/app/history` 持久化历史记录
-- 使用 `-v ./output:/app/output` 持久化生成的图片
-- 可选：挂载自定义配置文件 `-v ./text_providers.yaml:/app/text_providers.yaml`
+- 单一数据卷 `-v ./data:/app/data` 持久化**全部**用户数据：历史记录、生成图片、品牌库、内容日历、数据分析、灵感库、剪藏、自定义 Prompt、发布账号与服务商配置（`text_providers.yaml` / `image_providers.yaml`）都在 `./data/` 里，容器重建不丢数据
+- 端口映射 `-p 127.0.0.1:12398:12398` 只绑定宿主机回环地址，仅本机可访问；`-e REDINK_ALLOW_INSECURE=1` 用于豁免「非环回监听且无令牌则拒绝启动」的安全检查，**只有在端口不对外暴露时才是安全的**
+- **Linux 原生 Docker 卷权限**：容器以非特权用户（uid 10001）运行。若 `./data` 由 Docker daemon 以 root 自动创建，容器能正常启动但所有数据写入会**静默失败**。启动前（含 docker-compose 方式）请先执行 `mkdir -p data && sudo chown -R 10001 data`；macOS / Windows Docker Desktop 无此问题
+
+**⚠️ 公网 / 局域网部署安全须知：**
+
+把端口映射改为 `-p 12398:12398`（对外暴露）前，必须删掉 `REDINK_ALLOW_INSECURE=1` 并设置访问令牌：
+
+```bash
+docker run -d -p 12398:12398 -v ./data:/app/data -e REDINK_ACCESS_TOKEN=<随机强密钥> histonemax/redink:latest
+```
+
+否则任何能访问该端口的人都可以调用全部 API，并导出你的明文 API Key。新版应用对这种配置会**直接拒绝启动**（fail-closed），并在日志中给出解决办法。
+
+**从旧版本迁移（此前只挂载 `./history` 与 `./output`）：**
+
+旧版只持久化这两个目录，品牌库、内容日历等其他数据容器重建即丢。升级方法：停掉旧容器，把旧目录移入 `./data/` 后再启动新容器：
+
+```bash
+mkdir -p data && mv history output data/
+# 如手工挂载过配置文件，也一并移入：
+mv text_providers.yaml image_providers.yaml data/
+# Linux 原生 Docker：迁移后把整个目录交给容器用户（uid 10001），否则容器无法写入：
+sudo chown -R 10001 data
+```
 
 ---
 
@@ -370,7 +395,9 @@ providers:
 
 ### 公网部署与访问安全
 
-如果把红墨部署到公网，建议开启访问令牌保护：后端设置环境变量 `REDINK_ACCESS_TOKEN`，前端在「系统设置 → 访问安全」填写同一令牌即可正常使用。本地自用无需设置。
+如果把红墨部署到公网，**必须**开启访问令牌保护：后端设置环境变量 `REDINK_ACCESS_TOKEN`，前端在「系统设置 → 访问安全」填写同一令牌即可正常使用。本地自用（仅监听 127.0.0.1）无需设置。
+
+安全兜底（fail-closed）：当监听地址不是环回地址（127.0.0.1 / ::1 / localhost）且未设置 `REDINK_ACCESS_TOKEN` 时，应用会**拒绝启动**并说明三种解决办法（设令牌 / 改回本机监听 / 显式设置 `REDINK_ALLOW_INSECURE=1` 声明接受风险）。`REDINK_ALLOW_INSECURE=1` 仅适用于端口未对外暴露（如 Docker 只映射到宿主机回环）或可信内网环境。
 
 另外，图片生成链路做了一轮稳定性加固：SSE 心跳与超时对齐、失败分类更准确、重复请求自动去重。
 

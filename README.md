@@ -193,7 +193,10 @@ Generation is not the end — every stage can be polished further:
 **The simplest way — one command to start:**
 
 ```bash
-docker run -d -p 12398:12398 -v ./history:/app/history -v ./output:/app/output histonemax/redink:latest
+# On native Linux Docker, run this first (macOS / Windows Docker Desktop can skip it):
+mkdir -p data && sudo chown -R 10001 data
+
+docker run -d -p 127.0.0.1:12398:12398 -v ./data:/app/data -e REDINK_ALLOW_INSECURE=1 histonemax/redink:latest
 ```
 
 Visit http://localhost:12398 and configure your API Key in the **Settings** page.
@@ -208,9 +211,32 @@ docker-compose up -d
 
 **Docker Notes:**
 - The container does not include any API Keys — configure them in the web UI
-- Use `-v ./history:/app/history` to persist history
-- Use `-v ./output:/app/output` to persist generated images
-- Optional: mount custom config `-v ./text_providers.yaml:/app/text_providers.yaml`
+- The single data volume `-v ./data:/app/data` persists **all** user data: history, generated images, brand kits, content calendar, analytics, idea library, clips, custom prompts, publish accounts, and provider configs (`text_providers.yaml` / `image_providers.yaml`) — nothing is lost when the container is recreated
+- The port mapping `-p 127.0.0.1:12398:12398` binds to the host loopback only, so the service is reachable only from the host itself; `-e REDINK_ALLOW_INSECURE=1` waives the "refuse to start when listening on a non-loopback address without a token" safety check, which **is only safe as long as the port is not exposed**
+- **Volume permissions on native Linux Docker**: the container runs as an unprivileged user (uid 10001). If `./data` is auto-created by the Docker daemon as root, the container starts fine but every write to disk **fails silently**. Run `mkdir -p data && sudo chown -R 10001 data` before the first start (also applies to docker-compose); macOS / Windows Docker Desktop is not affected
+
+**⚠️ Security notice for public / LAN deployments:**
+
+Before changing the port mapping to `-p 12398:12398` (publicly reachable), remove `REDINK_ALLOW_INSECURE=1` and set an access token instead:
+
+```bash
+docker run -d -p 12398:12398 -v ./data:/app/data -e REDINK_ACCESS_TOKEN=<random-strong-secret> histonemax/redink:latest
+```
+
+Otherwise anyone who can reach the port can call every API and export your plaintext API keys. The app now **refuses to start** (fail-closed) with such a configuration and prints the remediation options in the log.
+
+**Migrating from older versions (which only mounted `./history` and `./output`):**
+
+Old setups persisted only those two directories — everything else (brand kits, calendar, etc.) was lost on container recreation. To upgrade, stop the old container and move the old directories into `./data/` before starting the new one:
+
+```bash
+mkdir -p data && mv history output data/
+# If you mounted config files manually, move them too:
+mv text_providers.yaml image_providers.yaml data/
+# Native Linux Docker: hand the whole directory to the container user (uid 10001),
+# otherwise the container cannot write to it:
+sudo chown -R 10001 data
+```
 
 ---
 
@@ -356,7 +382,9 @@ providers:
 
 ### Access Security (Public Deployment)
 
-Exposing RedInk on a public server? Set the `REDINK_ACCESS_TOKEN` environment variable on the backend (e.g. `-e REDINK_ACCESS_TOKEN=your-token` for Docker), then enter the same token under **Settings → Access Security** in the web UI. Purely local use needs no token.
+Exposing RedInk on a public server? You **must** set the `REDINK_ACCESS_TOKEN` environment variable on the backend (e.g. `-e REDINK_ACCESS_TOKEN=your-token` for Docker), then enter the same token under **Settings → Access Security** in the web UI. Purely local use (listening on 127.0.0.1) needs no token.
+
+Fail-closed safeguard: when listening on a non-loopback address (anything other than 127.0.0.1 / ::1 / localhost) without `REDINK_ACCESS_TOKEN`, the app **refuses to start** and prints three remediation options (set a token / listen on loopback / explicitly set `REDINK_ALLOW_INSECURE=1` to accept the risk). `REDINK_ALLOW_INSECURE=1` is only appropriate when the port is not actually exposed (e.g. Docker mapping bound to the host loopback) or inside a trusted private network.
 
 Long generation runs are also hardened for remote setups: SSE heartbeats, aligned timeouts, clearer error classification, and duplicate-request deduplication keep the stream stable end to end.
 

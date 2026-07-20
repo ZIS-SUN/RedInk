@@ -3,21 +3,40 @@ services:
     image: histonemax/redink:latest
     container_name: redink
     ports:
-      - "12398:12398"
+      # 默认只绑定宿主机回环地址：仅本机可访问，局域网/公网不可达。
+      # 需要对外提供服务时，改成 "12398:12398" 并务必设置 REDINK_ACCESS_TOKEN。
+      - "127.0.0.1:12398:12398"
     environment:
       # 生产安全默认：关闭 debug；容器内监听 0.0.0.0（对外暴露由上面的端口映射控制）
       - FLASK_DEBUG=False
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=12398
-      # 可选：部署级访问令牌鉴权。设置后所有 API 请求（健康检查除外）
-      # 必须携带 "Authorization: Bearer <token>" 或 "X-Access-Token: <token>" 请求头。
-      # 公网部署时强烈建议启用，请替换为随机强密钥：
+      # 统一数据根目录：全部用户数据（history、brand_kits、content_calendar、
+      # analytics_data、idea_library、clips、custom_prompts、publish_accounts.json、
+      # providers yaml 等）都落在 /app/data，配合下面的单卷挂载完整持久化
+      - REDINK_DATA_DIR=/app/data
+      # 容器内监听 0.0.0.0 属于"非环回无令牌"配置，应用默认会拒绝启动（fail-closed）。
+      # 这里显式豁免是安全的：上面的端口映射只绑定宿主机 127.0.0.1，
+      # 外部网络根本到不了这个端口，实际暴露面仍然只有本机。
+      # ⚠️ 公网/局域网部署（改用 "12398:12398"）时必须删掉下面这行，
+      #    并同时设置 REDINK_ACCESS_TOKEN，否则等于裸奔。
+      - REDINK_ALLOW_INSECURE=1
+      # 部署级访问令牌鉴权。设置后所有 API 请求（健康检查除外）
+      # 必须携带 "Authorization: Bearer <token>" 或 "X-Access-Token: <token>" 请求头
+      # （前端在「系统设置 → 访问安全」填写同一令牌即可）。
+      # 公网部署时必须启用，请替换为随机强密钥：
       # - REDINK_ACCESS_TOKEN=change-me-to-a-random-secret
     volumes:
-      # 持久化数据目录
-      - ./history:/app/history
-      - ./output:/app/output
-      # 可选：挂载自定义配置文件
-      # - ./text_providers.yaml:/app/text_providers.yaml
-      # - ./image_providers.yaml:/app/image_providers.yaml
+      # 单一数据卷：持久化全部用户数据与配置（对应 REDINK_DATA_DIR=/app/data）。
+      # 容器以非特权用户（uid 10001）运行，Linux 下如遇写入权限报错请执行：
+      #   sudo chown -R 10001 data
+      - ./data:/app/data
+      # ---- 旧版挂载（v0.x 只挂这两个目录，其余数据容器重建即丢）----
+      # 从旧版本升级：先停容器，再把旧目录移入 ./data/ 即可：
+      #   mkdir -p data && mv history output data/
+      # 如有手工挂载过的 text_providers.yaml / image_providers.yaml，也一并移入：
+      #   mv text_providers.yaml image_providers.yaml data/
+      # 迁移完成后无需再保留下面两行：
+      # - ./history:/app/history
+      # - ./output:/app/output
     restart: unless-stopped

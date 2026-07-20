@@ -51,8 +51,10 @@ COPY docker/image_providers.yaml ./
 # 从构建阶段复制前端产物
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# 创建数据目录
-RUN mkdir -p output history
+# 创建数据目录：/app/data 为统一数据根（挂载单卷即可持久化全部用户数据），
+# 并放入空白配置模板；output/history 为旧版遗留路径，保留以兼容仍挂载旧目录的用户
+RUN mkdir -p data output history \
+    && cp text_providers.yaml image_providers.yaml data/
 
 # 创建非特权用户并降权运行（安全加固）
 RUN useradd -m -u 10001 appuser && chown -R appuser:appuser /app
@@ -60,10 +62,15 @@ USER appuser
 
 # 设置环境变量
 # FLASK_HOST=0.0.0.0 仅在容器内对外监听，实际暴露范围由 compose 端口映射控制，
-# 建议同时设置 REDINK_ACCESS_TOKEN 启用访问鉴权
+# 公网部署必须设置 REDINK_ACCESS_TOKEN 启用访问鉴权（否则应用会拒绝启动，
+# 除非显式设置 REDINK_ALLOW_INSECURE=1）
+# REDINK_DATA_DIR=/app/data：全部用户数据（history、brand_kits、content_calendar、
+# analytics_data、idea_library、clips、custom_prompts、publish_accounts.json、
+# providers yaml 等）统一落在该目录，挂载一个卷即可完整持久化
 ENV FLASK_DEBUG=False
 ENV FLASK_HOST=0.0.0.0
 ENV FLASK_PORT=12398
+ENV REDINK_DATA_DIR=/app/data
 
 # 暴露端口
 EXPOSE 12398
