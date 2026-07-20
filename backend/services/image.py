@@ -166,18 +166,66 @@ class ImageService:
             generated_images.append("")
         generated_images[index] = filename
 
+    # 风格块的分节标题（注入与末尾重申引用同一名称，方便模型回指）
+    _STYLE_SECTION_TITLE = "【视觉风格规范 · 最高优先级】"
+
+    # 末尾重申：图像模型对 prompt 结尾更敏感，把关键要求在最末端重复一次
+    _STYLE_REINFORCEMENT = (
+        "\n\n再次强调：画面必须严格遵循上方【视觉风格规范 · 最高优先级】中的每一条要求，"
+        "全套图片风格保持统一；如与其他描述或模型默认审美冲突，一律以该规范为准。"
+    )
+
+    # 单张重试时追加的质量反馈提示（轻量变异，提高重试成功率）
+    _RETRY_QUALITY_HINT = (
+        "\n\n补充要求（本次为重新生成）：上一次生成的图片在文字准确性或排版上不达标。"
+        "本次请特别注意：画面中的所有文字必须与给定文案逐字一致（不错字、不漏字、不自造字），"
+        "排版必须工整、对齐、留白合理。"
+    )
+
     @staticmethod
     def _apply_style_prompt(prompt: str, style_prompt: str) -> str:
         """
-        在已构建好的 prompt 末尾追加风格描述段落。
+        在已构建好的 prompt 末尾以强调框架注入风格描述块。
 
         用字符串拼接而非模板占位符，避免给模板新增占位符导致
         其他 .format 调用点 KeyError。style_prompt 为空时原样返回。
+
+        注入结构：分隔线 + 分节标题 + 优先级声明 + 风格正文，
+        配合 _compose_prompt 在 prompt 最末端追加的重申句形成
+        「结构化注入 + 结尾重复」的双重强调。
         """
         style = (style_prompt or "").strip()
         if not style:
             return prompt
-        return f"{prompt}\n\n整体视觉风格要求（所有页面必须统一遵守，优先级最高）：\n{style}"
+        return (
+            f"{prompt}\n\n"
+            "========================================\n"
+            f"{ImageService._STYLE_SECTION_TITLE}\n"
+            "以下视觉风格要求优先级最高，覆盖上文所有描述与模型默认审美，"
+            "全套图片（封面与内容页）必须统一遵守：\n"
+            f"{style}\n"
+            "========================================"
+        )
+
+    def _compose_prompt(
+        self, prompt: str, style_prompt: str = "", retry_hint: bool = False
+    ) -> str:
+        """
+        统一的 prompt 组装出口，按固定顺序拼装各追加段落：
+
+        1. 模板渲染结果（page_content/page_type/full_outline/user_topic）
+        2. 风格块（强调框架注入，见 _apply_style_prompt；为空时跳过）
+        3. 品牌视觉约束（见 _apply_brand_visual_prompt；无品牌时跳过）
+        4. 风格重申句（仅在有风格块时追加，利用模型对结尾的敏感度）
+        5. 重试质量提示（仅单张重试路径追加）
+        """
+        prompt = self._apply_style_prompt(prompt, style_prompt)
+        prompt = self._apply_brand_visual_prompt(prompt)
+        if (style_prompt or "").strip():
+            prompt += self._STYLE_REINFORCEMENT
+        if retry_hint:
+            prompt += self._RETRY_QUALITY_HINT
+        return prompt
 
     @staticmethod
     def _apply_brand_visual_prompt(prompt: str) -> str:
@@ -287,7 +335,8 @@ class ImageService:
         user_topic: str = "",
         record_id: Optional[str] = None,
         total_count: Optional[int] = None,
-        style_prompt: str = ""
+        style_prompt: str = "",
+        retry_hint: bool = False
     ) -> Tuple[int, bool, Optional[str], Optional[str]]:
         """
         生成单张图片（带自动重试）
@@ -301,6 +350,7 @@ class ImageService:
             user_images: 用户上传的参考图片列表
             user_topic: 用户原始输入
             style_prompt: 风格模板的风格描述（可选，为空时不追加）
+            retry_hint: 是否在 prompt 末尾追加重试质量提示（单张重试路径为 True）
 
         Returns:
             (index, success, filename, error_message)
@@ -336,11 +386,8 @@ class ImageService:
                     user_topic=user_topic if user_topic else "未提供"
                 )
 
-            # 追加风格模板的风格描述（为空时不改变 prompt）
-            prompt = self._apply_style_prompt(prompt, style_prompt)
-
-            # 追加当前启用品牌的视觉约束（无品牌/无视觉字段时不改变 prompt）
-            prompt = self._apply_brand_visual_prompt(prompt)
+            # 统一组装：风格块（强调框架）→ 品牌视觉约束 → 风格重申 → 重试提示
+            prompt = self._compose_prompt(prompt, style_prompt, retry_hint=retry_hint)
 
             # 调用生成器生成图片。所有路径共用 limiter，避免批量和重试打爆上游。
             with self.rate_limiter.acquire():
@@ -948,6 +995,8 @@ class ImageService:
                 # 压缩封面图到 200KB
                 reference_image = compress_image(cover_data, max_size_kb=200)
 
+        # 单张重试/重新生成：追加质量反馈提示做轻量 prompt 变异，
+        # 避免用完全相同的 prompt 重蹈上一次的文字/排版问题
         index, success, filename, error = self._generate_single_image(
             page,
             task_id,
@@ -958,7 +1007,8 @@ class ImageService:
             user_topic,
             record_id,
             total_count,
-            style_prompt=style_prompt
+            style_prompt=style_prompt,
+            retry_hint=True
         )
 
         if success:
