@@ -75,6 +75,114 @@ def test_classifies_common_http_statuses():
     assert upstream.status == 502
 
 
+# ==================== CONTENT_BLOCKED（内容安全拦截，不可重试） ====================
+
+def test_classifies_google_safety_filter_message_as_content_blocked():
+    """generators/google_genai.py parse_genai_error 的中文安全过滤文案应命中新分类"""
+    error = classify_error(
+        "🛡️ 内容被安全过滤器拦截\n\n"
+        "【说明】\n您的提示词或生成内容触发了 Google 的安全过滤机制。"
+    )
+
+    assert error.code == "CONTENT_BLOCKED"
+    assert error.retryable is False
+    assert error.status == 400
+    assert error.title == "内容被安全审核拦截"
+    assert "文案" in error.suggestion
+
+
+def test_classifies_openai_content_policy_as_content_blocked():
+    error = classify_error(
+        'HTTP 400: {"error":{"message":"Your request was rejected as a result '
+        'of our safety system.","code":"content_policy_violation"}}'
+    )
+
+    assert error.code == "CONTENT_BLOCKED"
+    assert error.retryable is False
+    # detail 保留上游真实原因，前端补显时用户能看到
+    assert "safety system" in error.detail
+
+
+def test_content_blocked_with_400_status_not_stolen_by_invalid_request():
+    """带 400 状态码的安全拦截不应被更宽泛的 INVALID_REQUEST 分支抢先"""
+    error = classify_error(
+        "HTTP 400 Bad Request: image generation blocked by safety filter"
+    )
+
+    assert error.code == "CONTENT_BLOCKED"
+    assert error.retryable is False
+
+
+def test_classifies_chinese_moderation_keywords_as_content_blocked():
+    error = classify_error("生成失败：内容审核未通过，包含敏感内容")
+
+    assert error.code == "CONTENT_BLOCKED"
+    assert error.retryable is False
+
+
+def test_blocked_api_key_still_classified_as_auth():
+    """"blocked" 出现在认证语境时仍归类为认证错误，不误判成内容拦截"""
+    error = classify_error("HTTP 403: your api key has been blocked")
+
+    assert error.code == "AUTH_OR_PERMISSION"
+    assert error.retryable is False
+
+
+def test_connection_blocked_still_classified_as_network():
+    """"blocked" 出现在网络语境时仍归类为网络错误"""
+    error = classify_error("ConnectionError: connection blocked by firewall")
+
+    assert error.code == "NETWORK_ERROR"
+    assert error.retryable is True
+
+
+def test_content_blocked_sse_error_event_is_structured():
+    """SSE error 事件归一化后携带 CONTENT_BLOCKED 分类与不可重试标记"""
+    data = _normalize_sse_error(
+        "error",
+        {"index": 1, "status": "error", "message": "🛡️ 内容被安全过滤器拦截"},
+        {"endpoint": "/api/generate", "task_id": "task_1"},
+    )
+
+    assert data["error"]["code"] == "CONTENT_BLOCKED"
+    assert data["error"]["retryable"] is False
+    assert data["message"].startswith("内容被安全审核拦截")
+
+
+# ==================== QUEUE_TIMEOUT（本机排队超时，区别于网络超时） ====================
+
+def test_classifies_queue_timeout_distinct_from_network_timeout():
+    from backend.services.image_rate_limiter import ImageQueueTimeoutError
+
+    error = classify_error(ImageQueueTimeoutError(
+        "图片生成排队超时：等待并发额度超过 600 秒（本机排队任务过多），"
+        "请减少页数或稍后重试"
+    ))
+
+    assert error.code == "QUEUE_TIMEOUT"
+    assert error.title == "图片生成排队超时"
+    assert error.retryable is True
+    assert error.status == 503
+    # 建议指向减页数/关高并发，而不是误导用户查网络
+    assert "高并发" in error.suggestion
+    assert "网络" not in error.suggestion
+
+
+def test_classifies_legacy_queue_timeout_message():
+    """兼容旧版限流器消息（升级期间的历史日志/序列化错误）"""
+    error = classify_error("等待图片生成并发额度超时（600 秒），请稍后重试")
+
+    assert error.code == "QUEUE_TIMEOUT"
+
+
+def test_generic_timeout_still_classified_as_network_timeout():
+    """普通超时不受 QUEUE_TIMEOUT 新分支影响"""
+    error = classify_error("Request timed out after 300 seconds")
+
+    assert error.code == "NETWORK_TIMEOUT"
+    assert error.retryable is True
+
+
 def test_error_payload_keeps_compat_error_message():
     payload = error_payload(classify_error("HTTP 429: rate limit"))
 

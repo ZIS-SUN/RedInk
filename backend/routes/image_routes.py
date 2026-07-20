@@ -462,7 +462,10 @@ def create_image_blueprint():
             safe_state = {
                 "generated": state.get("generated", {}),
                 "failed": state.get("failed", {}),
-                "has_cover": state.get("cover_image") is not None
+                "has_cover": state.get("cover_image") is not None,
+                # S2 纯增量字段：正在生成中的页 index 列表，前端恢复时
+                # 可据此区分「在途」与「失败」，不把在途页误标成 error
+                "in_flight": image_service.get_in_flight_pages(task_id),
             }
 
             return jsonify({

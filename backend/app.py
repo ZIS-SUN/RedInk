@@ -324,8 +324,13 @@ def _validate_config_on_startup(logger):
 if __name__ == '__main__':
     app = create_app()
     # 注意：app.run() 使用 Flask 内置开发服务器，仅适合本地开发/自用部署。
-    # 生产环境建议改用 WSGI 服务器，例如：
-    #   uv run gunicorn -w 2 -b 0.0.0.0:12398 "backend.app:create_app()"
+    # 生产环境建议改用 WSGI 服务器，且必须保持单进程多线程，例如：
+    #   uv run gunicorn -w 1 --threads 4 --timeout 0 -b 0.0.0.0:12398 "backend.app:create_app()"
+    # 说明：
+    # - 必须 -w 1：历史索引、图片限流器、任务状态都依赖进程内锁/内存，
+    #   多 worker 进程会互相覆盖历史索引（丢记录）、限流失效；
+    #   如需多进程，需先引入跨进程锁或把历史/任务状态迁移到数据库
+    # - --timeout 0：图片生成 SSE 流可持续数分钟，默认 30 秒会杀掉 worker
     app.run(
         host=Config.HOST,
         port=Config.PORT,

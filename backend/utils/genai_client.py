@@ -1,4 +1,5 @@
 """Google GenAI 客户端封装"""
+import re
 import time
 import random
 import logging
@@ -12,8 +13,75 @@ from ..generators.google_genai import parse_genai_error
 logger = logging.getLogger(__name__)
 
 
+# ==================== 重试白名单判定 ====================
+# 每次重试都是一次完整计费的上游调用。历史实现是黑名单（除认证/参数/安全
+# 之外全部重试 3 次），会把代码 bug（如 TypeError）、格式错误等确定性失败
+# 也白跑 2 轮。这里改为白名单：仅限流(429/配额)、上游 5xx、超时和网络
+# 连接类错误才重试，其余一律直接抛出。
+
+# 可重试的 HTTP 状态码（异常携带 status_code/code 属性时优先使用）
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+# 状态码词边界匹配，避免误命中模型名/ID 中的数字片段
+_RETRYABLE_CODE_PATTERN = re.compile(r"\b(429|500|502|503|504)\b")
+
+# 限流/配额类关键词（重试时使用更保守的指数退避）
+_RATE_LIMIT_KEYWORDS = (
+    "resource_exhausted",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "quota",
+)
+
+# 上游临时故障/网络类关键词
+_TRANSIENT_KEYWORDS = (
+    "internal error",
+    "service unavailable",
+    "unavailable",
+    "deadline_exceeded",
+    "deadline exceeded",
+    "timeout",
+    "timed out",
+    "connection",
+    "network",
+)
+
+
+def _extract_status_code(error: Exception):
+    """尽力从异常对象提取 HTTP 状态码（genai APIError 携带 code 属性）"""
+    for attr in ("status_code", "code", "status"):
+        value = getattr(error, attr, None)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _is_rate_limit_error(error: Exception) -> bool:
+    if _extract_status_code(error) == 429:
+        return True
+    text = str(error).lower()
+    return "429" in _RETRYABLE_CODE_PATTERN.findall(text) or any(
+        keyword in text for keyword in _RATE_LIMIT_KEYWORDS
+    )
+
+
+def _is_retryable_error(error: Exception) -> bool:
+    """白名单判定：仅 429/配额、5xx、超时、网络连接类错误可重试"""
+    status = _extract_status_code(error)
+    if status is not None:
+        # 有明确状态码时以状态码为准（400/401/403/404 等直接不重试）
+        return status in _RETRYABLE_STATUS_CODES
+    text = str(error).lower()
+    if _RETRYABLE_CODE_PATTERN.search(text):
+        return True
+    return any(keyword in text for keyword in _RATE_LIMIT_KEYWORDS) or any(
+        keyword in text for keyword in _TRANSIENT_KEYWORDS
+    )
+
+
 def retry_on_429(max_retries=3, base_delay=2):
-    """429 错误自动重试装饰器（带智能错误解析）"""
+    """限流/临时故障自动重试装饰器（白名单重试 + 智能错误解析）"""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -23,30 +91,15 @@ def retry_on_429(max_retries=3, base_delay=2):
                     return func(*args, **kwargs)
                 except Exception as e:
                     last_error = e
-                    error_str = str(e).lower()
 
-                    # 不可重试的错误类型
-                    non_retryable = [
-                        "401", "unauthenticated",  # 认证错误
-                        "403", "permission_denied", "forbidden",  # 权限错误
-                        "404", "not_found",  # 资源不存在
-                        "invalid_argument",  # 参数错误
-                        "safety", "blocked", "filter",  # 安全过滤
-                    ]
-
-                    should_retry = True
-                    for keyword in non_retryable:
-                        if keyword in error_str:
-                            should_retry = False
-                            break
-
-                    if not should_retry:
-                        # 直接抛出，不重试
+                    if not _is_retryable_error(e):
+                        # 白名单之外（认证/参数/安全拦截/代码错误等）：
+                        # 重试大概率仍失败且每次都计费，直接抛出
                         raise Exception(parse_genai_error(e))
 
                     # 可重试的错误
                     if attempt < max_retries - 1:
-                        if "429" in error_str or "resource_exhausted" in error_str:
+                        if _is_rate_limit_error(e):
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
                             logger.warning(f"[重试] 遇到资源限制，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                         else:
@@ -197,7 +250,11 @@ class GenAIClient:
             ):
                 if not chunk.candidates or not chunk.candidates[0].content or not chunk.candidates[0].content.parts:
                     continue
-                text += chunk.text
+                # 思考模型的 chunk 可能只含 thought 部件，此时 .text 为 None；
+                # 直接拼接会抛 TypeError 并被误当可重试错误再跑几轮（重复计费）
+                chunk_text = chunk.text
+                if chunk_text:
+                    text += chunk_text
             return text
 
         try:

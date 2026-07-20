@@ -103,6 +103,16 @@ class RecordStatus:
 
 
 class HistoryService:
+    # S11：仅这些状态的记录在 get_record(sync_images=True) 时执行目录同步。
+    # completed 记录的图片列表已稳定（单张重绘会即时合并进记录），每次打开
+    # 详情都 listdir 并可能写盘属于纯浪费；目录被外部手动改动的兜底走
+    # /history/scan 系列接口
+    _IMAGE_SYNC_STATUSES = {
+        RecordStatus.DRAFT,
+        RecordStatus.GENERATING,
+        RecordStatus.PARTIAL,
+    }
+
     def __init__(self):
         """
         初始化历史记录服务
@@ -133,6 +143,25 @@ class HistoryService:
                     lock = threading.RLock()
                     self.__dict__["_lock_obj"] = lock
         return lock
+
+    # S11 索引攒批：延后索引同步的合并每累计 N 次自动补写一次索引，
+    # 生成流收尾时再由 flush_record_index 强制补写（finally 保证）。
+    # 取 5 的权衡：列表页状态最多滞后 4 张图，而 N 页生成的索引全量重写
+    # 从 N 次降到约 N/5 + 1 次
+    INDEX_SYNC_BATCH_SIZE = 5
+
+    @property
+    def _pending_index_merges(self) -> Dict[str, int]:
+        """
+        record_id -> 自上次索引同步以来延后的合并次数（惰性创建，兼容
+        __new__ 构造的实例）。所有读写都必须在持有 self._lock 时进行，
+        惰性创建因此无并发竞态。
+        """
+        pending = self.__dict__.get("_pending_index_merges_map")
+        if pending is None:
+            pending = {}
+            self.__dict__["_pending_index_merges_map"] = pending
+        return pending
 
     @staticmethod
     def _atomic_write_json(path: str, data: Dict) -> None:
@@ -360,6 +389,9 @@ class HistoryService:
 
         Args:
             record_id: 记录 ID
+            sync_images: 是否先从任务目录同步图片列表。仅对未完成状态
+                （draft/generating/partial，含缺状态字段的老数据）真正执行
+                目录扫描；completed/error 记录直接返回（S11 详情页免扫盘）
 
         Returns:
             Optional[Dict]: 记录详情，如果不存在则返回 None
@@ -385,7 +417,13 @@ class HistoryService:
         except Exception:
             return None
 
-        if sync_images:
+        # S11：completed（及 error）记录跳过目录同步，直接返回——
+        # 打开详情页不再每次 listdir 扫盘；缺状态字段的老数据仍同步（兜底）
+        status = record.get("status")
+        needs_sync = sync_images and (
+            status is None or status in self._IMAGE_SYNC_STATUSES
+        )
+        if needs_sync:
             synced = self.sync_record_images(record_id, record)
             if synced.get("success") and synced.get("updated"):
                 return self.get_record(record_id, sync_images=False)
@@ -461,6 +499,9 @@ class HistoryService:
             index = self._load_index()
             self._apply_index_entry_update(index, record_id, record, outline=outline)
             self._save_index(index)
+            # 索引条目已全量刷新，清空该记录的攒批计数（S11），
+            # 避免生成流收尾时再做一次多余的索引补写
+            self._pending_index_merges.pop(record_id, None)
             return True
 
     def _apply_record_update(
@@ -602,6 +643,8 @@ class HistoryService:
             index = self._load_index()
             self._apply_index_entry_update(index, record_id, record)
             self._save_index(index)
+            # 索引条目已全量刷新，清空该记录的攒批计数（S11）
+            self._pending_index_merges.pop(record_id, None)
             return True
 
     def merge_generated_image(
@@ -610,9 +653,20 @@ class HistoryService:
         task_id: str,
         page_index: int,
         filename: str,
-        total_count: Optional[int] = None
+        total_count: Optional[int] = None,
+        defer_index_sync: bool = False
     ) -> bool:
-        """按页面索引合并单张已生成图片。"""
+        """
+        按页面索引合并单张已生成图片。
+
+        Args:
+            defer_index_sync: 为 True 时只写记录 JSON、延后索引同步
+                （S11 消除生成期间的索引写放大：N 页生成不再产生 N 次
+                索引全量重写）。延后的合并每累计 INDEX_SYNC_BATCH_SIZE 次
+                自动补写一次索引（列表页状态最多滞后 BATCH_SIZE-1 张图）；
+                调用方（生成流）必须在收尾时调用 flush_record_index 兜底。
+                默认 False 保持旧行为：合并后立即同步索引。
+        """
         with self._lock:
             record = self.get_record(record_id)
             if not record:
@@ -631,7 +685,21 @@ class HistoryService:
             status = HistoryImageMerger.compute_status(generated, total_count)
             thumbnail = HistoryImageMerger.first_image(generated)
 
-            return self.update_record(
+            if not defer_index_sync:
+                # 旧行为：记录 + 索引一次到位（update_record 内部会
+                # 清空该记录的攒批计数，见其实现）
+                return self.update_record(
+                    record_id,
+                    images={
+                        "task_id": task_id,
+                        "generated": generated,
+                    },
+                    status=status,
+                    thumbnail=thumbnail,
+                )
+
+            # 延后索引：只写记录文件（_apply_record_update 不动索引）
+            updated_record = self._apply_record_update(
                 record_id,
                 images={
                     "task_id": task_id,
@@ -640,6 +708,37 @@ class HistoryService:
                 status=status,
                 thumbnail=thumbnail,
             )
+            if updated_record is None:
+                return False
+
+            pending = self._pending_index_merges
+            count = pending.get(record_id, 0) + 1
+            if count >= self.INDEX_SYNC_BATCH_SIZE:
+                # 攒够一批：补写索引并清零计数（RLock 可重入，安全）
+                self._flush_index_entry_updates({record_id: updated_record})
+                pending.pop(record_id, None)
+            else:
+                pending[record_id] = count
+            return True
+
+    def flush_record_index(self, record_id: str) -> bool:
+        """
+        把该记录延后攒批的索引更新一次性补写（生成流收尾的 finally 调用）。
+
+        无挂账（期间没有 defer_index_sync 合并，或已被自动攒批/其他全量
+        更新补写）时不读不写、零成本返回，避免缓存回放等路径的多余索引写。
+
+        Returns:
+            bool: 本次是否真正执行了索引补写
+        """
+        with self._lock:
+            if self._pending_index_merges.pop(record_id, None) is None:
+                return False
+            record = self.get_record(record_id)
+            if not record:
+                return False
+            self._flush_index_entry_updates({record_id: record})
+            return True
 
     def sync_record_images(self, record_id: str, record: Optional[Dict] = None) -> Dict[str, Any]:
         """从任务目录扫描图片并合并回历史记录。"""
@@ -770,6 +869,9 @@ class HistoryService:
             index = self._load_index()
             index["records"] = [r for r in index["records"] if r["id"] != record_id]
             self._save_index(index)
+
+            # 记录已删除，攒批计数一并清理（S11，防字典残留）
+            self._pending_index_merges.pop(record_id, None)
 
             return True
 

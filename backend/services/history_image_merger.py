@@ -1,6 +1,11 @@
 """历史图片列表合并与状态计算。"""
 import os
+import re
 from typing import Dict, List, Optional
+
+# 页面图片文件名主干：{index} 或单张重绘产生的 {index}_v{毫秒时间戳}
+# （与 services/image.py 的版本化命名保持一致）
+_PAGE_IMAGE_STEM_PATTERN = re.compile(r"^(\d+)(?:_v(\d+))?$")
 
 
 class HistoryImageMerger:
@@ -58,19 +63,30 @@ class HistoryImageMerger:
 
     @staticmethod
     def files_by_index(history_dir: str, task_id: str) -> Dict[int, str]:
+        """
+        扫描任务目录，返回 index -> 文件名 映射。
+
+        同一页存在多个版本（如旧的 "0.png" 与重绘产生的 "0_v<时间戳>.png"
+        并存，通常是旧版本清理失败）时取版本号最大者，避免目录同步把
+        旧文件名合并回历史记录、覆盖重绘结果。
+        """
         task_dir = os.path.join(history_dir, task_id)
         if not os.path.isdir(task_dir):
             return {}
 
         files: Dict[int, str] = {}
+        versions: Dict[int, int] = {}
         for filename in os.listdir(task_dir):
             if filename.startswith("thumb_"):
                 continue
             if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
                 continue
-            try:
-                index = int(filename.rsplit(".", 1)[0])
-            except ValueError:
+            match = _PAGE_IMAGE_STEM_PATTERN.match(filename.rsplit(".", 1)[0])
+            if not match:
                 continue
-            files[index] = filename
+            index = int(match.group(1))
+            version = int(match.group(2) or 0)  # 无版本后缀视为版本 0
+            if index not in files or version > versions[index]:
+                files[index] = filename
+                versions[index] = version
         return dict(sorted(files.items()))

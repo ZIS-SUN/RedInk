@@ -19,9 +19,10 @@ def test_rate_limiter_acquire_times_out_instead_of_blocking_forever():
             with limiter.acquire(timeout=0.05):
                 pass
 
-    # 超时错误可被现有错误机制归类为"可重试"
+    # 排队超时归类为"可重试"的 QUEUE_TIMEOUT（本机排队饱和，
+    # 而不是误导用户查网络的 NETWORK_TIMEOUT）
     app_error = ensure_app_error(exc_info.value)
-    assert app_error.code == "NETWORK_TIMEOUT"
+    assert app_error.code == "QUEUE_TIMEOUT"
     assert app_error.retryable is True
 
 

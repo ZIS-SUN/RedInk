@@ -1,4 +1,5 @@
 """Text API 客户端封装"""
+import re
 import time
 import random
 import base64
@@ -19,6 +20,31 @@ class ApiRateLimitError(Exception):
         self.status_code = status_code
 
 
+# 429 词边界匹配：避免误命中错误文本里的其他数字片段
+_STATUS_429_PATTERN = re.compile(r"\b429\b")
+
+# 限流/配额的明确短语（历史实现用子串 "rate" 判定，会误命中
+# "generateContent" 等文本，把不可重试错误当限流重试、重复计费）
+_RATE_LIMIT_PHRASES = (
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "too many requests",
+    "resource_exhausted",
+    "quota",
+)
+
+
+def _is_rate_limited_error(error: Exception) -> bool:
+    """限流判定：优先异常的 status_code==429，字符串匹配用词边界/明确短语"""
+    if getattr(error, 'status_code', None) == 429:
+        return True
+    text = str(error).lower()
+    return bool(_STATUS_429_PATTERN.search(text)) or any(
+        phrase in text for phrase in _RATE_LIMIT_PHRASES
+    )
+
+
 def retry_on_429(max_retries=3, base_delay=2):
     """429 错误自动重试装饰器"""
     def decorator(func):
@@ -28,14 +54,7 @@ def retry_on_429(max_retries=3, base_delay=2):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    error_str = str(e)
-                    is_rate_limited = (
-                        getattr(e, 'status_code', None) == 429
-                        or "429" in error_str
-                        or "rate" in error_str.lower()
-                        or "resource_exhausted" in error_str.lower()
-                    )
-                    if is_rate_limited:
+                    if _is_rate_limited_error(e):
                         if attempt < max_retries - 1:
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
                             logger.warning(f"[重试] 遇到限流，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")

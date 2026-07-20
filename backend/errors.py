@@ -161,6 +161,20 @@ def classify_error(error: Union[Exception, str], context: Optional[Dict[str, Any
             diagnostics=diagnostics,
         )
 
+    # 内容安全拦截：必须排在 400/401/403/UNKNOWN 等更宽泛的分支之前，
+    # 否则携带 HTTP 状态码的安全拦截错误会被抢先归类成可重试错误，
+    # 用户对确定性失败反复重试反复扣费
+    if _looks_like_content_blocked(raw, text, status):
+        return AppError(
+            code="CONTENT_BLOCKED",
+            title="内容被安全审核拦截",
+            detail=upstream_message or _first_meaningful_line(raw) or "提示词或生成内容触发了服务商的内容安全审核。",
+            suggestion="请修改该页文案后重试（更换敏感表述、避免涉及真实人物或违规话题）；重复提交相同内容不会成功。",
+            status=400,
+            retryable=False,
+            diagnostics=diagnostics,
+        )
+
     if status in (400, 415) and (
         "json" in text
         or "unsupported media type" in text
@@ -236,6 +250,20 @@ def classify_error(error: Union[Exception, str], context: Optional[Dict[str, Any
             detail=upstream_message or f"服务商返回 HTTP {status}。",
             suggestion="请稍后重试；如果持续失败，请切换服务商或查看服务商状态。",
             status=502,
+            retryable=True,
+            diagnostics=diagnostics,
+        )
+
+    # 本机排队超时：必须排在 NETWORK_TIMEOUT 之前。
+    # 消息同样含"超时"，但根因是本机图片生成排队饱和而非网络问题，
+    # 归类成网络超时会误导用户去查网络
+    if _looks_like_queue_timeout(raw):
+        return AppError(
+            code="QUEUE_TIMEOUT",
+            title="图片生成排队超时",
+            detail=_first_meaningful_line(raw) or "等待图片生成并发额度超时（本机排队任务过多）。",
+            suggestion="减少页数或稍后重试；如果频繁出现可在设置中关闭高并发。",
+            status=503,
             retryable=True,
             diagnostics=diagnostics,
         )
@@ -374,6 +402,67 @@ def _looks_like_fake_ip_tls(text: str) -> bool:
         or ("eof occurred" in text and "ssl" in text)
         or ("198.18." in text and "ssl" in text)
     )
+
+
+# 内容安全拦截的强关键词：出现即认定为内容审核拦截。
+# 英文小写匹配（覆盖 OpenAI content_policy/safety system、Google prohibited_content、
+# Azure content filter 等），中文对原文匹配（覆盖 generators/google_genai.py
+# 的"内容被安全过滤器拦截"等既有文案）
+_CONTENT_BLOCKED_STRONG_KEYWORDS_EN = (
+    "safety",
+    "content_policy",
+    "content policy",
+    "prohibited_content",
+    "prohibited content",
+    "content_filter",
+    "content filter",
+)
+_CONTENT_BLOCKED_KEYWORDS_ZH = (
+    "内容审核",
+    "安全过滤",
+    "安全审核",
+    "敏感内容",
+    "敏感词",
+    "内容违规",
+)
+
+# 弱关键词：单词本身有歧义（如 "api key has been blocked" 是认证问题），
+# 仅在非认证语境下生效
+_CONTENT_BLOCKED_WEAK_KEYWORDS_EN = ("blocked", "filter")
+
+_AUTH_CONTEXT_KEYWORDS = (
+    "api key",
+    "unauthorized",
+    "unauthenticated",
+    "forbidden",
+    "permission_denied",
+    "权限被拒绝",
+)
+
+
+def _looks_like_content_blocked(raw: str, text: str, status: Optional[int]) -> bool:
+    if any(keyword in text for keyword in _CONTENT_BLOCKED_STRONG_KEYWORDS_EN):
+        return True
+    if any(keyword in raw for keyword in _CONTENT_BLOCKED_KEYWORDS_ZH):
+        return True
+    # "blocked"/"filter" 有歧义：认证语境（401/403 或 API Key 相关文案，
+    # 如 "api key has been blocked"）应落入 AUTH_OR_PERMISSION；
+    # 网络/超时语境（如 "connection blocked by firewall"）应落入网络分支
+    ambiguous_context = (
+        status in (401, 403)
+        or any(keyword in text for keyword in _AUTH_CONTEXT_KEYWORDS)
+        or _looks_like_timeout(text)
+        or _looks_like_network(text)
+    )
+    if ambiguous_context:
+        return False
+    return any(keyword in text for keyword in _CONTENT_BLOCKED_WEAK_KEYWORDS_EN)
+
+
+def _looks_like_queue_timeout(raw: str) -> bool:
+    # 匹配 ImageRateLimiter 排队超时的专属消息
+    # （新消息以"图片生成排队超时"开头；兼容旧版"等待图片生成并发额度超时"）
+    return "图片生成排队超时" in raw or "等待图片生成并发额度超时" in raw
 
 
 def _looks_like_timeout(text: str) -> bool:

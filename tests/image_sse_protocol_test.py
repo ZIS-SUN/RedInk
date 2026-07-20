@@ -24,6 +24,7 @@ import json
 import os
 import re
 import threading
+import time
 
 import pytest
 
@@ -386,7 +387,7 @@ def test_generate_client_disconnect_cancels_pending_pool_tasks(app, image_env):
     def fake_generate(page, task_id, reference_image=None, retry_count=0,
                       full_outline="", user_images=None, user_topic="",
                       record_id=None, total_count=None, style_prompt="",
-                      retry_hint=False):
+                      retry_hint=False, defer_index_sync=False):
         index = page["index"]
         if page.get("type") == "cover":
             # 生成流会回读封面文件作为参考图，须真实落盘
@@ -655,3 +656,123 @@ def test_retry_failed_sse_wire_format(client, image_env):
     assert_sse_wire_format(body, RETRY_EVENTS)
     event_names = {e[0] for e in parse_sse_events(body)}
     assert {"retry_start", "complete", "error", "retry_finish"} <= event_names
+
+
+# ==================== SSE 心跳（慢生成期间保活，防前端空闲熔断） ====================
+
+class SlowFakeImageGenerator(FakeImageGenerator):
+    """模拟慢速上游：每张图阻塞 delay_seconds 秒"""
+
+    def __init__(self, delay_seconds: float = 0.3):
+        super().__init__()
+        self.delay_seconds = delay_seconds
+
+    def generate_image(self, prompt=None, **kwargs):
+        time.sleep(self.delay_seconds)
+        return super().generate_image(prompt=prompt, **kwargs)
+
+
+def make_slow_service(image_env, worker_count: int = 1, delay_seconds: float = 0.3):
+    """
+    构造慢速生成的服务，并把心跳间隔压到 50ms 加速测试
+    （实例属性覆盖类常量 HEARTBEAT_INTERVAL_SECONDS）
+    """
+    service = image_env(worker_count=worker_count)
+    service.generator = SlowFakeImageGenerator(delay_seconds=delay_seconds)
+    service.HEARTBEAT_INTERVAL_SECONDS = 0.05
+    return service
+
+
+def split_heartbeats(events):
+    """把事件列表拆为 (业务事件, 心跳事件)"""
+    business = [e for e in events if e[0] != "heartbeat"]
+    heartbeats = [e for e in events if e[0] == "heartbeat"]
+    return business, heartbeats
+
+
+def test_generate_serial_slow_pages_emit_heartbeats(client, image_env):
+    """顺序模式下单张图阻塞期间周期性下发 heartbeat，业务事件序列不变"""
+    make_slow_service(image_env, worker_count=1)
+    pages = [
+        {"index": 0, "type": "cover", "content": "封面"},
+        {"index": 1, "type": "content", "content": "第一页"},
+    ]
+
+    response = post_generate(client, pages, task_id="task_hb_serial")
+    body = response.get_data(as_text=True)
+
+    # 心跳是合法 SSE 事件（event: heartbeat\ndata: {json}\n\n）
+    assert_sse_wire_format(body, GENERATE_EVENTS | {"heartbeat"})
+
+    business, heartbeats = split_heartbeats(parse_sse_events(body))
+    assert heartbeats, "阻塞生成期间应下发心跳事件"
+    # 心跳携带毫秒时间戳，前端未注册该事件类型会安全忽略
+    assert all(isinstance(hb[1].get("ts"), int) for hb in heartbeats)
+    # 过滤心跳后，业务事件的语义与顺序与既有协议完全一致
+    assert [e[0] for e in business] == [
+        "progress", "complete",
+        "progress",
+        "progress", "complete",
+        "finish",
+    ]
+    # 心跳出现在生成阻塞期间（第一个业务事件之后、最后一个之前）
+    all_events = parse_sse_events(body)
+    first_hb = next(i for i, e in enumerate(all_events) if e[0] == "heartbeat")
+    assert 0 < first_hb < len(all_events) - 1
+
+
+def test_generate_concurrent_slow_pages_emit_heartbeats(client, image_env):
+    """高并发模式下等待批次完成期间同样下发心跳"""
+    make_slow_service(image_env, worker_count=2)
+    pages = [
+        {"index": 0, "type": "cover", "content": "封面"},
+        {"index": 1, "type": "content", "content": "第一页"},
+        {"index": 2, "type": "content", "content": "第二页"},
+    ]
+
+    response = post_generate(client, pages, task_id="task_hb_parallel")
+    body = response.get_data(as_text=True)
+
+    assert_sse_wire_format(body, GENERATE_EVENTS | {"heartbeat"})
+
+    business, heartbeats = split_heartbeats(parse_sse_events(body))
+    assert heartbeats, "并发等待期间应下发心跳事件"
+    # 封面 → batch_start → 2 条 progress → 2 条 complete → finish
+    assert [e[0] for e in business] == [
+        "progress", "complete",
+        "progress",
+        "progress", "progress",
+        "complete", "complete",
+        "finish",
+    ]
+    finish = business[-1][1]
+    assert finish["success"] is True
+    assert finish["completed"] == 3
+
+
+def test_retry_failed_slow_pages_emit_heartbeats(client, image_env):
+    """批量重试（顺序模式）阻塞期间同样下发心跳，业务事件序列不变"""
+    make_slow_service(image_env, worker_count=1)
+
+    response = client.post("/api/retry-failed", json={
+        "task_id": "task_hb_retry",
+        "pages": [{"index": 1, "type": "content", "content": "第一页"}],
+    })
+    body = response.get_data(as_text=True)
+
+    assert_sse_wire_format(body, RETRY_EVENTS | {"heartbeat"})
+
+    business, heartbeats = split_heartbeats(parse_sse_events(body))
+    assert heartbeats, "阻塞生成期间应下发心跳事件"
+    assert [e[0] for e in business] == ["retry_start", "complete", "retry_finish"]
+    assert business[-1][1]["success"] is True
+
+
+def test_generate_fast_pages_emit_no_heartbeat(client, image_env, sample_pages):
+    """快速完成的生成不产生心跳：既有事件协议对旧前端完全兼容"""
+    image_env(worker_count=1)
+
+    response = post_generate(client, sample_pages, task_id="task_hb_none")
+    events = parse_sse_events(response.get_data(as_text=True))
+
+    assert all(e[0] != "heartbeat" for e in events)

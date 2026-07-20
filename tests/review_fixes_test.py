@@ -10,6 +10,7 @@
 - P2-5 /api/images 按扩展名推断 mimetype
 - P2-7 服务单例惰性初始化的双检查锁定
 """
+import re
 import threading
 import time
 from pathlib import Path
@@ -122,7 +123,11 @@ def test_retry_failed_images_survives_concurrent_state_eviction(tmp_path):
 
 
 def test_retry_single_image_updates_state_when_present(tmp_path):
-    """状态存在时，重试成功后 generated/failed 正常更新（行为不回退）"""
+    """状态存在时，重试成功后 generated/failed 正常更新（行为不回退）
+
+    注：单张重试写入带版本的新文件名 {index}_v{毫秒时间戳}.png
+    （避免同名覆盖被浏览器 immutable 缓存吃掉新图），状态中记录的即新名。
+    """
     image_service = make_image_service(tmp_path)
     page = {"index": 1, "type": "content", "content": "content"}
     state = make_task_state([page])
@@ -132,7 +137,7 @@ def test_retry_single_image_updates_state_when_present(tmp_path):
     result = image_service.retry_single_image("task_1", page)
 
     assert result["success"] is True
-    assert state["generated"][1] == "1.png"
+    assert re.fullmatch(r"1_v\d+\.png", state["generated"][1])
     assert 1 not in state["failed"]
 
 
@@ -144,7 +149,9 @@ def test_retry_single_image_with_fully_evicted_state(tmp_path):
     result = image_service.retry_single_image("task_gone", page, use_reference=True)
 
     assert result["success"] is True
-    assert (tmp_path / "task_gone" / "2.png").exists()
+    # 单张重试写入带版本的新文件名
+    generated = list((tmp_path / "task_gone").glob("2_v*.png"))
+    assert len(generated) == 1
 
 
 # ==================== P2-2 封面参考图按封面页 index 推导 ====================
