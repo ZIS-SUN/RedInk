@@ -71,8 +71,30 @@
       </div>
     </div>
 
-    <!-- 加载骨架 -->
-    <div v-if="loading" class="skeleton-section" aria-hidden="true">
+    <!-- 最近记录（本地存档） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">最近记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ entry.summary }} · {{ entry.payload.results.length }} 个平台版本</span>
+            <span class="history-time">{{ formatArchiveTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
+    <div v-if="loading && results.length === 0" class="skeleton-section" aria-hidden="true">
       <div v-for="n in 2" :key="n" class="card skeleton-card">
         <div class="sk-row">
           <span class="sk-line sk-badge"></span>
@@ -100,12 +122,26 @@
               type="button"
               class="btn btn-primary send-btn"
               :disabled="sendingPlatform !== ''"
-              :aria-label="`把${platformLabel(item.platform)}文案送入创作中心`"
+              :aria-label="`把${platformLabel(item.platform)}文案本地切页后送入创作中心，不消耗 AI 额度`"
+              title="按段落本地切成大纲页，不调用 AI"
               @click="sendToCreation(item)"
             >
-              <span v-if="sendingPlatform === item.platform" class="spinner-sm"></span>
-              {{ sendingPlatform === item.platform ? '正在转成大纲…' : '送入创作中心' }}
+              送入创作（不耗额度）
             </button>
+            <span class="ai-send-group">
+              <button
+                type="button"
+                class="btn btn-secondary send-btn"
+                :disabled="sendingPlatform !== ''"
+                :aria-label="`让 AI 重新提炼${platformLabel(item.platform)}文案为大纲后送入创作中心（将调用 AI）`"
+                title="让 AI 重新提炼分页，将调用 AI 并消耗额度"
+                @click="sendToCreationViaAI(item)"
+              >
+                <span v-if="sendingPlatform === item.platform" class="spinner-sm"></span>
+                {{ sendingPlatform === item.platform ? '正在转成大纲…' : 'AI 重排后送入' }}
+              </button>
+              <span class="ai-cost-hint">将调用 AI</span>
+            </span>
             <button
               type="button"
               class="btn btn-secondary copy-btn"
@@ -152,8 +188,21 @@ import { useRouter } from 'vue-router'
 import { rewriteCopy, type RewritePlatform, type RewriteResult } from '../api/rewrite'
 import { getBrandList, type BrandKit } from '../api/brand'
 import { linkToOutline } from '../api/link'
+import type { Page } from '../api/types'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  REWRITE_ARCHIVE_KEY,
+  addToolArchiveEntry,
+  buildInputSummary,
+  createToolArchiveEntry,
+  formatArchiveTime,
+  isValidRewritePayload,
+  loadToolArchive,
+  saveToolArchive,
+  type RewriteArchivePayload,
+  type ToolArchiveEntry,
+} from '../utils/toolArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
 interface PlatformOption {
@@ -181,6 +230,12 @@ const error = ref<AppError | null>(null)
 const copiedPlatform = ref('')
 // 正在流转到创作中心的平台代号，'' 表示空闲（同一时间只允许一个流转请求）
 const sendingPlatform = ref('')
+
+// 最近记录（本地存档，最近 10 次改写结果）
+const archive = ref<Array<ToolArchiveEntry<RewriteArchivePayload>>>(
+  loadToolArchive(REWRITE_ARCHIVE_KEY, isValidRewritePayload)
+)
+const showArchive = ref(false)
 
 // 品牌人设选择：'' 表示不使用，默认选中当前启用档案
 const brands = ref<BrandKit[]>([])
@@ -218,7 +273,7 @@ async function handleRewrite() {
 
   loading.value = true
   error.value = null
-  results.value = []
+  // 重新改写时保留旧结果展示，新结果返回后再整体替换（这些都是花了额度的产物）
 
   try {
     const result = await rewriteCopy(
@@ -230,6 +285,7 @@ async function handleRewrite() {
 
     if (result.success && result.results) {
       results.value = result.results
+      recordArchive(result.results)
     } else {
       error.value = normalizeApiError(result.error || result.error_message || '文案改写失败', '文案改写失败')
     }
@@ -240,12 +296,129 @@ async function handleRewrite() {
   }
 }
 
+// ==================== 最近记录（本地存档） ====================
+
+function recordArchive(resultList: RewriteResult[]) {
+  if (resultList.length === 0) return
+  const entry = createToolArchiveEntry<RewriteArchivePayload>({
+    input: content.value.trim(),
+    payload: {
+      content: content.value.trim(),
+      sourcePlatform: sourcePlatform.value,
+      targetPlatforms: [...targetPlatforms.value],
+      results: resultList,
+    },
+  })
+  archive.value = addToolArchiveEntry(archive.value, entry)
+  saveToolArchive(REWRITE_ARCHIVE_KEY, archive.value)
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: ToolArchiveEntry<RewriteArchivePayload>) {
+  if (loading.value) return
+  content.value = entry.payload.content
+  const validCodes = platforms.map(p => p.code) as string[]
+  sourcePlatform.value = validCodes.includes(entry.payload.sourcePlatform)
+    ? entry.payload.sourcePlatform
+    : ''
+  targetPlatforms.value = entry.payload.targetPlatforms.filter(code =>
+    validCodes.includes(code)
+  )
+  results.value = entry.payload.results
+  error.value = null
+}
+
+// ==================== 送入创作中心 ====================
+
+// 本地切页的单页字数区间：短于下限的相邻段落会被合并，超过上限的段落按句拆分
+const PAGE_MIN_CHARS = 50
+const PAGE_MAX_CHARS = 120
+
 /**
- * 把某个平台的改写结果送入创作中心：
+ * 把正文本地切成 50-120 字的内容页（纯前端，不调用 AI）：
+ * 1. 按换行拆段；2. 超长段按句尾标点再拆（无标点的整句硬切）；
+ * 3. 相邻短段贪心合并，凑到下限即成页
+ */
+function splitBodyToChunks(body: string): string[] {
+  const paragraphs = body.split(/\n+/).map(s => s.trim()).filter(Boolean)
+
+  const units: string[] = []
+  for (const para of paragraphs) {
+    if (para.length <= PAGE_MAX_CHARS) {
+      units.push(para)
+      continue
+    }
+    let buf = ''
+    for (const sentence of para.split(/(?<=[。！？!?；;…])/).map(s => s.trim()).filter(Boolean)) {
+      if (sentence.length > PAGE_MAX_CHARS) {
+        // 整句无标点且超长：按上限硬切，避免单页爆版
+        if (buf) { units.push(buf); buf = '' }
+        for (let i = 0; i < sentence.length; i += PAGE_MAX_CHARS) {
+          units.push(sentence.slice(i, i + PAGE_MAX_CHARS))
+        }
+      } else if (buf && buf.length + sentence.length > PAGE_MAX_CHARS) {
+        units.push(buf)
+        buf = sentence
+      } else {
+        buf = buf ? buf + sentence : sentence
+      }
+    }
+    if (buf) units.push(buf)
+  }
+
+  const chunks: string[] = []
+  let current = ''
+  for (const unit of units) {
+    if (!current) {
+      current = unit
+    } else if (current.length < PAGE_MIN_CHARS && current.length + 1 + unit.length <= PAGE_MAX_CHARS) {
+      current = `${current}\n${unit}`
+    } else {
+      chunks.push(current)
+      current = unit
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+/**
+ * 送入创作中心（默认路径，不耗额度）：
+ * 改写结果已经是分好段的成稿，前端直接本地构造大纲——
+ * 标题作封面页、正文切成 50-120 字的内容页、标签收尾作总结页，
+ * 组装与后端一致的 raw（<page> 分隔）后写入 store 并跳转大纲页
+ */
+function sendToCreation(item: RewriteResult) {
+  if (sendingPlatform.value !== '') return
+
+  const title = item.title.trim() || buildInputSummary(item.content, 30)
+  const pages: Page[] = [{ index: 0, type: 'cover', content: title }]
+  for (const chunk of splitBodyToChunks(item.content)) {
+    pages.push({ index: pages.length, type: 'content', content: chunk })
+  }
+  if (item.tags.length > 0) {
+    pages.push({
+      index: pages.length,
+      type: 'summary',
+      content: item.tags.map(t => `#${t}`).join(' '),
+    })
+  }
+  const raw = pages.map(page => page.content).join('\n\n<page>\n\n')
+
+  store.setTopic(title)
+  store.setOutline(raw, pages)
+  // 清空旧的历史记录 ID，让大纲页为本次内容创建新的历史记录
+  store.setRecordId(null)
+
+  router.push('/outline')
+}
+
+/**
+ * AI 重排后送入（次级路径，将调用 AI）：
  * title + content + tags 拼成长文本 → 调链接工具的长文转大纲能力 →
  * 照 ToolLinkView.sendToCreation 的模式写入 generator store 并跳转大纲页
  */
-async function sendToCreation(item: RewriteResult) {
+async function sendToCreationViaAI(item: RewriteResult) {
   if (sendingPlatform.value !== '') return
 
   const rawParts = [`标题：${item.title}`, item.content]
@@ -476,6 +649,85 @@ async function copyResult(item: RewriteResult) {
   min-width: 180px;
 }
 
+/* ── 最近记录（本地存档，样式参照选题灵感的历史区） ── */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
 /* 加载骨架（纯 CSS shimmer） */
 .skeleton-section {
   margin-top: var(--space-5);
@@ -553,6 +805,19 @@ async function copyResult(item: RewriteResult) {
   gap: 6px;
   padding: 8px 18px;
   font-size: 14px;
+}
+
+/* AI 重排按钮 + 消耗提示：提示紧贴按钮，提醒该路径会调用 AI */
+.ai-send-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-cost-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .copy-btn {

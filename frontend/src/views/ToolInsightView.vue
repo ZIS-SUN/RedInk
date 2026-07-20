@@ -12,6 +12,13 @@
 
     <!-- 输入区 -->
     <div class="card input-card">
+      <!-- 来自评论助手的预填提示 -->
+      <div v-if="handoffFromReply" class="handoff-banner" role="status">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        已带入评论助手的 {{ parsedComments.length }} 条评论，点「挖掘痛点与选题」开始分析
+        <button type="button" class="handoff-close" aria-label="关闭提示" @click="handoffFromReply = false">×</button>
+      </div>
+
       <label class="field-label" for="insight-comments">粉丝评论（每行一条，最多 {{ MAX_COMMENTS }} 条）</label>
       <textarea
         id="insight-comments"
@@ -90,6 +97,15 @@
         <span class="result-count">
           从 {{ commentCount }} 条评论中挖出 {{ painPoints.length }} 个痛点、{{ totalTopics }} 条选题
         </span>
+        <button
+          type="button"
+          class="crosslink-btn"
+          title="把这批评论带到评论助手，为每条评论生成神回复"
+          @click="goReplyWithComments"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/></svg>
+          用这批评论生成回复
+        </button>
       </div>
 
       <div class="pain-list">
@@ -155,6 +171,15 @@
                 >
                   {{ copiedKey === `${pi}-${ti}` ? '已复制' : '复制' }}
                 </button>
+                <button
+                  type="button"
+                  class="save-btn"
+                  :class="{ saved: savedKeys.has(`${pi}-${ti}`) }"
+                  :disabled="savedKeys.has(`${pi}-${ti}`) || savingKey === `${pi}-${ti}`"
+                  @click="handleSaveToLibrary(topic, `${pi}-${ti}`)"
+                >
+                  {{ savedKeys.has(`${pi}-${ti}`) ? '已入库 ✓' : (savingKey === `${pi}-${ti}` ? '入库中…' : '存入选题库') }}
+                </button>
                 <template v-if="addedKeys.has(`${pi}-${ti}`)">
                   <button type="button" class="calendar-btn added" disabled>已加入 ✓</button>
                   <RouterLink class="calendar-link" to="/tools/calendar">去日历看看</RouterLink>
@@ -194,6 +219,9 @@
       @added="onCalendarAdded"
     />
 
+    <!-- 轻提示（已入库等） -->
+    <div v-if="toast" class="lib-toast" role="status" aria-live="polite">{{ toast }}</div>
+
     <ErrorCard
       v-if="error"
       class="insight-error"
@@ -206,9 +234,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { mineInsights, type InsightTopicIdea, type PainPoint } from '../api/insight'
+import { createIdea } from '../api/ideaLibrary'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
 import {
@@ -218,6 +247,7 @@ import {
   saveInsightArchive,
   type InsightArchiveEntry,
 } from '../utils/ideaArchive'
+import { setCommentHandoff, takeCommentHandoff } from '../utils/commentHandoff'
 import ErrorCard from '../components/common/ErrorCard.vue'
 import AddToCalendarDialog from '../components/common/AddToCalendarDialog.vue'
 
@@ -235,6 +265,17 @@ const painPoints = ref<PainPoint[]>([])
 const commentCount = ref(0)
 const copiedKey = ref('')
 
+// 来自评论助手的预填提示（挂载时检测 sessionStorage）
+const handoffFromReply = ref(false)
+
+onMounted(() => {
+  const handoff = takeCommentHandoff()
+  if (handoff && handoff.source === 'reply') {
+    commentsInput.value = handoff.comments.join('\n')
+    handoffFromReply.value = true
+  }
+})
+
 // 本地存档（最近 10 次挖掘结果）
 const archive = ref<InsightArchiveEntry[]>(loadInsightArchive())
 const showArchive = ref(false)
@@ -244,11 +285,26 @@ const calendarTarget = ref<InsightTopicIdea | null>(null)
 const calendarTargetKey = ref('')
 const addedKeys = ref<Set<string>>(new Set())
 
+// 存入选题库：已入库 / 正在入库的选题位置键
+const savedKeys = ref<Set<string>>(new Set())
+const savingKey = ref('')
+
+// 轻提示（已入库等）
+const toast = ref('')
+
 let copyTimer: ReturnType<typeof setTimeout> | undefined
+let toastTimer: ReturnType<typeof setTimeout> | undefined
 
 onUnmounted(() => {
   if (copyTimer !== undefined) clearTimeout(copyTimer)
+  if (toastTimer !== undefined) clearTimeout(toastTimer)
 })
+
+function showToast(message: string) {
+  toast.value = message
+  if (toastTimer !== undefined) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = '' }, 2000)
+}
 
 const parsedComments = computed(() =>
   commentsInput.value
@@ -288,6 +344,7 @@ async function handleGenerate() {
       commentCount.value = result.comment_count ?? usedComments.length
       hasGenerated.value = true
       addedKeys.value = new Set()
+      savedKeys.value = new Set()
       recordArchive(usedComments, result.pain_points)
     } else {
       error.value = normalizeApiError(
@@ -325,6 +382,7 @@ function restoreFromArchive(entry: InsightArchiveEntry) {
   commentCount.value = entry.commentCount
   hasGenerated.value = true
   addedKeys.value = new Set()
+  savedKeys.value = new Set()
   error.value = null
 }
 
@@ -341,6 +399,46 @@ function archiveSummary(entry: InsightArchiveEntry): string {
   parts.push(`${entry.commentCount} 条评论`)
   parts.push(`${entry.painPoints.length} 个痛点`)
   return parts.join(' · ')
+}
+
+// ==================== 与评论助手互通 ====================
+
+/**
+ * 把当前结果对应的这批评论带到评论助手生成神回复
+ * （sessionStorage 传递，回复页挂载时预填并提示来源）
+ */
+function goReplyWithComments() {
+  const comments = parsedComments.value.slice(0, MAX_COMMENTS)
+  if (comments.length === 0) return
+  setCommentHandoff({ source: 'insight', comments })
+  router.push('/tools/reply')
+}
+
+// ==================== 存入选题库（收集入口） ====================
+
+/**
+ * 把痛点选题存入「我的选题库」（source=insight），
+ * 携带切入角度、建议标签与当前填写的赛道，成功后轻提示「已入库」
+ */
+async function handleSaveToLibrary(item: InsightTopicIdea, key: string) {
+  if (savedKeys.value.has(key) || savingKey.value) return
+  savingKey.value = key
+
+  const res = await createIdea({
+    title: item.title,
+    angle: item.angle,
+    tags: item.tags,
+    source: 'insight',
+    niche: niche.value.trim(),
+  })
+  savingKey.value = ''
+
+  if (res.success) {
+    savedKeys.value.add(key)
+    showToast('已入库')
+  } else {
+    showToast(res.error_message || '存入选题库失败，请重试')
+  }
 }
 
 // ==================== 加入内容日历 ====================
@@ -492,6 +590,31 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
 
 .comments-hint.overflow {
   color: var(--color-warning);
+}
+
+/* ── 来自评论助手的预填提示 ── */
+.handoff-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.handoff-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .field-group {
@@ -669,6 +792,8 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 12px;
   padding: 0 4px;
 }
@@ -676,6 +801,28 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
 .result-count {
   font-size: 14px;
   color: var(--text-sub);
+}
+
+/* 「用这批评论生成回复」互跳按钮 */
+.crosslink-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--primary);
+  background: var(--bg-card);
+  color: var(--primary);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.crosslink-btn:hover {
+  background: var(--primary-light);
+  box-shadow: var(--shadow-xs);
 }
 
 .pain-list {
@@ -967,6 +1114,41 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
   color: #fff;
 }
 
+/* ── 存入选题库按钮（与选题灵感页同款） ── */
+.save-btn {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  white-space: nowrap;
+}
+
+.save-btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.save-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.save-btn.saved {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+  color: var(--color-success);
+  cursor: default;
+}
+
 .calendar-btn {
   padding: 5px 14px;
   border-radius: var(--radius-full);
@@ -1075,6 +1257,24 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
   animation: slideUp 0.3s var(--ease-out);
 }
 
+/* ── 轻提示 toast（与选题灵感页同款） ── */
+.lib-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 22px;
+  border-radius: var(--radius-full);
+  background: var(--text-main);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  z-index: 1200;
+  animation: slideUp 0.3s var(--ease-out);
+  white-space: nowrap;
+}
+
 /* ── 移动端适配 ─────────────────── */
 @media (max-width: 640px) {
   .insight-container {
@@ -1151,10 +1351,16 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
     background: var(--gray-2);
   }
 
+  .lib-toast {
+    animation: none;
+  }
+
   .use-btn,
   .use-btn:hover,
   .copy-btn,
-  .copy-btn:hover {
+  .copy-btn:hover,
+  .save-btn,
+  .save-btn:hover {
     transform: none;
   }
 }

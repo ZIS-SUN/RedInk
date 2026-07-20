@@ -128,6 +128,58 @@
       </ul>
     </div>
 
+    <!-- 我的套路库（长期沉淀，与 20 条滚动的拆解历史相互独立） -->
+    <div v-if="patterns.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showPatterns = !showPatterns">
+        <span class="history-title">我的套路库（{{ patterns.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showPatterns }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showPatterns" class="history-list pattern-list">
+        <li v-for="pattern in patterns" :key="pattern.id" class="pattern-item">
+          <div class="pattern-row">
+            <button
+              type="button"
+              class="pattern-name-btn"
+              :title="expandedPatternId === pattern.id ? '收起模板全文' : '查看模板全文'"
+              @click="togglePatternExpand(pattern.id)"
+            >
+              <span class="history-summary">{{ pattern.name }}</span>
+              <span class="history-time">{{ formatTime(pattern.created_at) }}</span>
+            </button>
+            <div class="pattern-actions">
+              <button
+                type="button"
+                class="pattern-action-btn"
+                :disabled="loading || !!sending"
+                title="以这个套路结构创作我的主题"
+                @click="openTopicDialogForPattern(pattern)"
+              >
+                以此结构创作
+              </button>
+              <button
+                type="button"
+                class="pattern-action-btn danger"
+                :title="pendingDeletePatternId === pattern.id ? '再点一次确认删除' : '从套路库删除'"
+                @click="requestDeletePattern(pattern.id)"
+              >
+                {{ pendingDeletePatternId === pattern.id ? '确认删除？' : '删除' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="expandedPatternId === pattern.id" class="pattern-detail">
+            <p class="pattern-template-text">{{ pattern.template }}</p>
+            <p v-if="pattern.source_title" class="pattern-source">来源：{{ pattern.source_title }}</p>
+          </div>
+        </li>
+      </ul>
+    </div>
+
     <!-- 加载骨架 -->
     <div v-if="loading" class="skeleton-section" aria-hidden="true">
       <div class="card skeleton-card">
@@ -199,14 +251,25 @@
         <div class="analysis-item template-item">
           <div class="template-header">
             <h3 class="analysis-label">📋 可复用套路模板</h3>
-            <button
-              type="button"
-              class="btn btn-secondary copy-btn"
-              :class="{ copied: copiedKey === 'template' }"
-              @click="copyTemplate"
-            >
-              {{ copiedKey === 'template' ? '已复制 ✓' : '复制模板' }}
-            </button>
+            <div class="template-actions">
+              <button
+                type="button"
+                class="btn btn-secondary copy-btn"
+                :class="{ copied: patternSavedFlash }"
+                title="把这个套路长期存进「我的套路库」，随时以此结构创作"
+                @click="openPatternDialog"
+              >
+                {{ patternSavedFlash ? '已存入 ✓' : '存入套路库' }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary copy-btn"
+                :class="{ copied: copiedKey === 'template' }"
+                @click="copyTemplate"
+              >
+                {{ copiedKey === 'template' ? '已复制 ✓' : '复制模板' }}
+              </button>
+            </div>
           </div>
           <p class="analysis-text template-text">{{ analysis.reusable_template }}</p>
         </div>
@@ -218,11 +281,24 @@
             type="button"
             class="btn btn-primary creation-btn"
             :disabled="loading || !!sending"
+            title="按段落本地切成大纲页，不调用 AI"
             @click="sendDraftToCreation"
           >
-            <span v-if="sending === 'draft'" class="spinner-sm" aria-hidden="true"></span>
-            {{ sending === 'draft' ? '正在生成大纲…' : '用仿写草稿创作' }}
+            用仿写草稿创作（不耗额度）
           </button>
+          <span v-if="draft" class="ai-send-group">
+            <button
+              type="button"
+              class="btn btn-secondary creation-btn"
+              :disabled="loading || !!sending"
+              title="让 AI 重新提炼草稿分页，将调用 AI 并消耗额度"
+              @click="sendDraftToCreationViaAI"
+            >
+              <span v-if="sending === 'draft'" class="spinner-sm" aria-hidden="true"></span>
+              {{ sending === 'draft' ? '正在生成大纲…' : 'AI 重排后送入' }}
+            </button>
+            <span class="ai-cost-hint">将调用 AI</span>
+          </span>
           <button
             v-if="analysis.reusable_template"
             type="button"
@@ -235,7 +311,7 @@
             {{ sending === 'template' ? '正在生成大纲…' : '以此结构创作我的主题' }}
           </button>
         </div>
-        <p class="creation-tip">送创作后会自动转成图文大纲，进入创作中心继续编辑和生成图片</p>
+        <p class="creation-tip">「用仿写草稿创作」在本地切页送入创作中心、不消耗额度；「AI 重排」与「以此结构创作」会调用 AI 生成大纲</p>
       </div>
 
       <!-- 仿写草稿区 -->
@@ -266,11 +342,31 @@
       <p class="empty-example">拆解维度：钩子 · 结构 · 情绪 · 受众 · 爆点 · 可复用模板</p>
     </div>
 
+    <!-- 「存入套路库」命名弹窗 -->
+    <div v-if="patternDialogVisible" class="topic-dialog-mask" @click.self="closePatternDialog">
+      <div class="card topic-dialog" role="dialog" aria-modal="true" aria-labelledby="pattern-dialog-title">
+        <h3 id="pattern-dialog-title" class="topic-dialog-title">存入套路库</h3>
+        <p class="topic-dialog-desc">给这个套路起个好记的名字（默认取对标标题），之后可在「我的套路库」随时以此结构创作</p>
+        <input
+          ref="patternNameInputEl"
+          v-model="patternNameInput"
+          class="topic-input"
+          type="text"
+          placeholder="例如：痛点清单体 / 反差故事体"
+          @keyup.enter="confirmSavePattern"
+        />
+        <div class="topic-dialog-actions">
+          <button type="button" class="btn btn-secondary" @click="closePatternDialog">取消</button>
+          <button type="button" class="btn btn-primary" @click="confirmSavePattern">存入</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 「以此结构创作」主题输入弹窗 -->
     <div v-if="topicDialogVisible" class="topic-dialog-mask" @click.self="closeTopicDialog">
       <div class="card topic-dialog" role="dialog" aria-modal="true" aria-labelledby="topic-dialog-title">
         <h3 id="topic-dialog-title" class="topic-dialog-title">以此结构创作我的主题</h3>
-        <p class="topic-dialog-desc">AI 会严格按刚拆解出的爆款结构模板，围绕你的主题生成图文大纲</p>
+        <p class="topic-dialog-desc">AI 会严格按选中的爆款结构模板，围绕你的主题生成图文大纲（将调用 AI）</p>
         <input
           ref="topicDialogInputEl"
           v-model="topicDialogInput"
@@ -315,11 +411,20 @@ import type { Page } from '../api/types'
 import { normalizeApiError, type AppError } from '../utils/errors'
 import {
   addEntry,
+  buildSummary,
   createEntry,
   loadHistory,
   saveHistory,
   type BenchmarkHistoryEntry,
 } from '../utils/benchmarkHistory'
+import {
+  addPatternEntry,
+  createPatternEntry,
+  loadPatternLibrary,
+  removePatternEntry,
+  savePatternLibrary,
+  type PatternEntry,
+} from '../utils/patternLibrary'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
 const router = useRouter()
@@ -338,14 +443,36 @@ const copiedKey = ref('')
 // 送创作加载态：'' 空闲 | 'draft' 仿写草稿 | 'template' 结构模板
 const sending = ref<'' | 'draft' | 'template'>('')
 
-// 「以此结构创作」主题弹窗
+// 「以此结构创作」主题弹窗；templateForCreation 是本次确认后要套用的结构模板
+// （既可能来自刚拆解出的结果，也可能来自套路库里存的某条套路）
 const topicDialogVisible = ref(false)
 const topicDialogInput = ref('')
 const topicDialogInputEl = ref<HTMLInputElement | null>(null)
+const templateForCreation = ref('')
 
 // 本地历史
 const history = ref<BenchmarkHistoryEntry[]>(loadHistory())
 const showHistory = ref(false)
+
+// 当前拆解结果的来源标题/摘要（存套路时的默认命名与来源字段）
+const analysisSource = ref('')
+
+// ==================== 我的套路库状态 ====================
+const patterns = ref<PatternEntry[]>(loadPatternLibrary())
+const showPatterns = ref(false)
+// 展开查看模板全文的套路 ID
+const expandedPatternId = ref('')
+// 两次点击确认删除：第一次点击记录 ID，2.5 秒内再点才真正删除
+const pendingDeletePatternId = ref('')
+let deletePatternTimer: ReturnType<typeof setTimeout> | undefined
+
+// 「存入套路库」命名弹窗
+const patternDialogVisible = ref(false)
+const patternNameInput = ref('')
+const patternNameInputEl = ref<HTMLInputElement | null>(null)
+// 存入成功后的短暂反馈（按钮变「已存入 ✓」）
+const patternSavedFlash = ref(false)
+let patternSavedTimer: ReturnType<typeof setTimeout> | undefined
 
 // 品牌人设选择：'' 表示不使用，默认选中当前启用档案
 const brands = ref<BrandKit[]>([])
@@ -369,6 +496,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (copyTimer !== undefined) clearTimeout(copyTimer)
+  if (deletePatternTimer !== undefined) clearTimeout(deletePatternTimer)
+  if (patternSavedTimer !== undefined) clearTimeout(patternSavedTimer)
 })
 
 const canAnalyze = computed(() =>
@@ -396,6 +525,8 @@ async function handleAnalyze() {
     if (result.success && result.analysis) {
       analysis.value = result.analysis
       draft.value = result.draft || ''
+      // 记录来源摘要，作为「存入套路库」的默认命名与来源字段
+      analysisSource.value = buildSummary(input)
       recordHistory(input, result.analysis, result.draft || '')
     } else {
       error.value = normalizeApiError(result.error || result.error_message || '对标拆解失败', '对标拆解失败')
@@ -425,6 +556,7 @@ function restoreFromHistory(entry: BenchmarkHistoryEntry) {
   if (loading.value || sending.value) return
   analysis.value = entry.analysis
   draft.value = entry.draft
+  analysisSource.value = entry.summary
   if (entry.myTopic) myTopic.value = entry.myTopic
   error.value = null
 }
@@ -437,8 +569,110 @@ function formatTime(timestamp: number): string {
 
 // ==================== 一键送创作 ====================
 
+// 本地切页的单页字数区间：短于下限的相邻段落会被合并，超过上限的段落按句拆分
+const PAGE_MIN_CHARS = 50
+const PAGE_MAX_CHARS = 120
+
 /**
- * 长文本 → 大纲 → 写入 store → 跳转创作中心（照抄 ToolLinkView.sendToCreation 模式）
+ * 把正文本地切成 50-120 字的内容页（纯前端，不调用 AI）：
+ * 1. 按换行拆段；2. 超长段按句尾标点再拆（无标点的整句硬切）；
+ * 3. 相邻短段贪心合并，凑到下限即成页
+ */
+function splitBodyToChunks(body: string): string[] {
+  const paragraphs = body.split(/\n+/).map(s => s.trim()).filter(Boolean)
+
+  const units: string[] = []
+  for (const para of paragraphs) {
+    if (para.length <= PAGE_MAX_CHARS) {
+      units.push(para)
+      continue
+    }
+    let buf = ''
+    for (const sentence of para.split(/(?<=[。！？!?；;…])/).map(s => s.trim()).filter(Boolean)) {
+      if (sentence.length > PAGE_MAX_CHARS) {
+        // 整句无标点且超长：按上限硬切，避免单页爆版
+        if (buf) { units.push(buf); buf = '' }
+        for (let i = 0; i < sentence.length; i += PAGE_MAX_CHARS) {
+          units.push(sentence.slice(i, i + PAGE_MAX_CHARS))
+        }
+      } else if (buf && buf.length + sentence.length > PAGE_MAX_CHARS) {
+        units.push(buf)
+        buf = sentence
+      } else {
+        buf = buf ? buf + sentence : sentence
+      }
+    }
+    if (buf) units.push(buf)
+  }
+
+  const chunks: string[] = []
+  let current = ''
+  for (const unit of units) {
+    if (!current) {
+      current = unit
+    } else if (current.length < PAGE_MIN_CHARS && current.length + 1 + unit.length <= PAGE_MAX_CHARS) {
+      current = `${current}\n${unit}`
+    } else {
+      chunks.push(current)
+      current = unit
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+/** 纯 #标签 行（如「#穿搭 #通勤」），作为收尾时切成总结页 */
+function isTagLine(text: string): boolean {
+  return /^(#[^\s#]+\s*)+$/.test(text.trim())
+}
+
+/**
+ * 「用仿写草稿创作」（默认路径，不耗额度）：
+ * 草稿已经是分好段的成稿，前端直接本地构造大纲——
+ * 首段较短时视为草稿自带标题作封面页（否则用「我的主题」作封面），
+ * 正文切成 50-120 字的内容页，结尾的纯标签行作总结页收尾
+ */
+function sendDraftToCreation() {
+  if (!draft.value || loading.value || sending.value) return
+
+  const paragraphs = draft.value.split(/\n+/).map(s => s.trim()).filter(Boolean)
+  if (paragraphs.length === 0) return
+
+  const topic = myTopic.value.trim()
+  // 封面文案：首段不超过 40 字时视为草稿自带标题；否则退回主题/默认名
+  let coverText = topic || '对标仿创'
+  let bodyParagraphs = paragraphs
+  if (paragraphs[0].length <= 40 && paragraphs.length > 1) {
+    coverText = paragraphs[0]
+    bodyParagraphs = paragraphs.slice(1)
+  }
+
+  // 结尾的纯标签行单独收出来作总结页
+  let summaryText = ''
+  if (bodyParagraphs.length > 1 && isTagLine(bodyParagraphs[bodyParagraphs.length - 1])) {
+    summaryText = bodyParagraphs[bodyParagraphs.length - 1]
+    bodyParagraphs = bodyParagraphs.slice(0, -1)
+  }
+
+  const pages: Page[] = [{ index: 0, type: 'cover', content: coverText }]
+  for (const chunk of splitBodyToChunks(bodyParagraphs.join('\n'))) {
+    pages.push({ index: pages.length, type: 'content', content: chunk })
+  }
+  if (summaryText) {
+    pages.push({ index: pages.length, type: 'summary', content: summaryText })
+  }
+  const raw = pages.map(page => page.content).join('\n\n<page>\n\n')
+
+  store.setTopic(topic || coverText)
+  store.setOutline(raw, pages)
+  // 清空旧的历史记录 ID，让大纲页为本次内容创建新的历史记录
+  store.setRecordId(null)
+
+  router.push('/outline')
+}
+
+/**
+ * 长文本 → 大纲 → 写入 store → 跳转创作中心（照抄 ToolLinkView.sendToCreation 模式，将调用 AI）
  */
 async function sendTextToCreation(text: string, fallbackTopic: string, kind: 'draft' | 'template') {
   if (loading.value || sending.value) return
@@ -475,14 +709,26 @@ async function sendTextToCreation(text: string, fallbackTopic: string, kind: 'dr
   }
 }
 
-/** 「用仿写草稿创作」：把 draft 转成大纲后进入创作流程 */
-function sendDraftToCreation() {
+/** 「AI 重排后送入」（次级路径）：把 draft 交给 AI 重新提炼成大纲后进入创作流程 */
+function sendDraftToCreationViaAI() {
   if (!draft.value) return
   sendTextToCreation(draft.value, myTopic.value.trim(), 'draft')
 }
 
+/** 以刚拆解出的结构模板打开主题弹窗 */
 function openTopicDialog() {
   if (loading.value || sending.value) return
+  if (!analysis.value?.reusable_template) return
+  templateForCreation.value = analysis.value.reusable_template
+  topicDialogInput.value = myTopic.value.trim()
+  topicDialogVisible.value = true
+  nextTick(() => topicDialogInputEl.value?.focus())
+}
+
+/** 以套路库里存的某条套路打开主题弹窗（复用同一个「以此结构创作」路径） */
+function openTopicDialogForPattern(pattern: PatternEntry) {
+  if (loading.value || sending.value) return
+  templateForCreation.value = pattern.template
   topicDialogInput.value = myTopic.value.trim()
   topicDialogVisible.value = true
   nextTick(() => topicDialogInputEl.value?.focus())
@@ -495,16 +741,71 @@ function closeTopicDialog() {
 /** 「以此结构创作我的主题」：主题 + 套路模板拼成长文，转大纲后进入创作流程 */
 function confirmTemplateCreation() {
   const topic = topicDialogInput.value.trim()
-  if (!topic || !analysis.value?.reusable_template) return
+  if (!topic || !templateForCreation.value) return
 
   topicDialogVisible.value = false
   const text = [
     '请严格按以下爆款结构模板创作：',
     `主题：${topic}`,
-    `结构模板：\n${analysis.value.reusable_template}`,
+    `结构模板：\n${templateForCreation.value}`,
   ].join('\n\n')
 
   sendTextToCreation(text, topic, 'template')
+}
+
+// ==================== 我的套路库 ====================
+
+/** 打开「存入套路库」命名弹窗，名称默认取对标标题/摘要 */
+function openPatternDialog() {
+  if (!analysis.value?.reusable_template) return
+  patternNameInput.value = analysisSource.value
+  patternDialogVisible.value = true
+  nextTick(() => {
+    patternNameInputEl.value?.focus()
+    patternNameInputEl.value?.select()
+  })
+}
+
+function closePatternDialog() {
+  patternDialogVisible.value = false
+}
+
+/** 确认存入：写入套路库并给出短暂反馈 */
+function confirmSavePattern() {
+  if (!analysis.value?.reusable_template) return
+
+  const entry = createPatternEntry({
+    name: patternNameInput.value,
+    template: analysis.value.reusable_template,
+    sourceTitle: analysisSource.value,
+  })
+  patterns.value = addPatternEntry(patterns.value, entry)
+  savePatternLibrary(patterns.value)
+
+  patternDialogVisible.value = false
+  patternSavedFlash.value = true
+  if (patternSavedTimer !== undefined) clearTimeout(patternSavedTimer)
+  patternSavedTimer = setTimeout(() => { patternSavedFlash.value = false }, 1500)
+}
+
+/** 展开/收起某条套路的模板全文 */
+function togglePatternExpand(id: string) {
+  expandedPatternId.value = expandedPatternId.value === id ? '' : id
+}
+
+/** 两段式删除：第一次点击进入确认态，2.5 秒内再点才删除 */
+function requestDeletePattern(id: string) {
+  if (pendingDeletePatternId.value !== id) {
+    pendingDeletePatternId.value = id
+    if (deletePatternTimer !== undefined) clearTimeout(deletePatternTimer)
+    deletePatternTimer = setTimeout(() => { pendingDeletePatternId.value = '' }, 2500)
+    return
+  }
+  if (deletePatternTimer !== undefined) clearTimeout(deletePatternTimer)
+  pendingDeletePatternId.value = ''
+  patterns.value = removePatternEntry(patterns.value, id)
+  savePatternLibrary(patterns.value)
+  if (expandedPatternId.value === id) expandedPatternId.value = ''
 }
 
 // ==================== 复制 ====================
@@ -807,6 +1108,101 @@ function copyDraft() {
   color: var(--text-sub);
 }
 
+/* 我的套路库（在历史区样式基础上加操作按钮与详情展开） */
+.pattern-item {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+}
+
+.pattern-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px 6px 0;
+}
+
+.pattern-name-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pattern-name-btn:hover .history-summary {
+  color: var(--primary);
+}
+
+.pattern-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.pattern-action-btn {
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+  background: var(--bg-card);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-sub);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.pattern-action-btn:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.pattern-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pattern-action-btn.danger:hover {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.pattern-detail {
+  padding: 0 14px 12px;
+}
+
+.pattern-template-text {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xs);
+}
+
+.pattern-source {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 加载骨架（纯 CSS shimmer） */
 .skeleton-section {
   margin-top: var(--space-5);
@@ -966,6 +1362,13 @@ function copyDraft() {
   margin-bottom: 0;
 }
 
+.template-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 .template-text {
   font-weight: 500;
 }
@@ -974,6 +1377,7 @@ function copyDraft() {
 .creation-bar {
   display: flex;
   justify-content: center;
+  align-items: center;
   gap: var(--space-3);
   margin-top: var(--space-5);
   flex-wrap: wrap;
@@ -981,6 +1385,23 @@ function copyDraft() {
 
 .creation-btn {
   min-width: 200px;
+}
+
+/* AI 重排按钮 + 消耗提示：提示紧贴按钮，提醒该路径会调用 AI */
+.ai-send-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-send-group .creation-btn {
+  min-width: 0;
+}
+
+.ai-cost-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .creation-tip {
@@ -1148,6 +1569,16 @@ function copyDraft() {
   .result-header,
   .template-header {
     flex-wrap: wrap;
+  }
+
+  .pattern-row {
+    flex-wrap: wrap;
+    padding: 6px 8px;
+  }
+
+  .pattern-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 </style>

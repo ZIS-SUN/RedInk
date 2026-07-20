@@ -327,6 +327,17 @@
       </div>
     </div>
 
+    <!-- 从大纲页跳来时：应用风格后的「返回继续创作」悬浮条 -->
+    <transition name="toast-fade">
+      <div v-if="appliedFromOutline" class="back-to-outline-bar" role="status">
+        <span class="back-bar-text">已应用「{{ appliedFromOutline }}」</span>
+        <button type="button" class="back-bar-btn" @click="backToOutline">
+          返回继续创作 →
+        </button>
+        <button type="button" class="back-bar-close" aria-label="关闭提示" @click="appliedFromOutline = ''">×</button>
+      </div>
+    </transition>
+
     <!-- 轻提示 -->
     <transition name="toast-fade">
       <div v-if="toast" class="toast" role="status" aria-live="polite">{{ toast }}</div>
@@ -337,6 +348,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { styleCategories, type StyleCategory, type StyleTemplate } from '../data/styleTemplates'
 import { useStyleLibrary } from '../composables/useStyleLibrary'
 import {
@@ -553,12 +565,32 @@ function showToast(message: string) {
   }, 2000)
 }
 
+// ==================== 从大纲页跳来的返回动线 ====================
+
+const route = useRoute()
+const router = useRouter()
+
+/** 是否从大纲页跳来（大纲页跳风格库的链接带 ?from=outline） */
+const fromOutline = computed(() => route.query.from === 'outline')
+
+/** 应用成功后展示「返回继续创作」悬浮条（记录已应用的风格名，空串表示隐藏） */
+const appliedFromOutline = ref('')
+
+function backToOutline() {
+  router.push('/outline')
+}
+
 /**
- * 应用风格模板
+ * 应用风格模板；从大纲页跳来时改为展示「返回继续创作」悬浮条
+ * （替代普通 toast，引导用户带着新风格回到创作流程）
  */
 function handleApply(template: StyleTemplate) {
   applyStyle(template)
-  showToast(`已应用「${template.name}」风格`)
+  if (fromOutline.value) {
+    appliedFromOutline.value = template.name
+  } else {
+    showToast(`已应用「${template.name}」风格`)
+  }
 }
 
 // 复制反馈：记录最近一次复制成功的按钮，短暂显示「已复制」后复原
@@ -1302,6 +1334,61 @@ async function copyPrompt(prompt: string, key: string) {
   word-break: break-all;
 }
 
+/* ===== 从大纲页跳来的「返回继续创作」悬浮条 ===== */
+.back-to-outline-bar {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 14px 10px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-lg);
+  z-index: 1500;
+  white-space: nowrap;
+}
+
+.back-bar-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.back-bar-btn {
+  padding: 7px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  background: var(--primary);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.back-bar-btn:hover {
+  background: var(--primary-hover);
+}
+
+.back-bar-close {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: var(--radius-full);
+  transition: color var(--transition-fast);
+}
+
+.back-bar-close:hover {
+  color: var(--text-main);
+}
+
 /* ===== 轻提示 ===== */
 .toast {
   position: fixed;
@@ -1367,6 +1454,12 @@ async function copyPrompt(prompt: string, key: string) {
     max-width: calc(100vw - 32px);
     white-space: normal;
     text-align: center;
+  }
+
+  .back-to-outline-bar {
+    bottom: calc(var(--mobile-tabbar-height) + 20px);
+    max-width: calc(100vw - 24px);
+    white-space: normal;
   }
 
   .create-btn,

@@ -105,6 +105,21 @@
     <template v-else>
       <!-- 月历视图 -->
       <div v-if="viewMode === 'month'" class="calendar-wrap card">
+        <!-- 本月无计划时的空态引导卡（样式参照数据复盘的 empty-state） -->
+        <div v-if="plans.length === 0" class="month-empty-guide">
+          <div class="guide-icon-wrap" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          </div>
+          <h3 class="guide-title">本月还没有内容计划</h3>
+          <p class="guide-desc">点击下方任意日期新建，或让 AI 帮你排一周</p>
+          <div class="guide-actions">
+            <button type="button" class="btn btn-primary guide-cta" @click="openCreateModal()">新建计划</button>
+            <button type="button" class="btn btn-mini btn-ai" @click="openAiModal">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              AI 帮我排一周
+            </button>
+          </div>
+        </div>
         <div class="calendar-grid calendar-head">
           <div v-for="w in WEEKDAYS" :key="w" class="weekday-cell">{{ w }}</div>
         </div>
@@ -184,7 +199,7 @@
                   class="record-link"
                   :aria-label="`查看「${plan.title}」关联的作品`"
                   title="该计划已关联历史作品"
-                  @click.stop="viewLinkedRecord()"
+                  @click.stop="viewLinkedRecord(plan)"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
                   查看作品
@@ -530,6 +545,52 @@
       </div>
     </Teleport>
 
+    <!-- 发布后黄金操作 SOP 卡片（状态流转为已发布后弹一次） -->
+    <Teleport to="body">
+      <div v-if="sopPlan" class="plan-modal-overlay" @click.self="closeSopModal">
+        <div class="plan-modal" role="dialog" aria-modal="true" aria-label="发布后黄金操作">
+          <div class="plan-modal-head">
+            <h3>🎉 已发布！接下来的黄金操作</h3>
+            <button type="button" class="close-btn" aria-label="关闭" @click="closeSopModal">×</button>
+          </div>
+
+          <div class="plan-modal-body">
+            <p class="log-hint">「{{ sopPlan.title }}」已标记为已发布。发布后的头几个小时决定了内容能进多大的流量池，抓紧做这三件事：</p>
+
+            <ol class="sop-list">
+              <li class="sop-item">
+                <span class="sop-step">1</span>
+                <div class="sop-main">
+                  <p class="sop-text">发布后 1 小时内回复每条评论</p>
+                  <p class="sop-sub">评论互动的权重约为点赞的 4 倍，前排热评能显著拉高进池概率</p>
+                </div>
+              </li>
+              <li class="sop-item">
+                <span class="sop-step">2</span>
+                <div class="sop-main">
+                  <p class="sop-text">用评论助手生成一条置顶引导评论</p>
+                  <p class="sop-sub">把互动话题抛出来，引导粉丝在评论区盖楼</p>
+                </div>
+                <button type="button" class="btn btn-mini btn-create" @click="goSop('/tools/reply')">去生成</button>
+              </li>
+              <li class="sop-item">
+                <span class="sop-step">3</span>
+                <div class="sop-main">
+                  <p class="sop-text">48 小时后回来录入数据看效果</p>
+                  <p class="sop-sub">曝光、点赞、涨粉录进数据复盘，让下一次选题更有把握</p>
+                </div>
+                <button type="button" class="btn btn-mini btn-create" @click="goSop('/tools/analytics')">去复盘</button>
+              </li>
+            </ol>
+          </div>
+
+          <div class="plan-modal-foot">
+            <button type="button" class="btn btn-primary" @click="closeSopModal">知道了</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
       :visible="!!deleteTarget"
@@ -578,6 +639,7 @@ import {
   saveHotspotLayerEnabled,
   upcomingHotspots
 } from '../utils/hotspotLayer'
+import { buildCreationTopicFromPlan } from '../utils/ideaArchive'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
@@ -592,6 +654,7 @@ import { normalizeApiError, type AppError } from '../utils/errors'
  * - AI 一周排期（生成预览 → 勾选 → 逐条添加到日历）
  * - 状态流转（想法 → 制作中 → 待发布 → 已发布）
  * - 标记「已发布」后一键转录到数据复盘（标题/平台/日期预填，补充指标即可）
+ * - 标记「已发布」后弹一次「发布后黄金操作」SOP 卡片（回评论/置顶评论/48h 复盘）
  * - 按平台 / 状态筛选
  * - 本月统计（计划总数 + 各状态数量）
  * - 热点节点图层（可开关，偏好存 localStorage）：月历叠加节日/电商/季节节点，
@@ -886,7 +949,10 @@ async function handleSave() {
     successMessage.value = editingPlan.value ? '计划已更新' : '计划已添加'
     showModal.value = false
     await loadData()
-    if (becamePublished && res.plan) openLogModal(res.plan)
+    if (becamePublished && res.plan) {
+      sopPending = true
+      openLogModal(res.plan)
+    }
   } else {
     formError.value = res.error_message || '保存失败，请重试'
   }
@@ -905,7 +971,10 @@ async function handleStatusChange(plan: PlanItem, status: PlanStatus) {
   if (res.success) {
     successMessage.value = `「${plan.title}」已流转为「${statusLabel(status)}」`
     await loadData()
-    if (status === 'published') openLogModal(res.plan || plan)
+    if (status === 'published') {
+      sopPending = true
+      openLogModal(res.plan || plan)
+    }
   } else {
     error.value = normalizeApiError(res.error || res.error_message || '更新计划状态失败', '更新计划状态失败')
     await loadData()
@@ -914,11 +983,12 @@ async function handleStatusChange(plan: PlanItem, status: PlanStatus) {
 
 /**
  * 从计划直接进入创作流程：
- * 把计划标题写入 generator store 作为主题并跳转到创作起点（首页）。
+ * 把计划标题 + 备注里的切入角度/建议标签拼成主题文本写入 generator store
+ * （与选题工具「用这个创作」同等的信息量），再跳转到创作起点（首页）。
  * 若计划处于 idea/ready 状态，顺带流转为 in_progress（尽力而为，失败不阻塞跳转）。
  */
 function startCreation(plan: PlanItem) {
-  generatorStore.setTopic(plan.title)
+  generatorStore.setTopic(buildCreationTopicFromPlan(plan.title, plan.notes))
 
   if (plan.status === 'idea' || plan.status === 'ready') {
     // 不 await：状态流转失败不影响进入创作
@@ -929,10 +999,15 @@ function startCreation(plan: PlanItem) {
 }
 
 /**
- * 查看条目关联的历史作品（简单跳转到历史页）
+ * 查看条目关联的历史作品：有 record_id 时直达作品详情页，
+ * 缺失时兜底跳历史列表（与数据复盘页的「查看作品」行为一致）
  */
-function viewLinkedRecord() {
-  router.push('/history')
+function viewLinkedRecord(plan: PlanItem) {
+  if (plan.record_id) {
+    router.push({ name: 'history-detail', params: { id: plan.record_id } })
+  } else {
+    router.push('/history')
+  }
 }
 
 // ==================== 转录到数据复盘（发布闭环） ====================
@@ -990,6 +1065,7 @@ function openLogModal(plan: PlanItem) {
 function closeLogModal() {
   if (logSaving.value) return
   showLogModal.value = false
+  maybeShowSop()
 }
 
 /**
@@ -1021,9 +1097,38 @@ async function handleLogSubmit() {
       ? `「${logForm.title.trim()}」已转录到数据复盘`
       : `已更新数据复盘中「${logForm.title.trim()}」的关联记录`
     showLogModal.value = false
+    maybeShowSop()
   } else {
     logError.value = res.error_message || '转录失败，请重试'
   }
+}
+
+// ==================== 发布后黄金操作 SOP（B9 轻量版） ====================
+
+/** SOP 卡片对应的计划（null 表示关闭） */
+const sopPlan = ref<PlanItem | null>(null)
+
+/**
+ * 「刚流转为已发布」的一次性标记：
+ * 转录弹窗与 SOP 卡片共用发布时机，为避免两个弹层叠在一起，
+ * 在转录弹窗关闭（跳过或提交成功）后再弹 SOP，且只弹这一次。
+ */
+let sopPending = false
+
+function maybeShowSop() {
+  if (!sopPending) return
+  sopPending = false
+  sopPlan.value = logPlan.value
+}
+
+function closeSopModal() {
+  sopPlan.value = null
+}
+
+/** 点击 SOP 卡片里的跳转按钮：关闭卡片并前往对应工具页 */
+function goSop(path: string) {
+  sopPlan.value = null
+  router.push(path)
 }
 
 // ==================== 热点节点图层 ====================
@@ -1366,6 +1471,29 @@ onMounted(() => {
   font-size: 13px;
 }
 
+/* 工具栏筛选下拉：去掉原生 select 质感，与 chip/分段控件统一为 32px 高的描边控件 */
+.toolbar .select-mini {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 32px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  background-color: var(--bg-card);
+  /* 自绘 chevron（描边色取 --text-sub 的 #5D5850，与文本色一致） */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235D5850' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.toolbar .select-mini:hover {
+  border-color: var(--border-hover);
+  background-color: var(--gray-0);
+}
+
 .view-toggle {
   display: flex;
   border: 1px solid var(--border-color);
@@ -1466,6 +1594,63 @@ onMounted(() => {
 .calendar-wrap {
   padding: 16px;
   margin-bottom: 40px;
+}
+
+/* 本月无计划时的空态引导卡（月历网格上方） */
+.month-empty-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  margin-bottom: 12px;
+  border: 1px dashed var(--border-hover);
+  border-radius: var(--radius-md);
+  background: var(--gray-0);
+}
+
+.guide-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  background: var(--primary-fade);
+  color: var(--primary);
+  margin-bottom: var(--space-3);
+}
+
+.guide-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.guide-desc {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.guide-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: var(--space-4);
+}
+
+.guide-cta {
+  padding: 8px 20px;
+  font-size: 14px;
+}
+
+/* 引导卡内的 AI 排期按钮与主按钮等高 */
+.guide-actions .btn-ai {
+  padding: 8px 16px;
+  font-size: 14px;
 }
 
 .calendar-grid {
@@ -1899,6 +2084,69 @@ onMounted(() => {
   color: var(--text-sub);
 }
 
+/* ==================== 发布后黄金操作 SOP 卡片 ==================== */
+
+.sop-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sop-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-0);
+}
+
+.sop-step {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.sop-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sop-text {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+.sop-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.sop-item .btn-create {
+  flex-shrink: 0;
+}
+
 .status-radio-group {
   display: flex;
   gap: 8px;
@@ -2284,12 +2532,21 @@ onMounted(() => {
 
 /* 移动端适配 */
 @media (max-width: 640px) {
+  /* 统计行改为横向滚动，避免 5 张卡在窄屏被挤成细条 */
   .stats-row {
-    grid-template-columns: repeat(5, 1fr);
-    gap: 6px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .stats-row::-webkit-scrollbar {
+    display: none;
   }
 
   .stat-card {
+    flex: 0 0 96px;
     padding: 10px 4px;
   }
 

@@ -12,7 +12,19 @@
 
     <!-- 输入区 -->
     <div class="card input-card">
-      <label class="field-label" for="title-topic">主题 / 文案草稿</label>
+      <div class="label-row">
+        <label class="field-label" for="title-topic">主题 / 文案草稿</label>
+        <button
+          v-if="storeTopic"
+          type="button"
+          class="pull-topic-btn"
+          title="把创作中心当前的主题填入输入框"
+          @click="pullStoreTopic"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 10 4 15l5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg>
+          带入当前创作主题
+        </button>
+      </div>
       <textarea
         id="title-topic"
         v-model="topic"
@@ -84,6 +96,28 @@
       </button>
     </div>
 
+    <!-- 最近记录（本地存档） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">最近记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ entry.summary }} · {{ entry.payload.titles.length }} 个候选</span>
+            <span class="history-time">{{ formatArchiveTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
     <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
     <div v-if="loading && titles.length === 0" class="skeleton-section" aria-hidden="true">
       <div v-for="n in 3" :key="n" class="skeleton-card">
@@ -145,15 +179,37 @@
               <span class="score-num">{{ item.score }}</span>
               <span class="score-label">吸引力</span>
             </div>
-            <button
-              type="button"
-              class="copy-btn"
-              :class="{ copied: copiedText === item.text }"
-              :aria-label="`复制标题：${item.text}`"
-              @click="handleCopy(item.text)"
-            >
-              {{ copiedText === item.text ? '已复制' : '复制' }}
-            </button>
+            <div class="card-actions">
+              <button
+                type="button"
+                class="use-btn"
+                :aria-label="`以「${item.text}」为主题开始创作`"
+                title="以这条标题为主题开始新创作"
+                @click="handleUseForCreation(item)"
+              >
+                以此标题创作
+              </button>
+              <button
+                v-if="hasActiveWork"
+                type="button"
+                class="copy-btn"
+                :class="{ copied: usedTitleText === item.text }"
+                :aria-label="`把「${item.text}」设为当前作品的首选标题`"
+                title="插入当前作品的标题候选首位（保留已有文案与标签）"
+                @click="useAsWorkTitle(item)"
+              >
+                {{ usedTitleText === item.text ? '已设为首选 ✓' : '用作作品标题' }}
+              </button>
+              <button
+                type="button"
+                class="copy-btn"
+                :class="{ copied: copiedText === item.text }"
+                :aria-label="`复制标题：${item.text}`"
+                @click="handleCopy(item.text)"
+              >
+                {{ copiedText === item.text ? '已复制' : '复制' }}
+              </button>
+            </div>
           </div>
         </div>
       </transition-group>
@@ -191,9 +247,22 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { generateTitles, type TitleCandidate } from '../api/title'
 import { getBrandList, type BrandKit } from '../api/brand'
+import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  TITLE_ARCHIVE_KEY,
+  addToolArchiveEntry,
+  createToolArchiveEntry,
+  formatArchiveTime,
+  isValidTitlePayload,
+  loadToolArchive,
+  saveToolArchive,
+  type TitleArchivePayload,
+  type ToolArchiveEntry,
+} from '../utils/toolArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
 const PLATFORMS = ['小红书', '抖音', '视频号', 'B站', '公众号'] as const
@@ -208,6 +277,9 @@ const STYLES = [
   { value: '情绪型', label: '情绪型', hint: '调动情绪共鸣，靠感染力带动转发与讨论' }
 ] as const
 
+const router = useRouter()
+const store = useGeneratorStore()
+
 const topic = ref('')
 const platform = ref<string>(PLATFORMS[0])
 const style = ref<string>(STYLES[0].value)
@@ -217,6 +289,22 @@ const error = ref<AppError | null>(null)
 const titles = ref<TitleCandidate[]>([])
 const sortByScore = ref(true)
 const copiedText = ref('')
+
+// 最近记录（本地存档，最近 10 次生成结果）
+const archive = ref<Array<ToolArchiveEntry<TitleArchivePayload>>>(
+  loadToolArchive(TITLE_ARCHIVE_KEY, isValidTitlePayload)
+)
+const showArchive = ref(false)
+
+// 「用作作品标题」的反馈标记（短暂显示「已设为首选 ✓」）
+const usedTitleText = ref('')
+let usedTitleTimer: ReturnType<typeof setTimeout> | undefined
+
+/** 创作中心当前主题（非空时展示「带入当前创作主题」快捷按钮） */
+const storeTopic = computed(() => store.topic.trim())
+
+/** 是否有进行中的作品内容（决定「用作作品标题」按钮是否展示） */
+const hasActiveWork = computed(() => store.content.status === 'done')
 
 // 品牌人设选择：'' 表示不使用，默认选中当前启用档案
 const brands = ref<BrandKit[]>([])
@@ -240,6 +328,7 @@ let copyTimer: ReturnType<typeof setTimeout> | undefined
 
 onUnmounted(() => {
   if (copyTimer !== undefined) clearTimeout(copyTimer)
+  if (usedTitleTimer !== undefined) clearTimeout(usedTitleTimer)
 })
 
 const activeStyleHint = computed(() =>
@@ -282,6 +371,7 @@ async function handleGenerate() {
     if (result.success && result.titles) {
       titles.value = result.titles
       hasGenerated.value = true
+      recordArchive(result.titles)
     } else {
       error.value = normalizeApiError(
         result.error || result.error_message || '生成标题失败',
@@ -293,6 +383,70 @@ async function handleGenerate() {
   } finally {
     loading.value = false
   }
+}
+
+// ==================== 最近记录（本地存档） ====================
+
+function recordArchive(resultTitles: TitleCandidate[]) {
+  if (resultTitles.length === 0) return
+  const entry = createToolArchiveEntry<TitleArchivePayload>({
+    input: topic.value.trim(),
+    payload: {
+      topic: topic.value.trim(),
+      platform: platform.value,
+      style: style.value,
+      titles: resultTitles,
+    },
+  })
+  archive.value = addToolArchiveEntry(archive.value, entry)
+  saveToolArchive(TITLE_ARCHIVE_KEY, archive.value)
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: ToolArchiveEntry<TitleArchivePayload>) {
+  if (loading.value) return
+  topic.value = entry.payload.topic
+  if ((PLATFORMS as readonly string[]).includes(entry.payload.platform)) {
+    platform.value = entry.payload.platform
+  }
+  if (STYLES.some(s => s.value === entry.payload.style)) {
+    style.value = entry.payload.style
+  }
+  titles.value = entry.payload.titles
+  hasGenerated.value = true
+  error.value = null
+}
+
+// ==================== 流转：预填 / 送创作 / 写回作品 ====================
+
+/** 把创作中心当前主题填入输入框 */
+function pullStoreTopic() {
+  if (!storeTopic.value) return
+  topic.value = storeTopic.value
+}
+
+/**
+ * 以该标题为主题开始新创作：写入 generator store 后跳回首页创作流程
+ * （与选题工具「用这个选题创作」机制一致）
+ */
+function handleUseForCreation(item: TitleCandidate) {
+  store.setTopic(item.text)
+  router.push('/')
+}
+
+/**
+ * 把该标题设为当前作品的首选标题：
+ * 插入 store.content.titles 首位（同文本去重），保留已有文案与标签。
+ * 没有进行中的作品内容时按钮不展示，此处直接返回兜底。
+ */
+function useAsWorkTitle(item: TitleCandidate) {
+  if (!hasActiveWork.value) return
+  const rest = store.content.titles.filter(t => t !== item.text)
+  store.setContent([item.text, ...rest], store.content.copywriting, store.content.tags)
+
+  usedTitleText.value = item.text
+  if (usedTitleTimer !== undefined) clearTimeout(usedTitleTimer)
+  usedTitleTimer = setTimeout(() => { usedTitleText.value = '' }, 1500)
 }
 
 async function handleCopy(text: string) {
@@ -370,6 +524,42 @@ async function handleCopy(text: string) {
   font-weight: 600;
   color: var(--text-main);
   margin-bottom: 10px;
+}
+
+/* 标签行：左侧 label + 右侧「带入当前创作主题」快捷按钮 */
+.label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.label-row .field-label {
+  margin-bottom: 10px;
+}
+
+.pull-topic-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.pull-topic-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+  box-shadow: var(--shadow-xs);
 }
 
 .topic-input {
@@ -492,6 +682,85 @@ async function handleCopy(text: string) {
 .generate-btn {
   margin-top: 22px;
   width: 100%;
+}
+
+/* ── 最近记录（本地存档，样式参照选题灵感的历史区） ── */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* ── 加载骨架（纯 CSS shimmer） ───── */
@@ -695,16 +964,16 @@ async function handleCopy(text: string) {
   font-weight: 500;
 }
 
-/* 品牌禁用词命中的红色警示标记 */
+/* 品牌禁用词命中的红色警示标记（语义色统一走设计令牌的暖调红） */
 .banned-tag {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 10px;
   border-radius: var(--radius-full);
-  background: rgba(220, 38, 38, 0.1);
-  border: 1px solid rgba(220, 38, 38, 0.35);
-  color: #dc2626;
+  background: var(--color-danger-soft);
+  border: 1px solid currentColor;
+  color: var(--color-danger);
   font-size: 12px;
   font-weight: 600;
 }
@@ -716,6 +985,41 @@ async function handleCopy(text: string) {
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 「以此标题创作」：主色实底，与选题工具的送创作按钮一致 */
+.use-btn {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
+  white-space: nowrap;
+}
+
+.use-btn:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.use-btn:active {
+  background: var(--primary-active);
+  border-color: var(--primary-active);
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .score-ring {
@@ -895,6 +1199,12 @@ async function handleCopy(text: string) {
     border-top: 1px dashed var(--border-color);
   }
 
+  .card-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .score-ring {
     width: 46px;
     height: 46px;
@@ -943,6 +1253,8 @@ async function handleCopy(text: string) {
   .option-chip:hover,
   .copy-btn,
   .copy-btn:hover,
+  .use-btn,
+  .use-btn:hover,
   .title-card:hover {
     transform: none;
   }

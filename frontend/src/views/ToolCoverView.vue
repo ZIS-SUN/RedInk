@@ -46,6 +46,29 @@
       </button>
     </div>
 
+    <!-- 最近记录（本地存档，样式与其他工具的历史区一致） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">最近记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ entry.summary }} · {{ entry.payload.directions.length }} 个方向</span>
+            <span v-if="adoptedLabel(entry)" class="adopted-badge">已采用 {{ adoptedLabel(entry) }}</span>
+            <span class="history-time">{{ formatArchiveTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
     <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
     <div v-if="loading && directions.length === 0" class="skeleton-grid" aria-hidden="true">
       <div v-for="n in 3" :key="n" class="skeleton-card">
@@ -104,7 +127,20 @@
           <p class="section-text">{{ direction.reason }}</p>
         </div>
 
-        <!-- 复制操作 -->
+        <!-- 送创作 + 复制操作 -->
+        <div class="card-actions card-actions-use">
+          <button
+            type="button"
+            class="use-direction-btn"
+            :aria-label="`带着方向 ${String.fromCharCode(65 + index)} 的标题与视觉概念开始新创作`"
+            title="标题与视觉概念将带入创作中心，开始一次新创作"
+            @click="useDirectionForCreation(direction)"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            用这个方向创作
+          </button>
+        </div>
+        <p class="use-direction-hint">将带着该方向的标题与视觉概念开始新创作</p>
         <div class="card-actions">
           <button
             type="button"
@@ -123,6 +159,17 @@
             @click="copyText(copyKeyOf(index, 'visual'), direction.visual_concept)"
           >
             {{ copiedKey === copyKeyOf(index, 'visual') ? '已复制 ✓' : '复制视觉概念' }}
+          </button>
+          <button
+            v-if="currentEntryId"
+            type="button"
+            class="copy-btn copy-btn-secondary adopt-btn"
+            :class="{ adopted: isAdopted(index) }"
+            :aria-label="`标记方向 ${String.fromCharCode(65 + index)} ${isAdopted(index) ? '取消已采用' : '为已采用'}`"
+            title="记录你实际采用了哪个封面方向，沉淀到最近记录里"
+            @click="toggleAdopted(index)"
+          >
+            {{ isAdopted(index) ? '已采用 ✓' : '标记已采用' }}
           </button>
         </div>
       </div>
@@ -151,15 +198,39 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { generateCoverDirections, type CoverDirection } from '../api/cover'
+import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  COVER_ARCHIVE_KEY,
+  addToolArchiveEntry,
+  createToolArchiveEntry,
+  formatArchiveTime,
+  isValidCoverPayload,
+  loadToolArchive,
+  saveToolArchive,
+  type CoverArchivePayload,
+  type ToolArchiveEntry,
+} from '../utils/toolArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
+
+const router = useRouter()
+const store = useGeneratorStore()
 
 const topic = ref('')
 const content = ref('')
 const loading = ref(false)
 const error = ref<AppError | null>(null)
 const directions = ref<CoverDirection[]>([])
+
+// 最近记录（本地存档，最近 10 次生成结果 + 已采用标记）
+const archive = ref<Array<ToolArchiveEntry<CoverArchivePayload>>>(
+  loadToolArchive(COVER_ARCHIVE_KEY, isValidCoverPayload)
+)
+const showArchive = ref(false)
+// 当前结果区对应的存档条目 ID（「标记已采用」写回这条存档）
+const currentEntryId = ref('')
 
 /** 已复制标记（key 形如 "0-text"），短暂显示"已复制"反馈 */
 const copiedKey = ref('')
@@ -212,6 +283,28 @@ async function copyText(key: string, text: string) {
   }, 1500)
 }
 
+/**
+ * 用这个封面方向开始新创作：
+ * - 方向标题（含副标题）与用户输入的主题组合成主题文本写入 generator store
+ *   （与选题工具「用这个创作」同款的多行主题范式）
+ * - 视觉概念通过 setStylePrompt 注入，供后续生成链路沿用
+ * - 跳回首页创作流程
+ */
+function useDirectionForCreation(direction: CoverDirection) {
+  const userTopic = topic.value.trim()
+  const coverTitle = direction.subtitle
+    ? `${direction.title}（${direction.subtitle}）`
+    : direction.title
+
+  const lines = userTopic ? [userTopic, `封面方向：${coverTitle}`] : [coverTitle]
+  if (direction.style) {
+    lines.push(`风格倾向：${direction.style}`)
+  }
+  store.setTopic(lines.join('\n'))
+  store.setStylePrompt(direction.visual_concept || '')
+  router.push('/')
+}
+
 async function handleGenerate() {
   if (!topic.value.trim() || loading.value) return
 
@@ -226,6 +319,7 @@ async function handleGenerate() {
 
     if (result.success && result.directions && result.directions.length > 0) {
       directions.value = result.directions
+      recordArchive(result.directions)
     } else {
       error.value = normalizeApiError(
         result.error || result.error_message || '生成封面方向失败',
@@ -237,6 +331,60 @@ async function handleGenerate() {
   } finally {
     loading.value = false
   }
+}
+
+// ==================== 最近记录（本地存档 + 已采用标记） ====================
+
+/** 生成成功后自动存档（主题 + 方向数组，「已采用」标记初始为全 false） */
+function recordArchive(resultDirections: CoverDirection[]) {
+  const entry = createToolArchiveEntry<CoverArchivePayload>({
+    input: topic.value.trim(),
+    payload: {
+      topic: topic.value.trim(),
+      content: content.value.trim(),
+      directions: resultDirections,
+      adopted: resultDirections.map(() => false),
+    },
+  })
+  archive.value = addToolArchiveEntry(archive.value, entry)
+  saveToolArchive(COVER_ARCHIVE_KEY, archive.value)
+  currentEntryId.value = entry.id
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: ToolArchiveEntry<CoverArchivePayload>) {
+  if (loading.value) return
+  topic.value = entry.payload.topic
+  content.value = entry.payload.content
+  directions.value = entry.payload.directions
+  currentEntryId.value = entry.id
+  error.value = null
+}
+
+/** 当前结果区对应的存档条目（「已采用」的读写目标） */
+function currentEntry(): ToolArchiveEntry<CoverArchivePayload> | undefined {
+  return archive.value.find(entry => entry.id === currentEntryId.value)
+}
+
+/** 某个方向是否已被标记采用 */
+function isAdopted(index: number): boolean {
+  return currentEntry()?.payload.adopted[index] === true
+}
+
+/** 切换「已采用」标记并写回存档（为将来的封面胜率统计沉淀数据） */
+function toggleAdopted(index: number) {
+  const entry = currentEntry()
+  if (!entry) return
+  entry.payload.adopted[index] = !entry.payload.adopted[index]
+  saveToolArchive(COVER_ARCHIVE_KEY, archive.value)
+}
+
+/** 存档条目的已采用徽标文案：把已采用方向的下标转成 A/B/C 字母 */
+function adoptedLabel(entry: ToolArchiveEntry<CoverArchivePayload>): string {
+  return entry.payload.adopted
+    .map((flag, i) => (flag ? String.fromCharCode(65 + i) : ''))
+    .filter(Boolean)
+    .join('/')
 }
 </script>
 
@@ -313,6 +461,97 @@ async function handleGenerate() {
 .form-textarea:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* ── 最近记录（本地存档，样式照抄其他工具的历史区） ── */
+.history-card {
+  margin: 0 0 var(--space-6);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+/* 存档条目上的已采用徽标 */
+.adopted-badge {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-success);
+  background: var(--color-success-soft);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
 }
 
 /* 加载骨架（纯 CSS shimmer） */
@@ -512,9 +751,64 @@ async function handleGenerate() {
 /* 复制操作 */
 .card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: auto;
   padding-top: 12px;
+}
+
+/* 「标记已采用」切换：选中后走 success 语义色 */
+.adopt-btn.adopted {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+/* 送创作按钮行：贴在卡片底部动作区最上方 */
+.card-actions-use {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.card-actions-use + .use-direction-hint + .card-actions {
+  margin-top: 0;
+  padding-top: 10px;
+}
+
+.use-direction-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--primary);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.use-direction-btn:hover {
+  background: var(--primary-hover);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.use-direction-btn:active {
+  background: var(--primary-active);
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.use-direction-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .copy-btn {
@@ -672,7 +966,9 @@ async function handleGenerate() {
 
   .direction-card:hover,
   .copy-btn,
-  .copy-btn:hover {
+  .copy-btn:hover,
+  .use-direction-btn,
+  .use-direction-btn:hover {
     transform: none;
   }
 

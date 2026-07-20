@@ -12,6 +12,13 @@
 
     <!-- 输入区 -->
     <div class="card input-card">
+      <!-- 来自评论洞察的预填提示 -->
+      <div v-if="handoffFromInsight" class="handoff-banner" role="status">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        已带入评论洞察的 {{ parsedComments.length }} 条评论，选好语气即可生成回复
+        <button type="button" class="handoff-close" aria-label="关闭提示" @click="handoffFromInsight = false">×</button>
+      </div>
+
       <label class="field-label" for="reply-comments">粉丝评论（每行一条，最多 20 条）</label>
       <textarea
         id="reply-comments"
@@ -50,6 +57,24 @@
         </label>
       </div>
 
+      <div class="field-group">
+        <label class="field-label" for="brand-select">品牌人设（可选）</label>
+        <select
+          v-if="brands.length > 0"
+          id="brand-select"
+          v-model="selectedBrandId"
+          class="brand-select"
+        >
+          <option value="">不使用品牌人设</option>
+          <option v-for="b in brands" :key="b.id" :value="b.id">
+            {{ b.name }}{{ b.id === activeBrandId ? '（当前启用）' : '' }}
+          </option>
+        </select>
+        <p v-else-if="brandsLoaded" class="brand-empty-hint">
+          还没有品牌档案，<RouterLink to="/tools/brand" class="brand-link">去创建</RouterLink>
+        </p>
+      </div>
+
       <button
         type="button"
         class="btn btn-primary generate-btn"
@@ -59,6 +84,28 @@
         <span v-if="loading" class="spinner-sm" aria-hidden="true"></span>
         {{ loading ? '正在生成神回复…' : '生成神回复' }}
       </button>
+    </div>
+
+    <!-- 最近记录（本地存档） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">最近记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ entry.summary }} · {{ entry.payload.replies.length }} 条回复</span>
+            <span class="history-time">{{ formatArchiveTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
@@ -102,6 +149,15 @@
 
       <div class="result-toolbar">
         <span class="result-count">共 {{ replies.length }} 条评论的回复建议</span>
+        <button
+          type="button"
+          class="crosslink-btn"
+          title="把这批评论带到评论洞察工具，聚类挖掘粉丝痛点与选题"
+          @click="goInsightWithComments"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+          用这批评论挖选题痛点
+        </button>
       </div>
 
       <div class="reply-list">
@@ -160,9 +216,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { generateReplies, type ReplyItem, type ReplyTone } from '../api/reply'
+import { getBrandList, type BrandKit } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import { setCommentHandoff, takeCommentHandoff } from '../utils/commentHandoff'
+import {
+  REPLY_ARCHIVE_KEY,
+  addToolArchiveEntry,
+  createToolArchiveEntry,
+  formatArchiveTime,
+  isValidReplyPayload,
+  loadToolArchive,
+  saveToolArchive,
+  type ReplyArchivePayload,
+  type ToolArchiveEntry,
+} from '../utils/toolArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
 const MAX_COMMENTS = 20
@@ -174,6 +244,8 @@ const TONES: ReadonlyArray<{ value: ReplyTone; label: string; hint: string }> = 
   { value: '温暖', label: '温暖', hint: '共情治愈，先接住对方情绪再温柔回应' }
 ] as const
 
+const router = useRouter()
+
 const commentsInput = ref('')
 const tone = ref<ReplyTone>(TONES[0].value)
 const includePinned = ref(true)
@@ -183,6 +255,40 @@ const error = ref<AppError | null>(null)
 const replies = ref<ReplyItem[]>([])
 const pinnedComment = ref('')
 const copiedText = ref('')
+
+// 最近记录（本地存档，最近 10 次生成结果）
+const archive = ref<Array<ToolArchiveEntry<ReplyArchivePayload>>>(
+  loadToolArchive(REPLY_ARCHIVE_KEY, isValidReplyPayload)
+)
+const showArchive = ref(false)
+
+// 来自评论洞察的预填提示（挂载时检测 sessionStorage）
+const handoffFromInsight = ref(false)
+
+// 品牌人设选择：'' 表示不使用，默认选中当前启用档案
+const brands = ref<BrandKit[]>([])
+const activeBrandId = ref<string | null>(null)
+const selectedBrandId = ref('')
+const brandsLoaded = ref(false)
+
+onMounted(async () => {
+  // 检测评论洞察带过来的评论：预填输入框并提示来源
+  const handoff = takeCommentHandoff()
+  if (handoff && handoff.source === 'insight') {
+    commentsInput.value = handoff.comments.join('\n')
+    handoffFromInsight.value = true
+  }
+
+  const res = await getBrandList()
+  if (res.success) {
+    brands.value = res.brands
+    activeBrandId.value = res.active_id
+    if (res.active_id && res.brands.some(b => b.id === res.active_id)) {
+      selectedBrandId.value = res.active_id
+    }
+  }
+  brandsLoaded.value = true
+})
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -209,17 +315,21 @@ async function handleGenerate() {
   loading.value = true
   error.value = null
 
+  const usedComments = parsedComments.value.slice(0, MAX_COMMENTS)
+
   try {
     const result = await generateReplies({
-      comments: parsedComments.value.slice(0, MAX_COMMENTS),
+      comments: usedComments,
       tone: tone.value,
-      includePinned: includePinned.value
+      includePinned: includePinned.value,
+      brandId: selectedBrandId.value || undefined
     })
 
     if (result.success && result.replies) {
       replies.value = result.replies
       pinnedComment.value = result.pinned_comment || ''
       hasGenerated.value = true
+      recordArchive(usedComments, result.replies, result.pinned_comment || '')
     } else {
       error.value = normalizeApiError(
         result.error || result.error_message || '生成回复失败',
@@ -231,6 +341,51 @@ async function handleGenerate() {
   } finally {
     loading.value = false
   }
+}
+
+// ==================== 最近记录（本地存档） ====================
+
+function recordArchive(usedComments: string[], resultReplies: ReplyItem[], pinned: string) {
+  if (resultReplies.length === 0) return
+  const entry = createToolArchiveEntry<ReplyArchivePayload>({
+    input: usedComments.join(' '),
+    payload: {
+      comments: usedComments,
+      tone: tone.value,
+      includePinned: includePinned.value,
+      replies: resultReplies,
+      pinnedComment: pinned,
+    },
+  })
+  archive.value = addToolArchiveEntry(archive.value, entry)
+  saveToolArchive(REPLY_ARCHIVE_KEY, archive.value)
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: ToolArchiveEntry<ReplyArchivePayload>) {
+  if (loading.value) return
+  commentsInput.value = entry.payload.comments.join('\n')
+  if (TONES.some(t => t.value === entry.payload.tone)) {
+    tone.value = entry.payload.tone
+  }
+  includePinned.value = entry.payload.includePinned
+  replies.value = entry.payload.replies
+  pinnedComment.value = entry.payload.pinnedComment
+  hasGenerated.value = true
+  error.value = null
+}
+
+// ==================== 与评论洞察互通 ====================
+
+/**
+ * 把当前结果对应的这批评论带到评论洞察工具挖选题痛点
+ * （sessionStorage 传递，洞察页挂载时预填并提示来源）
+ */
+function goInsightWithComments() {
+  const comments = replies.value.map(r => r.comment).filter(Boolean)
+  if (comments.length === 0) return
+  setCommentHandoff({ source: 'reply', comments })
+  router.push('/tools/insight')
 }
 
 async function handleCopy(text: string) {
@@ -426,10 +581,151 @@ async function handleCopy(text: string) {
   color: var(--text-sub);
 }
 
+/* ── 品牌人设选择（与标题工坊同款） ── */
+.brand-select {
+  width: 100%;
+  max-width: 320px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.brand-select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.brand-empty-hint {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-sub);
+}
+
+.brand-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.brand-link:hover {
+  text-decoration: underline;
+}
+
+/* ── 来自评论洞察的预填提示 ── */
+.handoff-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.handoff-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 /* 生成按钮基于全局 .btn btn-primary，仅覆盖布局 */
 .generate-btn {
   margin-top: 22px;
   width: 100%;
+}
+
+/* ── 最近记录（本地存档，样式参照选题灵感的历史区） ── */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* ── 置顶引导评论 ───────────────── */
@@ -549,6 +845,8 @@ async function handleCopy(text: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 14px;
   padding: 0 4px;
 }
@@ -556,6 +854,28 @@ async function handleCopy(text: string) {
 .result-count {
   font-size: 14px;
   color: var(--text-sub);
+}
+
+/* 「用这批评论挖选题痛点」互跳按钮 */
+.crosslink-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--primary);
+  background: var(--bg-card);
+  color: var(--primary);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.crosslink-btn:hover {
+  background: var(--primary-light);
+  box-shadow: var(--shadow-xs);
 }
 
 .reply-list {

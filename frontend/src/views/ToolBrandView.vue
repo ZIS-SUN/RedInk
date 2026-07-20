@@ -6,10 +6,16 @@
         <h1 class="page-title">品牌记忆</h1>
         <p class="page-subtitle">管理你的个人 IP / 品牌档案，让文案始终保持统一人设</p>
       </div>
-      <button type="button" class="btn btn-primary" @click="openCreateModal">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-        新建档案
-      </button>
+      <div class="header-actions">
+        <button type="button" class="btn btn-secondary" @click="openWizard">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"></path></svg>
+          新手？让 AI 帮你定位
+        </button>
+        <button type="button" class="btn btn-primary" @click="openCreateModal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          新建档案
+        </button>
+      </div>
     </div>
 
     <!-- 反馈提示 -->
@@ -46,7 +52,13 @@
       </div>
       <h3 class="empty-title">还没有品牌档案</h3>
       <p class="empty-tips">创建一个档案，记录你的人设定位、语气风格和常用话术</p>
-      <button type="button" class="btn btn-primary empty-cta" @click="openCreateModal">立即创建</button>
+      <div class="empty-cta-group">
+        <button type="button" class="btn btn-primary empty-cta" @click="openWizard">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z"></path></svg>
+          新手？让 AI 帮你定位
+        </button>
+        <button type="button" class="btn btn-secondary empty-cta" @click="openCreateModal">自己填写创建</button>
+      </div>
     </div>
 
     <!-- 档案列表 -->
@@ -184,6 +196,193 @@
       </div>
     </Teleport>
 
+    <!-- 新手账号定位向导弹窗 -->
+    <Teleport to="body">
+      <div v-if="wizardVisible" class="brand-modal-overlay" @click.self="closeWizard">
+        <div class="brand-modal wizard-modal" role="dialog" aria-modal="true" aria-label="新手账号定位向导">
+          <div class="brand-modal-head">
+            <h3>{{ wizardTitle }}</h3>
+            <button type="button" class="close-btn" aria-label="关闭" @click="closeWizard">×</button>
+          </div>
+
+          <!-- 阶段一：三步问答 -->
+          <template v-if="wizardPhase === 'questions'">
+            <div class="brand-modal-body">
+              <div class="wizard-steps" aria-hidden="true">
+                <template v-for="(q, i) in WIZARD_QUESTIONS" :key="q.key">
+                  <span class="wizard-step-dot" :class="{ active: i === wizardStep, done: i < wizardStep }">{{ i + 1 }}</span>
+                  <span v-if="i < WIZARD_QUESTIONS.length - 1" class="wizard-step-line" :class="{ done: i < wizardStep }"></span>
+                </template>
+              </div>
+
+              <div class="form-field">
+                <label class="wizard-q-title">{{ currentQuestion.title }}</label>
+                <p class="wizard-q-tips">{{ currentQuestion.tips }}</p>
+                <textarea
+                  v-model="wizardAnswers[currentQuestion.key]"
+                  class="input"
+                  rows="3"
+                  :placeholder="currentQuestion.placeholder"
+                ></textarea>
+              </div>
+
+              <div class="wizard-chips" aria-label="示例，点击填入">
+                <button
+                  v-for="chip in currentQuestion.examples"
+                  :key="chip"
+                  type="button"
+                  class="wizard-chip"
+                  @click="applyExample(chip)"
+                >{{ chip }}</button>
+              </div>
+
+              <p v-if="wizardError" class="form-error" role="alert">{{ wizardError }}</p>
+            </div>
+
+            <div class="brand-modal-foot">
+              <button v-if="wizardStep > 0" type="button" class="btn" :disabled="drafting" @click="prevStep">上一步</button>
+              <button
+                v-if="wizardStep < WIZARD_QUESTIONS.length - 1"
+                type="button"
+                class="btn btn-primary"
+                @click="nextStep"
+              >下一步</button>
+              <button
+                v-else
+                type="button"
+                class="btn btn-primary"
+                :disabled="drafting"
+                @click="handleGenerateDraft"
+              >
+                <span v-if="drafting" class="btn-spinner" aria-hidden="true"></span>
+                {{ drafting ? '生成中...' : (wizardError ? '重试生成' : '生成我的定位') }}
+              </button>
+            </div>
+          </template>
+
+          <!-- 阶段二：可编辑预览 -->
+          <template v-else-if="wizardPhase === 'preview'">
+            <div class="brand-modal-body">
+              <p class="wizard-preview-tip">AI 已生成你的定位草稿，每个字段都可以修改，确认后将创建档案并设为启用</p>
+
+              <div class="form-field">
+                <label>账号名 <span class="required">*</span></label>
+                <div v-if="draftNameOptions.length > 1" class="wizard-chips">
+                  <button
+                    v-for="option in draftNameOptions"
+                    :key="option"
+                    type="button"
+                    class="wizard-chip"
+                    :class="{ selected: draftForm.name === option }"
+                    @click="draftForm.name = option"
+                  >{{ option }}</button>
+                </div>
+                <input v-model="draftForm.name" class="input" type="text" maxlength="50" placeholder="从上方建议里选一个，或自己改" />
+              </div>
+
+              <div class="form-field">
+                <label>一句话定位</label>
+                <input v-model="draftForm.positioning" class="input" type="text" maxlength="100" />
+              </div>
+
+              <div class="form-grid">
+                <div class="form-field">
+                  <label>目标人群</label>
+                  <input v-model="draftForm.audience" class="input" type="text" maxlength="100" />
+                </div>
+                <div class="form-field">
+                  <label>语气风格</label>
+                  <input v-model="draftForm.tone" class="input" type="text" maxlength="50" />
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label>常用口头禅 / 开场白 <span class="hint">（每行一条）</span></label>
+                <textarea v-model="draftForm.catchphrasesText" class="input" rows="3"></textarea>
+              </div>
+
+              <div class="form-field">
+                <label>签名 / 结尾话术</label>
+                <textarea v-model="draftForm.signature" class="input" rows="2"></textarea>
+              </div>
+
+              <div class="form-field">
+                <label>建议避免的词 <span class="hint">（每行一个，将存为禁用词）</span></label>
+                <textarea v-model="draftForm.bannedWordsText" class="input" rows="3"></textarea>
+              </div>
+
+              <div class="form-field">
+                <label>赛道标签 <span class="hint">（空格分隔，将写入备注）</span></label>
+                <input v-model="draftForm.nicheTagsText" class="input" type="text" />
+              </div>
+
+              <p v-if="wizardError" class="form-error" role="alert">{{ wizardError }}</p>
+            </div>
+
+            <div class="brand-modal-foot">
+              <button type="button" class="btn" :disabled="savingDraft" @click="backToQuestions">返回修改回答</button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="savingDraft || !draftForm.name.trim()"
+                @click="handleSaveDraft"
+              >
+                {{ savingDraft ? '创建中...' : '创建档案并启用' }}
+              </button>
+            </div>
+          </template>
+
+          <!-- 阶段三：起号选题清单 -->
+          <template v-else>
+            <div class="brand-modal-body">
+              <div class="wizard-done-banner" role="status">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                档案「{{ createdBrandName }}」已创建并启用
+              </div>
+
+              <template v-if="draftTopics.length > 0">
+                <div class="starter-topics-head">
+                  <h4>你的前 {{ draftTopics.length }} 篇起号选题</h4>
+                  <button type="button" class="btn btn-mini" @click="copyAllTopics">
+                    {{ copiedKey === 'all' ? '✓ 已复制' : '全部复制' }}
+                  </button>
+                </div>
+
+                <ol class="starter-topics">
+                  <li v-for="(topic, i) in draftTopics" :key="i" class="starter-topic-item">
+                    <span class="topic-index">{{ i + 1 }}</span>
+                    <div class="topic-text">
+                      <span class="topic-title">{{ topic.title }}</span>
+                      <span v-if="topic.angle" class="topic-angle">{{ topic.angle }}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-mini topic-copy-btn"
+                      :aria-label="`复制「${topic.title}」`"
+                      @click="copyTopic(topic, i)"
+                    >
+                      {{ copiedKey === String(i) ? '✓' : '复制' }}
+                    </button>
+                  </li>
+                </ol>
+              </template>
+              <p v-else class="wizard-q-tips">本次没有生成起号选题，可以去选题灵感工具按新定位生成。</p>
+
+              <p class="wizard-done-tip">
+                想要更多方向？可去
+                <RouterLink to="/tools/topic">选题灵感工具</RouterLink>
+                继续深化这些选题
+              </p>
+            </div>
+
+            <div class="brand-modal-foot">
+              <button type="button" class="btn btn-primary" @click="closeWizard">完成</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
       :visible="!!deleteTarget"
@@ -198,16 +397,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
 import {
   activateBrand,
   createBrand,
   deleteBrand,
+  generateBrandDraft,
   getBrandList,
   updateBrand,
-  type BrandKit
+  type BrandDraft,
+  type BrandKit,
+  type BrandStarterTopic
 } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
@@ -219,6 +421,7 @@ import { normalizeApiError, type AppError } from '../utils/errors'
  * - 新建 / 编辑档案（弹窗表单）
  * - 设置「当前启用」档案
  * - 删除档案（二次确认）
+ * - 新手账号定位向导（三步问答 → AI 草稿 → 可编辑预览 → 落库启用 + 起号选题）
  */
 
 // 列表状态
@@ -391,6 +594,250 @@ async function handleActivate(brand: BrandKit) {
   }
 }
 
+// ==================== 新手账号定位向导 ====================
+
+/** 向导问答步骤定义 */
+interface WizardQuestion {
+  key: 'who' | 'audience' | 'advantage'
+  title: string
+  tips: string
+  placeholder: string
+  examples: string[]
+}
+
+const WIZARD_QUESTIONS: WizardQuestion[] = [
+  {
+    key: 'who',
+    title: '第 1 步：你是谁？',
+    tips: '你的身份、职业或经历，是账号可信度的地基',
+    placeholder: '如：三甲医院营养科医生，做了 8 年临床营养',
+    examples: ['三甲医院营养科医生', '带娃的前大厂运营', '健身 5 年的上班族']
+  },
+  {
+    key: 'audience',
+    title: '第 2 步：做给谁看？',
+    tips: '人群越具体，内容越容易戳中人，别贪「所有人」',
+    placeholder: '如：25-35 岁想减脂但没时间运动的女生',
+    examples: ['25-35 岁想减脂的女生', '新手宝妈', '想搞副业的大学生']
+  },
+  {
+    key: 'advantage',
+    title: '第 3 步：凭什么是你？',
+    tips: '你的独特优势：专业资质、踩过的坑、能坚持的事都算',
+    placeholder: '如：有营养师资质，自己减过 30 斤',
+    examples: ['有专业资质', '亲身踩过坑', '能坚持日更实测']
+  }
+]
+
+const wizardVisible = ref(false)
+const wizardPhase = ref<'questions' | 'preview' | 'done'>('questions')
+const wizardStep = ref(0)
+const wizardAnswers = reactive<Record<WizardQuestion['key'], string>>({
+  who: '',
+  audience: '',
+  advantage: ''
+})
+const wizardError = ref('')
+const drafting = ref(false)
+const savingDraft = ref(false)
+
+// 草稿预览（可编辑）状态
+const draftNameOptions = ref<string[]>([])
+const draftTopics = ref<BrandStarterTopic[]>([])
+const draftForm = reactive({
+  name: '',
+  positioning: '',
+  audience: '',
+  tone: '',
+  catchphrasesText: '',
+  signature: '',
+  bannedWordsText: '',
+  nicheTagsText: ''
+})
+const createdBrandName = ref('')
+
+// 起号选题复制反馈（'all' 或条目下标字符串）
+const copiedKey = ref('')
+let copyTimer: ReturnType<typeof setTimeout> | undefined
+
+const currentQuestion = computed(() => WIZARD_QUESTIONS[wizardStep.value])
+
+const wizardTitle = computed(() => {
+  if (wizardPhase.value === 'preview') return '确认你的定位'
+  if (wizardPhase.value === 'done') return '定位完成，开始起号'
+  return '新手账号定位向导'
+})
+
+function openWizard() {
+  wizardVisible.value = true
+  wizardPhase.value = 'questions'
+  wizardStep.value = 0
+  wizardAnswers.who = ''
+  wizardAnswers.audience = ''
+  wizardAnswers.advantage = ''
+  wizardError.value = ''
+  createdBrandName.value = ''
+  draftTopics.value = []
+}
+
+function closeWizard() {
+  // 生成/保存进行中不允许误触关闭
+  if (drafting.value || savingDraft.value) return
+  wizardVisible.value = false
+}
+
+/** 点击示例 chip：填入当前问题的输入框（可继续编辑） */
+function applyExample(chip: string) {
+  wizardAnswers[currentQuestion.value.key] = chip
+}
+
+function nextStep() {
+  if (!wizardAnswers[currentQuestion.value.key].trim()) {
+    wizardError.value = '先写一句再继续，点下面的示例填入也可以'
+    return
+  }
+  wizardError.value = ''
+  wizardStep.value++
+}
+
+function prevStep() {
+  wizardError.value = ''
+  if (wizardStep.value > 0) wizardStep.value--
+}
+
+/** 从预览返回问答（保留已填回答，便于调整后重新生成） */
+function backToQuestions() {
+  wizardError.value = ''
+  wizardPhase.value = 'questions'
+  wizardStep.value = WIZARD_QUESTIONS.length - 1
+}
+
+/**
+ * 第三步确认：调后端生成定位草稿，成功进入可编辑预览，失败展示错误可重试
+ */
+async function handleGenerateDraft() {
+  if (drafting.value) return
+  if (!wizardAnswers.advantage.trim()) {
+    wizardError.value = '先写一句再继续，点下面的示例填入也可以'
+    return
+  }
+
+  drafting.value = true
+  wizardError.value = ''
+
+  const res = await generateBrandDraft({
+    who: wizardAnswers.who.trim(),
+    audience: wizardAnswers.audience.trim(),
+    advantage: wizardAnswers.advantage.trim()
+  })
+
+  drafting.value = false
+
+  if (res.success && res.draft) {
+    fillDraftForm(res.draft)
+    wizardPhase.value = 'preview'
+  } else {
+    wizardError.value = res.error_message || '生成账号定位失败，请稍后重试'
+  }
+}
+
+/** 把 AI 草稿填入可编辑表单（目标人群草稿里没有，用第 2 步回答预填） */
+function fillDraftForm(draft: BrandDraft) {
+  draftNameOptions.value = draft.name
+  draftForm.name = draft.name[0] || ''
+  draftForm.positioning = draft.positioning
+  draftForm.audience = wizardAnswers.audience.trim()
+  draftForm.tone = draft.tone
+  draftForm.catchphrasesText = draft.catchphrases.join('\n')
+  draftForm.signature = draft.signature
+  draftForm.bannedWordsText = draft.banned_words.join('\n')
+  draftForm.nicheTagsText = draft.niche_tags.join(' ')
+  draftTopics.value = draft.starter_topics
+}
+
+/**
+ * 确认草稿：走现有创建档案 API 落库并设为启用，成功进入起号选题页
+ */
+async function handleSaveDraft() {
+  if (savingDraft.value) return
+  if (!draftForm.name.trim()) {
+    wizardError.value = '请填写账号名'
+    return
+  }
+
+  savingDraft.value = true
+  wizardError.value = ''
+
+  // 赛道标签没有独立字段，规整后写入备注便于后续查看
+  const tags = draftForm.nicheTagsText
+    .split(/[\s,，、#]+/)
+    .map(tag => tag.trim())
+    .filter(Boolean)
+  const notesParts = ['来自新手账号定位向导']
+  if (tags.length > 0) {
+    notesParts.push(`赛道标签：${tags.join(' / ')}`)
+  }
+
+  const res = await createBrand({
+    name: draftForm.name.trim(),
+    tagline: draftForm.positioning.trim(),
+    audience: draftForm.audience.trim(),
+    tone: draftForm.tone.trim(),
+    catchphrases: textToList(draftForm.catchphrasesText),
+    signature: draftForm.signature.trim(),
+    banned_words: textToList(draftForm.bannedWordsText),
+    notes: notesParts.join('\n')
+  })
+
+  if (!res.success || !res.brand) {
+    savingDraft.value = false
+    wizardError.value = res.error_message || '创建档案失败，请重试'
+    return
+  }
+
+  // 设为启用（首个档案后端已自动启用，这里再调用一次幂等无副作用）
+  const activated = await activateBrand(res.brand.id)
+  savingDraft.value = false
+
+  createdBrandName.value = res.brand.name
+  wizardPhase.value = 'done'
+  successMessage.value = activated.success
+    ? `已创建并启用「${res.brand.name}」`
+    : `已创建「${res.brand.name}」，启用失败，可在列表中手动启用`
+  await loadBrands()
+}
+
+/** 复制文本（剪贴板 API 不可用时降级为手动选区复制），并给出短暂反馈 */
+async function copyText(text: string, key: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+  }
+  copiedKey.value = key
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copiedKey.value = '' }, 1500)
+}
+
+function copyTopic(topic: BrandStarterTopic, index: number) {
+  const text = topic.angle ? `${topic.title}\n切入角度：${topic.angle}` : topic.title
+  copyText(text, String(index))
+}
+
+function copyAllTopics() {
+  const text = draftTopics.value
+    .map((topic, i) => `${i + 1}. ${topic.title}${topic.angle ? `（${topic.angle}）` : ''}`)
+    .join('\n')
+  copyText(text, 'all')
+}
+
 /**
  * 执行删除
  */
@@ -411,9 +858,25 @@ async function doDelete() {
 onMounted(() => {
   loadBrands()
 })
+
+onUnmounted(() => {
+  if (copyTimer !== undefined) clearTimeout(copyTimer)
+})
 </script>
 
 <style scoped>
+/* 页头操作组 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.header-actions .btn-secondary {
+  border: 1px solid var(--border-color);
+}
+
 /* 成功提示 */
 .success-card {
   display: flex;
@@ -513,6 +976,19 @@ onMounted(() => {
 
 .empty-cta {
   margin-top: var(--space-5);
+}
+
+/* 空态双入口：向导为主 CTA，手动创建降级为次级 */
+.empty-cta-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empty-cta-group .btn-secondary {
+  border: 1px solid var(--border-color);
 }
 
 /* 档案列表 */
@@ -767,6 +1243,235 @@ onMounted(() => {
 
 .brand-modal-foot .btn-primary {
   border: none;
+}
+
+/* ==================== 新手账号定位向导 ==================== */
+.wizard-modal {
+  max-width: 520px;
+}
+
+/* 步骤指示：编号圆点 + 连接线 */
+.wizard-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+
+.wizard-step-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--gray-2);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.wizard-step-dot.active {
+  background: var(--primary);
+  color: white;
+}
+
+.wizard-step-dot.done {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.wizard-step-line {
+  width: 36px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  transition: background var(--transition-fast);
+}
+
+.wizard-step-line.done {
+  background: var(--primary-light);
+}
+
+/* 提问标题比普通表单 label 更醒目（用更高特异性覆盖，避免 !important） */
+.form-field label.wizard-q-title {
+  font-size: 15px;
+}
+
+.wizard-q-tips {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* 示例 chips */
+.wizard-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wizard-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.wizard-chip:hover {
+  border-color: var(--border-hover);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.wizard-chip.selected {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+  font-weight: 600;
+}
+
+/* 生成按钮里的加载圈 */
+.btn-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: white;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+  animation: wizard-spin 0.8s linear infinite;
+}
+
+@keyframes wizard-spin {
+  to { transform: rotate(360deg); }
+}
+
+.wizard-preview-tip {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding: 10px 12px;
+  background: var(--gray-0);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* 完成态 */
+.wizard-done-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.starter-topics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.starter-topics-head h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.starter-topics {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.starter-topic-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.topic-index {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--gray-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+.topic-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.topic-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+.topic-angle {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.topic-copy-btn {
+  flex-shrink: 0;
+}
+
+.wizard-done-tip {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.wizard-done-tip a {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.wizard-done-tip a:hover {
+  text-decoration: underline;
 }
 
 /* 表单 */

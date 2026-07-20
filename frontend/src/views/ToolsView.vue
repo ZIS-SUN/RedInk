@@ -40,7 +40,14 @@
         >
           <div class="tool-icon" :class="`tone-${tool.tone}`" v-html="tool.icon"></div>
           <div class="tool-body">
-            <div class="tool-name">{{ tool.title }}</div>
+            <div class="tool-name">
+              {{ tool.title }}
+              <span
+                v-if="badgeFor(tool.name)"
+                class="tool-badge"
+                :class="{ muted: badgeFor(tool.name)!.muted }"
+              >{{ badgeFor(tool.name)!.text }}</span>
+            </div>
             <div class="tool-desc">{{ tool.desc }}</div>
           </div>
           <svg class="tool-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
@@ -51,7 +58,10 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { getPlanStats } from '../api/calendar'
+import { getAnalyticsStats } from '../api/analytics'
 import SetupGuideBanner from '../components/common/SetupGuideBanner.vue'
 
 type ToolTone = 'primary' | 'info' | 'success' | 'warning'
@@ -88,6 +98,53 @@ const ICON = {
   script: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>',
   insight: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="15" x2="12.01" y2="15"></line></svg>'
 }
+
+// ==================== 卡片状态角标（仅日历与数据复盘两张卡） ====================
+
+interface ToolBadge {
+  text: string
+  /** 空数据时用灰色弱化展示 */
+  muted: boolean
+}
+
+// 挂载后异步填充；请求失败保持 null → 不显示角标，不阻塞页面
+const calendarBadge = ref<ToolBadge | null>(null)
+const analyticsBadge = ref<ToolBadge | null>(null)
+
+function badgeFor(name: string): ToolBadge | null {
+  if (name === 'tool-calendar') return calendarBadge.value
+  if (name === 'tool-analytics') return analyticsBadge.value
+  return null
+}
+
+/** 当前本地月份（YYYY-MM），与日历页的统计口径一致 */
+function currentMonth(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+}
+
+async function loadCalendarBadge() {
+  const res = await getPlanStats(currentMonth())
+  if (res.success && res.stats) {
+    calendarBadge.value = { text: `本月 ${res.stats.total} 条计划`, muted: res.stats.total === 0 }
+  }
+}
+
+async function loadAnalyticsBadge() {
+  const res = await getAnalyticsStats()
+  if (res.success && res.stats) {
+    const total = res.stats.total_records
+    analyticsBadge.value = total > 0
+      ? { text: `已录 ${total} 条`, muted: false }
+      : { text: '未录入数据', muted: true }
+  }
+}
+
+onMounted(() => {
+  // 两个统计并行拉取（这两个接口内部已捕获异常，失败时返回 success:false，静默不显示角标）
+  void loadCalendarBadge()
+  void loadAnalyticsBadge()
+})
 
 const stages: Stage[] = [
   {
@@ -315,11 +372,33 @@ const stages: Stage[] = [
 .tool-body { flex: 1; min-width: 0; }
 
 .tool-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
   font-size: var(--font-size-body);
   font-weight: 600;
   letter-spacing: var(--tracking-tight);
   color: var(--text-main);
   margin-bottom: 3px;
+}
+
+/* 状态角标：小号 pill，复用现有设计令牌 */
+.tool-badge {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--primary);
+  background: var(--primary-light);
+  white-space: nowrap;
+}
+
+.tool-badge.muted {
+  color: var(--text-sub);
+  background: var(--gray-2);
 }
 
 .tool-desc {

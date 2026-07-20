@@ -1,8 +1,11 @@
 <template>
   <div class="container">
     <div class="page-header">
-      <h1 class="page-title">系统设置</h1>
-      <p class="page-subtitle">配置文本生成和图片生成的 API 服务</p>
+      <!-- 标题与副标题需包在同一子项内，避免被 page-header 的 space-between 推散 -->
+      <div>
+        <h1 class="page-title">系统设置</h1>
+        <p class="page-subtitle">配置文本生成和图片生成的 API 服务</p>
+      </div>
     </div>
 
     <div v-if="loading" class="loading-container">

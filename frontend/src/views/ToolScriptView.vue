@@ -79,8 +79,30 @@
       </div>
     </div>
 
-    <!-- 加载骨架 -->
-    <div v-if="loading" class="skeleton-section" aria-hidden="true">
+    <!-- 最近记录（本地存档） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">最近记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ entry.summary }} · {{ durationLabel(entry.payload.duration) }} · {{ sceneLabel(entry.payload.scene) }}</span>
+            <span class="history-time">{{ formatArchiveTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
+    <div v-if="loading && !script" class="skeleton-section" aria-hidden="true">
       <div v-for="n in 3" :key="n" class="card skeleton-card">
         <div class="sk-row">
           <span class="sk-line sk-badge"></span>
@@ -180,6 +202,17 @@ import {
 } from '../api/script'
 import { getBrandList, type BrandKit } from '../api/brand'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  SCRIPT_ARCHIVE_KEY,
+  addToolArchiveEntry,
+  createToolArchiveEntry,
+  formatArchiveTime,
+  isValidScriptPayload,
+  loadToolArchive,
+  saveToolArchive,
+  type ScriptArchivePayload,
+  type ToolArchiveEntry,
+} from '../utils/toolArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
 
 interface DurationOption {
@@ -213,6 +246,12 @@ const error = ref<AppError | null>(null)
 // 当前已复制的目标：'' 空闲 / 'all' 全文 / `seg-${index}` 单段台词
 const copiedKey = ref('')
 
+// 最近记录（本地存档，最近 10 次生成结果）
+const archive = ref<Array<ToolArchiveEntry<ScriptArchivePayload>>>(
+  loadToolArchive(SCRIPT_ARCHIVE_KEY, isValidScriptPayload)
+)
+const showArchive = ref(false)
+
 // 品牌人设选择：'' 表示不使用，默认选中当前启用档案
 const brands = ref<BrandKit[]>([])
 const activeBrandId = ref<string | null>(null)
@@ -244,7 +283,7 @@ async function handleGenerate() {
 
   loading.value = true
   error.value = null
-  script.value = null
+  // 重新生成时保留旧脚本展示，新结果返回后再整体替换（这些都是花了额度的产物）
 
   try {
     const result = await generateScript(
@@ -256,6 +295,7 @@ async function handleGenerate() {
 
     if (result.success && result.script) {
       script.value = result.script
+      recordArchive(result.script)
     } else {
       error.value = normalizeApiError(result.error || result.error_message || '脚本生成失败', '脚本生成失败')
     }
@@ -264,6 +304,36 @@ async function handleGenerate() {
   } finally {
     loading.value = false
   }
+}
+
+// ==================== 最近记录（本地存档） ====================
+
+function recordArchive(resultScript: VideoScript) {
+  const entry = createToolArchiveEntry<ScriptArchivePayload>({
+    input: content.value.trim(),
+    payload: {
+      content: content.value.trim(),
+      duration: duration.value,
+      scene: scene.value,
+      script: resultScript,
+    },
+  })
+  archive.value = addToolArchiveEntry(archive.value, entry)
+  saveToolArchive(SCRIPT_ARCHIVE_KEY, archive.value)
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: ToolArchiveEntry<ScriptArchivePayload>) {
+  if (loading.value) return
+  content.value = entry.payload.content
+  if (durations.some(d => d.code === entry.payload.duration)) {
+    duration.value = entry.payload.duration
+  }
+  if (scenes.some(s => s.code === entry.payload.scene)) {
+    scene.value = entry.payload.scene
+  }
+  script.value = entry.payload.script
+  error.value = null
 }
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
@@ -476,6 +546,85 @@ async function copySegment(seg: ScriptSegment, index: number) {
 
 .script-btn {
   min-width: 180px;
+}
+
+/* ── 最近记录（本地存档，样式参照选题灵感的历史区） ── */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* 加载骨架（纯 CSS shimmer） */

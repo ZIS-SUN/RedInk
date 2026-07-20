@@ -7,6 +7,10 @@
         <p class="page-subtitle">手动录入已发布内容的表现数据，用数据找到下一个爆款方向</p>
       </div>
       <div class="page-actions">
+        <button type="button" class="btn btn-import" @click="showOcrModal = true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+          截图导入
+        </button>
         <button type="button" class="btn btn-import" @click="openImportModal">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           批量导入
@@ -52,9 +56,10 @@
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
       </div>
       <h3 class="empty-title">还没有表现数据</h3>
-      <p class="empty-tips">把已发布内容的曝光、点赞等数据录进来，就能看到统计和 AI 复盘建议</p>
+      <p class="empty-tips">截图创作者后台数据页让 AI 自动识别，或手动录入曝光、点赞等数据，就能看到统计和 AI 复盘建议</p>
       <div class="empty-cta">
-        <button type="button" class="btn btn-primary" @click="openCreateModal">立即录入</button>
+        <button type="button" class="btn btn-primary" @click="showOcrModal = true">截图导入</button>
+        <button type="button" class="btn btn-import" @click="openCreateModal">手动录入</button>
         <button type="button" class="btn btn-import" @click="openImportModal">从表格批量导入</button>
       </div>
     </div>
@@ -72,12 +77,38 @@
         </div>
         <div class="card stat-card">
           <span class="stat-label">平均互动率</span>
-          <span class="stat-value">{{ stats.avg_engagement_rate }}%</span>
+          <span class="stat-value">
+            {{ stats.avg_engagement_rate }}%
+            <BenchmarkDot
+              :rating="metricRating('engagement_rate')?.rating"
+              :tooltip="metricTooltip('engagement_rate')"
+            />
+          </span>
         </div>
         <div class="card stat-card">
           <span class="stat-label">累计涨粉</span>
           <span class="stat-value">{{ formatNumber(stats.total_followers_gained) }}</span>
         </div>
+      </div>
+
+      <!-- 行业基准对照（B10 红绿灯） -->
+      <div v-if="benchmarkItems.length" class="card benchmark-strip">
+        <div class="benchmark-items">
+          <span
+            v-for="item in benchmarkItems"
+            :key="item.key"
+            class="benchmark-item"
+            :title="metricTooltip(item.key)"
+          >
+            <BenchmarkDot :rating="item.rating" :tooltip="metricTooltip(item.key)" />
+            <span class="benchmark-item-label">{{ item.label }}</span>
+            <span class="benchmark-item-value">{{ item.value === null ? '—' : `${item.value}%` }}</span>
+            <span class="benchmark-item-target">基准 ≥{{ item.green_at }}%</span>
+          </span>
+        </div>
+        <p class="benchmark-source">
+          红 = 低于基准下限，黄 = 待提升，绿 = 达标；{{ stats?.benchmarks_meta?.source || '公开行业经验值，仅供参考' }}
+        </p>
       </div>
 
       <!-- 平台/类型对比 + 趋势 + 发布时段 -->
@@ -137,8 +168,29 @@
 
           <template v-if="insight.suggestions.length">
             <h4 class="insight-section-title">下一步建议</h4>
-            <ol class="insight-list">
-              <li v-for="(item, i) in insight.suggestions" :key="'s' + i">{{ item }}</li>
+            <!-- T14：每条建议可直接转成动作（生成选题 / 加入内容日历） -->
+            <ol class="insight-list suggestion-list">
+              <li v-for="(item, i) in insight.suggestions" :key="'s' + i">
+                <div class="suggestion-row">
+                  <span class="suggestion-text">{{ item }}</span>
+                  <span class="suggestion-actions">
+                    <button
+                      type="button"
+                      class="btn btn-mini btn-suggestion"
+                      :aria-label="`以建议 ${i + 1} 为方向生成选题`"
+                      title="把这条建议作为领域方向，跳转选题灵感工具"
+                      @click="goTopicWithSuggestion(item)"
+                    >生成选题</button>
+                    <button
+                      type="button"
+                      class="btn btn-mini btn-suggestion"
+                      :aria-label="`把建议 ${i + 1} 加入内容日历`"
+                      title="把这条建议作为待办排进内容日历"
+                      @click="calendarSuggestion = item"
+                    >加入日历</button>
+                  </span>
+                </div>
+              </li>
             </ol>
           </template>
         </div>
@@ -190,7 +242,13 @@
                 <td class="num">{{ formatNumber(record.comments) }}</td>
                 <td class="num">{{ formatNumber(record.shares) }}</td>
                 <td class="num">{{ formatNumber(record.followers_gained) }}</td>
-                <td class="num">{{ engagementRateText(record) }}</td>
+                <td class="num rate-cell">
+                  <BenchmarkDot
+                    :rating="record.metrics?.engagement_rate?.rating"
+                    :tooltip="metricTooltip('engagement_rate', record.metrics?.engagement_rate?.value)"
+                  />
+                  {{ engagementRateText(record) }}
+                </td>
                 <td class="actions-cell">
                   <button
                     v-if="record.record_id"
@@ -225,19 +283,21 @@
               <input v-model="form.title" class="input" type="text" placeholder="如：3 个方法让敏感肌稳住不烂脸" maxlength="100" />
             </div>
 
+            <div class="form-field">
+              <label>发布平台 <span class="required">*</span></label>
+              <input v-model="form.platform" class="input" type="text" placeholder="如：小红书 / 抖音" maxlength="30" list="platform-presets" />
+              <datalist id="platform-presets">
+                <option value="小红书"></option>
+                <option value="抖音"></option>
+                <option value="B站"></option>
+                <option value="视频号"></option>
+                <option value="快手"></option>
+                <option value="公众号"></option>
+              </datalist>
+            </div>
+
+            <!-- U9：日期/时间并排两列，与下方曝光/点赞/收藏三列网格保持节奏 -->
             <div class="form-grid">
-              <div class="form-field">
-                <label>发布平台 <span class="required">*</span></label>
-                <input v-model="form.platform" class="input" type="text" placeholder="如：小红书 / 抖音" maxlength="30" list="platform-presets" />
-                <datalist id="platform-presets">
-                  <option value="小红书"></option>
-                  <option value="抖音"></option>
-                  <option value="B站"></option>
-                  <option value="视频号"></option>
-                  <option value="快手"></option>
-                  <option value="公众号"></option>
-                </datalist>
-              </div>
               <div class="form-field">
                 <label>发布日期</label>
                 <input v-model="form.publish_date" class="input" type="date" />
@@ -415,6 +475,21 @@
       </div>
     </Teleport>
 
+    <!-- 截图导入弹窗（B3：上传/粘贴截图 → AI 识别 → 可编辑预览 → 批量入库） -->
+    <OcrImportModal
+      v-if="showOcrModal"
+      @close="showOcrModal = false"
+      @imported="onOcrImported"
+    />
+
+    <!-- 复盘建议加入日历弹窗（T14，复用通用加入日历弹窗，标题即建议文本） -->
+    <AddToCalendarDialog
+      v-if="suggestionCalendarIdea"
+      :idea="suggestionCalendarIdea"
+      @close="calendarSuggestion = ''"
+      @added="onSuggestionCalendarAdded"
+    />
+
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
       :visible="!!deleteTarget"
@@ -433,8 +508,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ErrorCard from '../components/common/ErrorCard.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
+import AddToCalendarDialog from '../components/common/AddToCalendarDialog.vue'
 import CompareBarChart from '../components/analytics/CompareBarChart.vue'
 import TrendLineChart from '../components/analytics/TrendLineChart.vue'
+import BenchmarkDot from '../components/analytics/BenchmarkDot.vue'
+import OcrImportModal from '../components/analytics/OcrImportModal.vue'
 import {
   batchCreateAnalyticsRecords,
   createAnalyticsRecord,
@@ -445,11 +523,13 @@ import {
   updateAnalyticsRecord,
   type AnalyticsBatchFailure,
   type AnalyticsInsight,
+  type AnalyticsMetricRating,
   type AnalyticsRecord,
   type AnalyticsStats,
   type AnalyticsTimeSlot
 } from '../api/analytics'
 import { parseAnalyticsImport } from '../utils/analyticsImport'
+import type { CalendarIdeaLike } from '../utils/ideaArchive'
 import { normalizeApiError, type AppError } from '../utils/errors'
 
 /**
@@ -457,11 +537,22 @@ import { normalizeApiError, type AppError } from '../utils/errors'
  *
  * 功能：
  * - 手动录入已发布内容的表现数据（CRUD）
+ * - 截图导入：上传/粘贴创作者后台数据截图，AI 多模态识别后预览入库（B3）
  * - 批量导入：粘贴 Excel / CSV 表格文本，预览后一键入库
  * - 统计概览：总数、各平台/各类型对比（SVG 柱状图）、按月趋势（SVG 折线图）、最佳发布时段
+ * - 行业基准红绿灯：互动率/点赞率/收藏率/评论率对照行业基准展示红黄绿评级（B10）
  * - 一键 AI 复盘洞察：哪类内容/标题/平台/时段表现更好 + 下一步建议
+ * - 建议转动作：每条 AI 建议可一键「生成选题」或「加入日历」（T14）
  * - 关联展示：带 record_id 的记录可一键跳转到历史作品详情，带关联的行有小标识
  */
+
+/**
+ * 「生成选题」跳转预填的 sessionStorage 键（T14）。
+ * 值为 JSON：{ niche: 建议文本, from: 'analytics' }。
+ * 约定：选题工具页（/tools/topic，ToolTopicView）挂载时读取该键预填
+ * 「领域/赛道」输入框，读取后应立即删除该键（读后即清，避免反复预填）。
+ */
+const TOPIC_NICHE_PREFILL_KEY = 'redink_topic_niche_prefill'
 
 const router = useRouter()
 
@@ -515,6 +606,19 @@ const importing = ref(false)
 const importError = ref('')
 const importResult = ref<{ created: number; failed: AnalyticsBatchFailure[] } | null>(null)
 
+// 截图导入弹窗（B3）
+const showOcrModal = ref(false)
+
+// T14：待加入日历的建议文本（非空时弹出加入日历弹窗）
+const calendarSuggestion = ref('')
+
+/** 建议文本 → 通用加入日历弹窗的选题结构（标题即建议文本） */
+const suggestionCalendarIdea = computed<CalendarIdeaLike | null>(() =>
+  calendarSuggestion.value
+    ? { title: calendarSuggestion.value, angle: '', tags: [] }
+    : null
+)
+
 /** 粘贴文本的实时解析结果（纯函数，见 utils/analyticsImport.ts） */
 const importParse = computed(() => parseAnalyticsImport(importText.value))
 
@@ -548,6 +652,69 @@ const timeSlotBars = computed(() =>
 )
 
 const bestTimeSlot = computed<AnalyticsTimeSlot | null>(() => sortedTimeSlots.value[0] ?? null)
+
+// ==================== 行业基准红绿灯（B10） ====================
+
+/** 基准对照条的展示顺序 */
+const BENCHMARK_ORDER = ['engagement_rate', 'like_rate', 'collect_rate', 'comment_rate'] as const
+
+/** 基准对照条目（旧后端无 metric_ratings 字段时为空，整块隐藏） */
+const benchmarkItems = computed(() => {
+  const ratings = stats.value?.metric_ratings
+  if (!ratings) return []
+  return BENCHMARK_ORDER.filter(key => ratings[key]).map(key => ({ key, ...ratings[key] }))
+})
+
+/** 取某个指标的汇总评级（含基准阈值与说明） */
+function metricRating(key: string): AnalyticsMetricRating | null {
+  return stats.value?.metric_ratings?.[key] ?? null
+}
+
+/**
+ * 红绿灯 hover 的基准说明文案。
+ * value 不传时用汇总值（指标卡）；传入时用单条记录的值（记录列表）。
+ */
+function metricTooltip(key: string, value?: number | null): string {
+  const rule = metricRating(key)
+  if (!rule) return ''
+  const shown = value !== undefined ? value : rule.value
+  const valueText = shown === null || shown === undefined ? '暂无曝光数据' : `${shown}%`
+  const source = stats.value?.benchmarks_meta?.source || '公开行业经验值，仅供参考'
+  return `${rule.label} ${valueText}｜达标线 ≥${rule.green_at}%，低于 ${rule.red_below}% 偏低。${rule.note}（${source}）`
+}
+
+// ==================== 建议转动作（T14） ====================
+
+/**
+ * 「生成选题」：把建议文本写入 sessionStorage 后跳转选题工具，
+ * 由选题页挂载时读取 TOPIC_NICHE_PREFILL_KEY 预填领域输入（键约定见常量注释）。
+ */
+function goTopicWithSuggestion(suggestion: string) {
+  try {
+    sessionStorage.setItem(
+      TOPIC_NICHE_PREFILL_KEY,
+      // 选题页领域输入框上限 100 字，超长建议截断后传递
+      JSON.stringify({ niche: suggestion.trim().slice(0, 100), from: 'analytics' })
+    )
+  } catch {
+    // sessionStorage 不可用（隐私模式等）时放弃预填，仅跳转
+  }
+  router.push('/tools/topic')
+}
+
+/** 建议加入日历成功 */
+function onSuggestionCalendarAdded() {
+  calendarSuggestion.value = ''
+  successMessage.value = '已把建议加入内容日历'
+}
+
+// ==================== 截图导入（B3） ====================
+
+/** 截图导入成功入库后刷新列表与统计 */
+async function onOcrImported(created: number) {
+  successMessage.value = `截图导入完成：成功 ${created} 条`
+  await loadData()
+}
 
 /** 数字千分位格式化 */
 function formatNumber(value: number): string {
@@ -933,6 +1100,53 @@ onMounted(() => {
   color: var(--text-main);
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 行业基准对照条（B10 红绿灯） */
+.benchmark-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 20px;
+  margin-bottom: 16px;
+}
+
+.benchmark-items {
+  display: flex;
+  gap: 8px 22px;
+  flex-wrap: wrap;
+}
+
+.benchmark-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: help;
+}
+
+.benchmark-item-label {
+  color: var(--text-secondary);
+}
+
+.benchmark-item-value {
+  font-weight: 700;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.benchmark-item-target {
+  font-size: 12px;
+  color: var(--text-placeholder);
+}
+
+.benchmark-source {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-placeholder);
 }
 
 /* 汇总 / 趋势面板 */
@@ -1032,6 +1246,36 @@ onMounted(() => {
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-main);
+}
+
+/* T14：建议列表的「生成选题 / 加入日历」动作按钮
+   （flex 放在 li 内层的 .suggestion-row 上，保住 ol 的序号 marker） */
+.suggestion-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.suggestion-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.suggestion-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-suggestion {
+  color: var(--primary);
+  border-color: var(--primary) !important;
+  white-space: nowrap;
+}
+
+.btn-suggestion:hover {
+  background: var(--primary-light);
 }
 
 /* 记录列表 */
@@ -1143,6 +1387,12 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-sub);
   font-variant-numeric: tabular-nums;
+}
+
+/* 互动率单元格：红绿灯点 + 数值（B10） */
+.rate-cell .benchmark-dot {
+  margin-right: 5px;
+  margin-top: -2px;
 }
 
 .actions-cell {
@@ -1309,6 +1559,33 @@ onMounted(() => {
 
 .form-grid.three {
   grid-template-columns: repeat(3, 1fr);
+}
+
+/* U9：原生日期/时间控件对齐项目 .input 风格（高度/内边距/字体/圆角），
+   否则 WebKit 默认渲染的高度与字体和文本框不一致，两列并排时参差不齐 */
+.analytics-modal .input[type='date'],
+.analytics-modal .input[type='time'] {
+  height: 52px; /* 与 .input（14px 上下内边距 + 16px 字号 + 边框）视觉高度一致 */
+  padding: 0 16px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.analytics-modal .input[type='date']::-webkit-calendar-picker-indicator,
+.analytics-modal .input[type='time']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--transition-fast);
+}
+
+.analytics-modal .input[type='date']:hover::-webkit-calendar-picker-indicator,
+.analytics-modal .input[type='time']:hover::-webkit-calendar-picker-indicator {
+  opacity: 0.85;
 }
 
 .form-error {

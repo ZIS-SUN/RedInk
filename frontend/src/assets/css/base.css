@@ -57,6 +57,8 @@ body {
 .layout-main {
   margin-left: var(--sidebar-width);
   flex: 1;
+  /* flex 子项默认 min-width:auto 会被内部 min-content 撑破视口，导致移动端横向溢出 */
+  min-width: 0;
   padding: var(--space-7) var(--space-8);
   min-height: 100vh;
   background: var(--bg-body);
@@ -77,6 +79,8 @@ body {
   max-width: 180px;
   height: auto;
   object-fit: contain;
+  /* logo 位图无 alpha 通道，正片叠底消除四角白底（项目无深色主题，浅色底安全） */
+  mix-blend-mode: multiply;
 }
 
 .logo-text {
@@ -278,7 +282,8 @@ body {
 
 .footer-license {
   font-size: var(--font-size-caption);
-  color: var(--text-placeholder);
+  /* 占位符色对比度仅 1.93:1，正文信息改用三级文本色 */
+  color: var(--text-secondary);
 }
 
 .footer-license a {

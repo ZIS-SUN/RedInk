@@ -14,7 +14,8 @@
   display: inline-block;
   padding: 6px 16px;
   background: var(--primary-fade);
-  color: var(--primary);
+  /* 品牌红在粉底上仅 3.62:1，改用更深的激活红达 5.19:1 */
+  color: var(--primary-active);
   border-radius: var(--radius-full);
   font-size: var(--font-size-caption);
   font-weight: 600;
