@@ -85,10 +85,10 @@ Beyond the "one sentence → full post" main flow, the **Creator Tools** section
 | | Comment Assistant | Paste fan comments to generate high-engagement replies and a pinned guiding comment |
 | | Video Script | Turn a post into a 30s / 60s / 3min short-video narration script with a timestamped storyboard (hook, visual cues, spoken lines, subtitle breaks, CTA); supports brand persona injection, and you can copy the full script or any single line |
 | **Style & Visuals** | Brand Memory | Manage personal IP / brand profiles (tone, catchphrases, signature, banned words) for a consistent persona |
-| | Style Templates | A curated library of 43 visual styles (with custom templates) — now including viral layouts and trend styles such as big-character poster, chat log, sticky note, Y2K, dopamine, and Maillard — applied to image generation in one click |
+| | Style Templates | A curated library of 43 visual styles (with custom templates) — now including viral layouts and trend styles such as big-character poster, chat log, sticky note, Y2K, dopamine, and Maillard — applied to image generation in one click; custom styles can be exported as a "style share code" that friends paste to import |
 | | Cover A/B | Generate multiple cover directions for one topic and compare estimated click appeal |
 | **Generate & Export** | Link to Post | Paste a URL or long text to auto-distill a multi-page outline and send it into the creation flow |
-| | Multi-Size Export | Adapt one image to 9:16 / 1:1 / 3:4 / WeChat banner / Bilibili cover and batch download |
+| | Multi-Size Export | Adapt one image to 9:16 / 1:1 / 3:4 / WeChat banner / Bilibili cover and batch download; preview can overlay "platform safe-zone" masks showing where Douyin's like bar or Xiaohongshu's title area would cover your image (preview only, never exported) |
 | **Plan & Review** | Content Calendar | Plan publishing cadence across platforms and manage plans and statuses; entries support publish times and linked works ("Add to Calendar" from history links automatically, with jump-to-view); new entries get a best-time-slot recommendation based on your account data; "AI Scheduling" generates a one-week content plan in one click (optionally using account data, with a preview to check off before saving); a built-in hotspot calendar covers year-round marketing moments (solar and lunar festivals, e-commerce sales, seasonal rules, with 2026–2028 lunar-date mapping), shown as an overlay layer plus an "upcoming hotspots" countdown block, and any hotspot can spawn topic ideas in one click — works without an AI model |
 | | Analytics Review | Log published metrics manually or bulk-paste from Excel / CSV (headers auto-detected, numbers like "1.2万" auto-converted), view SVG trend / comparison charts and publishing time-slot analysis, and get AI review insights |
 
@@ -354,6 +354,13 @@ If this project helps you, please give it a Star ⭐
 ## Changelog
 
 ### Unreleased
+- ✨ Creator preference profile: automatically aggregates "topics the user liked / preferred length / editing habits" from work ratings and edit traces, and injects it into outline generation so the AI understands you better over time (no conclusions until 3+ rated samples); a profile summary card is available in Settings
+- ✨ Platform safe-zone preview in Multi-Size Export: overlays translucent masks for Douyin like/comment bar and bottom caption area, Xiaohongshu title area, and Bilibili duration badge so text can avoid covered regions — preview only, never exported into images
+- ✨ Style share codes in Style Templates: generate a RINK1 share code from any custom style and send it to friends, who can paste to import (with validation preview, automatic rename on conflicts, and malicious-content protection)
+- ✨ Work rating (1-5 stars) and edit traces on the result page: accumulates data for the quality feedback loop, with star badges on history cards
+- ✨ Data management center in Settings: one-click backup of all local data as zip / import restore (with automatic pre-import backup) / sanitized diagnostics package export
+- ✨ Windows desktop build support with cross-platform data directories, plus a Release CI pipeline for automated packaging
+- ✨ Local archive with quick restore for Topic Inspiration / Comment Insight, and one-click "Add to Calendar" for topics
 - ✨ Real-time generation progress visualization: queued / generating / done / failed image card states, per-image progress bar with elapsed time, smooth overall progress, and estimated time remaining based on actual completion times
 - ✨ Added macOS desktop app: pywebview native window packaged with PyInstaller as `dist/RedInk.app`, with app icon, native completion/failure notifications, and window size/position memory (see BUILD_DESKTOP.md)
 - ✨ Added "Edit Text" on the result page: save copy only or save and redraw; titles / copy / tags support inline editing and are saved with the work in history
