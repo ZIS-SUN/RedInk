@@ -27,9 +27,119 @@ export const LLM_TIMEOUT = 330_000
  */
 export const SSE_IDLE_TIMEOUT = 120_000
 
+// ==================== 部署级访问令牌（REDINK_ACCESS_TOKEN） ====================
+
+/** 访问令牌在 localStorage 中的存储键 */
+export const ACCESS_TOKEN_STORAGE_KEY = 'redink:access-token'
+
+/**
+ * 部署级令牌 401 的统一用户提示。
+ * 后端原文建议「在请求头携带 Authorization …」是给 API 调用方看的，
+ * 页面用户需要的是「到哪里填」。
+ */
+export const ACCESS_TOKEN_UNAUTHORIZED_MESSAGE =
+  '访问令牌缺失或不正确，请到 系统设置 → 访问安全 填写'
+
+/** localStorage 的最小接口，便于测试注入（与 utils/localBackup.ts 的约定一致） */
+export interface TokenStorageLike {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  removeItem(key: string): void
+}
+
+function defaultTokenStorage(): TokenStorageLike | null {
+  return typeof localStorage === 'undefined' ? null : localStorage
+}
+
+/** 读取已保存的访问令牌；未保存或存储不可用时返回空字符串 */
+export function getAccessToken(
+  storage: TokenStorageLike | null = defaultTokenStorage()
+): string {
+  if (!storage) return ''
+  try {
+    return (storage.getItem(ACCESS_TOKEN_STORAGE_KEY) || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+/** 保存访问令牌（自动去除首尾空白；空白串等价于清除） */
+export function setAccessToken(
+  token: string,
+  storage: TokenStorageLike | null = defaultTokenStorage()
+): void {
+  const clean = (token || '').trim()
+  if (!clean) {
+    clearAccessToken(storage)
+    return
+  }
+  if (!storage) return
+  try {
+    storage.setItem(ACCESS_TOKEN_STORAGE_KEY, clean)
+  } catch {
+    // 隐私模式/配额满等写入失败时静默：令牌只是无法持久化，不阻断页面
+  }
+}
+
+/** 清除已保存的访问令牌 */
+export function clearAccessToken(
+  storage: TokenStorageLike | null = defaultTokenStorage()
+): void {
+  if (!storage) return
+  try {
+    storage.removeItem(ACCESS_TOKEN_STORAGE_KEY)
+  } catch {
+    // 同上，静默失败
+  }
+}
+
+/**
+ * 生成鉴权请求头：已保存令牌时返回 { 'X-Access-Token': token }，否则返回空对象。
+ * 后端同时接受 Authorization: Bearer 与 X-Access-Token（backend/app.py），
+ * 这里选用 X-Access-Token，避免与上游服务商的 Authorization 语义混淆。
+ */
+export function getAuthHeaders(
+  storage: TokenStorageLike | null = defaultTokenStorage()
+): Record<string, string> {
+  const token = getAccessToken(storage)
+  return token ? { 'X-Access-Token': token } : {}
+}
+
+/**
+ * 把部署级令牌鉴权的 401 响应体（code=UNAUTHORIZED，见 backend/app.py
+ * _register_access_token_auth）塑形为面向页面用户的标准错误结构，
+ * normalizeApiError / ErrorCard 可直接消费。
+ *
+ * 仅处理部署级 401：上游 AI 服务商的 401/403 是 AUTH_OR_PERMISSION
+ * （API Key 配置问题），原样保留不塑形。
+ */
+export function reshapeUnauthorizedPayload(data: unknown): unknown {
+  const payload = data as { error?: { code?: string; detail?: string } } | null | undefined
+  if (payload?.error?.code !== 'UNAUTHORIZED') return data
+
+  const error: AppError = {
+    type: 'https://redink.app/errors/unauthorized',
+    code: 'UNAUTHORIZED',
+    title: '访问未授权',
+    detail: ACCESS_TOKEN_UNAUTHORIZED_MESSAGE,
+    suggestion: getAccessToken()
+      ? '当前填写的令牌与服务端不一致，请到 系统设置 → 访问安全 更新为与服务端 REDINK_ACCESS_TOKEN 相同的值。'
+      : '请到 系统设置 → 访问安全 填写与服务端 REDINK_ACCESS_TOKEN 相同的访问令牌。',
+    status: 401,
+    retryable: false,
+    diagnostics: { raw: payload.error.detail || '缺少或无效的访问令牌' }
+  }
+  return {
+    success: false,
+    error,
+    error_message: `${error.title}：${error.detail}`
+  }
+}
+
 /**
  * 统一的 axios 实例：
  * - 统一 baseURL 和默认超时
+ * - 请求拦截器注入访问令牌请求头（未设置令牌时零行为变化）
  * - 响应拦截器里把错误归一化为 AppError，挂到 error.appError 上，
  *   调用方可以直接读取，也可以继续走 normalizeApiError（幂等）
  */
@@ -38,9 +148,22 @@ export const http: AxiosInstance = axios.create({
   timeout: DEFAULT_TIMEOUT
 })
 
+// 每次请求时重新读取令牌（设置页保存后立即生效，无需刷新页面）；
+// 未设置令牌时 getAuthHeaders() 返回空对象，不添加任何请求头
+http.interceptors.request.use(config => {
+  for (const [key, value] of Object.entries(getAuthHeaders())) {
+    config.headers.set(key, value)
+  }
+  return config
+})
+
 http.interceptors.response.use(
   response => response,
   (error: unknown) => {
+    // 部署级令牌 401：先把响应体塑形为用户可行动的提示，再走统一归一化
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      error.response.data = reshapeUnauthorizedPayload(error.response.data)
+    }
     const appError = normalizeApiError(error)
     if (error && typeof error === 'object') {
       ;(error as { appError?: AppError }).appError = appError
@@ -63,7 +186,8 @@ export function getApiErrorPayload(error: unknown, fallback: string): {
 
 export async function readErrorResponse(response: Response, fallback: string) {
   try {
-    return await response.json()
+    // 部署级令牌 401 同样塑形（SSE fetch 不经过 axios 拦截器）
+    return reshapeUnauthorizedPayload(await response.json())
   } catch {
     return new Error(fallback)
   }

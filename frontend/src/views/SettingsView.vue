@@ -286,6 +286,62 @@
           </div>
         </div>
       </div>
+
+      <!-- 访问安全：公网部署时的访问令牌 -->
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">访问安全</h2>
+            <p class="section-desc">
+              本地使用无需设置。若你把 RedInk 部署到公网并在服务端启用了
+              REDINK_ACCESS_TOKEN，请在此填写相同令牌。
+            </p>
+          </div>
+        </div>
+
+        <p v-if="hasSavedAccessToken" class="token-status">
+          已保存令牌：<code class="token-preview">{{ maskedAccessToken }}</code>（保存新值将覆盖）
+        </p>
+        <p v-else class="token-status">当前未保存访问令牌，请求不会携带鉴权头。</p>
+
+        <div class="token-editor">
+          <div class="token-input-wrap">
+            <input
+              v-model="accessTokenInput"
+              :type="showAccessToken ? 'text' : 'password'"
+              class="token-input"
+              placeholder="粘贴与服务端 REDINK_ACCESS_TOKEN 相同的令牌"
+              autocomplete="off"
+              spellcheck="false"
+              @keyup.enter="handleSaveAccessToken"
+            />
+            <button
+              type="button"
+              class="token-toggle"
+              :aria-label="showAccessToken ? '隐藏令牌' : '明文显示令牌'"
+              @click="showAccessToken = !showAccessToken"
+            >
+              {{ showAccessToken ? '隐藏' : '显示' }}
+            </button>
+          </div>
+          <div class="token-actions">
+            <button
+              class="btn btn-primary btn-small"
+              :disabled="!accessTokenInput.trim()"
+              @click="handleSaveAccessToken"
+            >
+              保存
+            </button>
+            <button
+              class="btn btn-secondary btn-small"
+              :disabled="!hasSavedAccessToken && !accessTokenInput"
+              @click="handleClearAccessToken"
+            >
+              清除
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 文本服务商弹窗 -->
@@ -335,6 +391,7 @@ import {
   getPreferenceProfile,
   type PreferenceProfile
 } from '../api'
+import { clearAccessToken, getAccessToken, setAccessToken } from '../api/client'
 import { normalizeApiError } from '../utils/errors'
 import { hasConfiguredProvider } from '../utils/providerConfig'
 import { collectLocalBackup, restoreLocalBackup } from '../utils/localBackup'
@@ -640,6 +697,43 @@ async function loadPreferenceProfile() {
   }
 }
 
+// ==================== 访问安全（部署级访问令牌） ====================
+
+const accessTokenInput = ref('')
+const showAccessToken = ref(false)
+/** 已保存的令牌值（仅用于脱敏预览，不回填输入框） */
+const savedAccessToken = ref(getAccessToken())
+
+const hasSavedAccessToken = computed(() => savedAccessToken.value !== '')
+
+/** 脱敏预览：前 4 后 4，中间打星（与后端 mask_api_key 约定一致） */
+const maskedAccessToken = computed(() => {
+  const token = savedAccessToken.value
+  if (!token) return ''
+  if (token.length <= 8) return '*'.repeat(token.length)
+  return token.slice(0, 4) + '*'.repeat(token.length - 8) + token.slice(-4)
+})
+
+/** 保存令牌：axios 拦截器与 SSE fetch 每次请求都会重新读取，保存后立即生效 */
+function handleSaveAccessToken() {
+  const token = accessTokenInput.value.trim()
+  if (!token) return
+  setAccessToken(token)
+  savedAccessToken.value = getAccessToken()
+  accessTokenInput.value = ''
+  showAccessToken.value = false
+  feedback.value = { type: 'success', message: '访问令牌已保存，立即生效（无需刷新页面）' }
+}
+
+/** 清除令牌：后续请求不再携带鉴权头 */
+function handleClearAccessToken() {
+  clearAccessToken()
+  savedAccessToken.value = ''
+  accessTokenInput.value = ''
+  showAccessToken.value = false
+  feedback.value = { type: 'success', message: '已清除访问令牌，后续请求不再携带鉴权头' }
+}
+
 onMounted(() => {
   loadConfig()
   loadImagePrompt()
@@ -920,6 +1014,91 @@ onMounted(() => {
   min-width: 0;
 }
 
+/* 访问安全卡片 */
+.token-status {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-3);
+  line-height: 1.6;
+}
+
+.token-preview {
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--gray-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+.token-editor {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.token-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 输入框对齐 ProviderModal 的 .form-input 样式 */
+.token-input {
+  width: 100%;
+  padding: 10px 58px 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-main);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.token-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+.token-input:hover {
+  border-color: var(--border-hover);
+}
+
+.token-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.token-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.token-toggle:hover {
+  color: var(--text-main);
+  background: var(--gray-2);
+}
+
+.token-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 /* 按钮样式 */
 .btn-small {
   padding: 6px 14px;
@@ -961,6 +1140,15 @@ onMounted(() => {
   .data-admin-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .token-editor {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .token-actions .btn {
+    flex: 1;
   }
 }
 </style>

@@ -1,6 +1,7 @@
 import {
   API_BASE_URL,
   LLM_TIMEOUT,
+  getAuthHeaders,
   http,
   readErrorResponse,
   readSseResponse
@@ -92,8 +93,10 @@ export async function retryFailedImages(
   try {
     const response = await fetch(`${API_BASE_URL}/retry-failed`, {
       method: 'POST',
+      // SSE 流式请求不走 axios 拦截器，需在此合并访问令牌请求头
       headers: {
         'Content-Type': 'application/json',
+        ...getAuthHeaders()
       },
       body: JSON.stringify({
         task_id: taskId,
@@ -141,8 +144,10 @@ export async function generateImagesPost(
 
     const response = await fetch(`${API_BASE_URL}/generate`, {
       method: 'POST',
+      // SSE 流式请求不走 axios 拦截器，需在此合并访问令牌请求头
       headers: {
         'Content-Type': 'application/json',
+        ...getAuthHeaders()
       },
       body: JSON.stringify({
         pages,
