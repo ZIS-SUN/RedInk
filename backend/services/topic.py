@@ -3,9 +3,13 @@
 
 根据用户的领域/赛道和目标平台，由 AI 生成一批有爆款潜力的选题灵感。
 注意：这是基于常识/常青角度的 AI 灵感生成，不是实时热榜数据。
+
+另含系列拆解能力（expand_series）：把一个大主题拆成递进连更的系列选题，
+吃垂直连更的算法加权与粉丝追更红利。
 """
 
 import logging
+import re
 from typing import Dict, Any, Optional
 from backend.utils.llm_utils import (
     classify_llm_error,
@@ -31,6 +35,14 @@ MAX_HOT_TOPICS = 20
 
 # 蹭热点模式：单条热点词的最大长度（防超长文本挤爆 prompt）
 MAX_HOT_TOPIC_LEN = 100
+
+# 系列拆解：集数取值范围与默认值
+SERIES_MIN_COUNT = 5
+SERIES_MAX_COUNT = 10
+DEFAULT_SERIES_COUNT = 6
+
+# 系列拆解：主题/系列名输入的最大长度（防超长文本挤爆 prompt）
+MAX_SERIES_THEME_LEN = 100
 
 
 class TopicService:
@@ -357,6 +369,262 @@ class TopicService:
             return {
                 "success": False,
                 "error": classify_llm_error(e, task_label="选题灵感生成失败")
+            }
+
+    # ==================== 系列拆解（把大主题拆成递进连更系列） ====================
+
+    @staticmethod
+    def clamp_series_count(count) -> int:
+        """
+        集数归一化：非法类型回退默认值，越界钳制到 [SERIES_MIN_COUNT, SERIES_MAX_COUNT]。
+        """
+        try:
+            value = int(count)
+        except (TypeError, ValueError):
+            return DEFAULT_SERIES_COUNT
+        return max(SERIES_MIN_COUNT, min(SERIES_MAX_COUNT, value))
+
+    @staticmethod
+    def _build_series_prompt(
+        theme: str,
+        count: int,
+        niche: str = '',
+        platform: str = '',
+        series_name: str = ''
+    ) -> str:
+        """
+        运行时拼接系列拆解 prompt（不走模板文件，保持简单、避免占位符冲突）。
+
+        编排要求写死在 prompt 里：第 1 集立题引流、中段逐层深入各打一个
+        具体痛点、末集进阶/总结收口，标题差异化不同质。
+        """
+        # 选填上下文逐段拼接，空值不出现在 prompt 中
+        context_lines = []
+        if niche:
+            context_lines.append(f"创作者领域/赛道：{niche}")
+        if platform:
+            context_lines.append(f"目标平台：{platform}")
+        context_block = ("\n".join(context_lines) + "\n\n") if context_lines else ""
+
+        if series_name:
+            series_name_rule = (
+                f"系列名固定使用用户指定的「{series_name}」，"
+                '输出的 "series_name" 字段必须与其完全一致。'
+            )
+        else:
+            series_name_rule = (
+                "用户未指定系列名，请你起一个 4-10 字、有辨识度、方便读者追更的系列名"
+                "（如「新手化妆避坑」「租房改造日记」），不要带书名号或引号。"
+            )
+
+        return (
+            "你是一个深耕内容创作行业的系列策划专家，深谙垂直连更的算法逻辑：\n"
+            "系列内容会获得平台算法加权，粉丝会追更，系列中一篇爆则全系列被翻牌。\n\n"
+            "## 任务\n"
+            f"把下面的大主题拆解成一个 {count} 集的递进系列选题，每一集都能独立成篇，"
+            "串起来又是一个完整的进阶路径。\n\n"
+            f"大主题：{theme}\n\n"
+            f"{context_block}"
+            "## 系列编排要求（必须遵守）\n"
+            f"1. 第 1 集负责立题引流：点明系列价值、制造追更钩子，让读者知道追完整个系列能得到什么\n"
+            f"2. 中段各集逐层深入，每一集只打一个具体痛点，一集讲透一件事，不贪多\n"
+            f"3. 最后一集负责进阶/总结收口：给出进阶方向或全系列要点回顾，形成完整闭环\n"
+            "4. 各集标题措辞差异化，不要同质化（不要每集都是「XX 的 N 个技巧」这种同一句式）\n"
+            f"5. {series_name_rule}\n\n"
+            "## 输出格式\n"
+            "请严格按以下 JSON 格式输出（必须是有效的 JSON，不要包含其他说明文字）：\n\n"
+            "{\n"
+            '  "series_name": "系列名",\n'
+            '  "episodes": [\n'
+            "    {\n"
+            '      "order": 1,\n'
+            '      "title": "系列名｜01 本集具体标题",\n'
+            '      "angle": "本集切入角度：这一集讲什么、戳中什么痛点",\n'
+            '      "progression": "在系列中的递进作用一句话（如：立题引流，建立追更预期）"\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "## 字段要求\n"
+            f"- episodes 恰好 {count} 集，order 从 1 开始连续递增\n"
+            '- title 统一格式「系列名｜0X 本集具体标题」：竖线用全角「｜」，'
+            "集数编号两位数字（01、02……），编号后接一个空格再写本集具体标题；"
+            "具体标题 8-20 字、有画面感，能独立当一篇笔记/视频的标题用\n"
+            "- angle 一句话说清本集的切入角度与痛点，20-50 字，讲人话\n"
+            "- progression 一句话说清这一集在整个系列递进结构中的位置和作用，15-40 字\n\n"
+            "## 重要提醒\n"
+            "- 直接输出 JSON，不要有任何其他说明或对话\n"
+            "- 确保 JSON 格式正确，可以被解析"
+        )
+
+    @staticmethod
+    def _format_series_title(series_name: str, order: int, bare_title: str) -> str:
+        """按统一格式「{series_name}｜0X 具体标题」组装单集标题。"""
+        return f"{series_name}｜{order:02d} {bare_title}"
+
+    def _normalize_episode(
+        self, item: Any, fallback_order: int, series_name: str
+    ) -> Dict[str, Any]:
+        """
+        把 AI 返回的单集收敛为标准结构 {order, title, angle, progression}。
+
+        - title 为空的条目直接丢弃（返回空 dict）
+        - order 非法时回退为该集在数组中的位置
+        - AI 没按「系列名｜0X 标题」格式输出时，剥掉它自带的编号前缀后重新组装，
+          保证入库/铺日历拿到的标题格式统一
+        """
+        if not isinstance(item, dict):
+            return {}
+
+        title = str(item.get('title', '')).strip()
+        if not title:
+            return {}
+
+        try:
+            order = int(item.get('order', 0))
+        except (TypeError, ValueError):
+            order = 0
+        if order <= 0:
+            order = fallback_order
+
+        # 已符合「系列名｜」前缀的标题只取竖线后的部分重排编号；
+        # 兼容 AI 用半角 | 或漏写系列名的情况
+        bare = title
+        for sep in ('｜', '|'):
+            if sep in bare:
+                prefix, rest = bare.split(sep, 1)
+                if prefix.strip() == series_name or not prefix.strip():
+                    bare = rest
+                break
+        # 剥掉「第1集：」「01.」等编号前缀，避免双重编号
+        bare = re.sub(
+            r'^\s*(?:第\s*\d+\s*[集期篇]\s*[.、:：\-\s]?|\d{1,2}\s*[.、:：\-])\s*',
+            '', bare
+        ).strip()
+        # 「数字+空格」前缀仅在编号与集数吻合时才剥（如 01 对应第 1 集），
+        # 避免误伤「10 分钟搞定底妆」这类以数字开头的正常标题
+        numbered = re.match(r'^\s*(\d{1,2})\s+(\S.*)$', bare)
+        if numbered and int(numbered.group(1)) == order:
+            bare = numbered.group(2).strip()
+        if not bare:
+            bare = title
+
+        angle = str(item.get('angle', '')).strip()
+        progression = str(item.get('progression', '')).strip()
+
+        return {
+            'order': order,
+            'title': self._format_series_title(series_name, order, bare),
+            'angle': angle,
+            'progression': progression,
+        }
+
+    def expand_series(
+        self,
+        theme: str,
+        count: int = DEFAULT_SERIES_COUNT,
+        niche: str = '',
+        platform: str = '',
+        series_name: str = ''
+    ) -> Dict[str, Any]:
+        """
+        把一个大主题拆解成递进系列选题（一次 LLM 调用）
+
+        参数：
+            theme: 大主题（必填，如"新手化妆"）
+            count: 集数（5-10，越界自动钳制，默认 6）
+            niche: 领域/赛道（选填，注入 prompt 供 AI 贴合赛道语境）
+            platform: 目标平台（选填）
+            series_name: 系列名（选填，不填由 AI 起名）
+
+        返回：
+            成功：{success: True, series_name, episodes}，每集含
+                order/title/angle/progression，title 统一为「系列名｜0X 标题」格式
+            失败：{success: False, error}
+        """
+        try:
+            theme = (theme or '').strip()[:MAX_SERIES_THEME_LEN]
+            if not theme:
+                raise ValueError("系列主题不能为空")
+
+            count = self.clamp_series_count(count)
+            niche = (niche or '').strip()[:MAX_SERIES_THEME_LEN]
+            platform = (platform or '').strip()[:MAX_SERIES_THEME_LEN]
+            series_name = (series_name or '').strip()[:MAX_SERIES_THEME_LEN]
+
+            logger.info(
+                f"开始系列拆解: theme={theme[:50]}, count={count}, "
+                f"niche={niche[:30]}, platform={platform}, "
+                f"series_name={series_name[:30] or '(AI 起名)'}"
+            )
+
+            prompt = self._build_series_prompt(
+                theme, count, niche=niche, platform=platform, series_name=series_name
+            )
+
+            model, temperature, max_output_tokens = resolve_generation_params(
+                self.text_config, default_max_output_tokens=4000
+            )
+
+            logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
+            # 生成 + 解析 JSON（与 generate_topics 相同：解析失败自动带纠正提示重试一次）
+            series_data = generate_and_parse_json(
+                lambda prompt_suffix: self.client.generate_text(
+                    prompt=prompt + prompt_suffix,
+                    model=model,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    json_mode=True
+                )
+            )
+
+            # 系列名：优先用户指定，其次 AI 返回，最后回退大主题
+            final_series_name = series_name or str(
+                series_data.get('series_name', '') or ''
+            ).strip() or theme
+
+            raw_episodes = series_data.get('episodes', [])
+            if not isinstance(raw_episodes, list):
+                raw_episodes = []
+
+            episodes = []
+            for index, item in enumerate(raw_episodes):
+                episode = self._normalize_episode(item, index + 1, final_series_name)
+                if episode:
+                    episodes.append(episode)
+
+            if not episodes:
+                logger.error("AI 返回结果中没有有效的系列集数")
+                raise ValueError("AI 未返回有效的系列内容，请重试")
+
+            # 按 order 排序后重排为连续编号，标题中的编号同步刷新
+            episodes.sort(key=lambda e: e['order'])
+            title_prefix = f"{final_series_name}｜"
+            for index, episode in enumerate(episodes):
+                new_order = index + 1
+                if episode['order'] != new_order:
+                    # 标题里的编号是按旧 order 组装的，剥掉已知前缀与旧编号后重新组装
+                    bare = episode['title']
+                    if bare.startswith(title_prefix):
+                        bare = bare[len(title_prefix):]
+                    bare = re.sub(r'^\d{2}\s', '', bare)
+                    episode['order'] = new_order
+                    episode['title'] = self._format_series_title(
+                        final_series_name, new_order, bare
+                    )
+
+            logger.info(f"系列拆解完成: 「{final_series_name}」共 {len(episodes)} 集")
+
+            return {
+                "success": True,
+                "series_name": final_series_name,
+                "episodes": episodes,
+            }
+
+        except Exception as e:
+            logger.error(f"系列拆解失败: {e}")
+            return {
+                "success": False,
+                "error": classify_llm_error(e, task_label="系列拆解失败")
             }
 
 

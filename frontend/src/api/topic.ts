@@ -55,3 +55,56 @@ export async function generateTopics(
   )
   return response.data
 }
+
+// ==================== 系列拆解（把大主题拆成递进连更系列） ====================
+
+/** 系列集数取值范围（与后端 SERIES_MIN_COUNT / SERIES_MAX_COUNT 对齐） */
+export const SERIES_MIN_COUNT = 5
+export const SERIES_MAX_COUNT = 10
+export const DEFAULT_SERIES_COUNT = 6
+
+/** 系列中的单集选题 */
+export interface SeriesEpisode {
+  /** 集数序号，从 1 开始 */
+  order: number
+  /** 统一格式标题：「系列名｜0X 本集具体标题」 */
+  title: string
+  /** 本集切入角度 */
+  angle: string
+  /** 在系列中的递进作用（一句话） */
+  progression: string
+}
+
+export interface ExpandSeriesParams {
+  /** 大主题（必填），如：新手化妆 */
+  theme: string
+  /** 集数 5-10，默认 6 */
+  count?: number
+  /** 领域/赛道（选填） */
+  niche?: string
+  /** 目标平台（选填） */
+  platform?: string
+  /** 系列名（选填，不填由 AI 起名） */
+  series_name?: string
+}
+
+export interface ExpandSeriesResponse {
+  success: boolean
+  /** 系列名（用户指定或 AI 起名） */
+  series_name?: string
+  episodes?: SeriesEpisode[]
+  error?: AppError | string
+  error_message?: string
+}
+
+export async function expandSeries(
+  params: ExpandSeriesParams
+): Promise<ExpandSeriesResponse> {
+  const response = await http.post<ExpandSeriesResponse>(
+    '/topic/series',
+    params,
+    // 系列拆解走 LLM，耗时较长
+    { timeout: LLM_TIMEOUT }
+  )
+  return response.data
+}

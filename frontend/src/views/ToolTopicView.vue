@@ -286,6 +286,13 @@
                 >
                   {{ savedTitles.has(item.title) ? '已入库 ✓' : (savingTitle === item.title ? '入库中…' : '存入选题库') }}
                 </button>
+                <button
+                  type="button"
+                  class="series-btn"
+                  @click="openSeriesDialogFromTopic(item)"
+                >
+                  拆成系列
+                </button>
                 <template v-if="addedTitles.has(item.title)">
                   <button type="button" class="calendar-btn added" disabled>已加入 ✓</button>
                   <RouterLink class="calendar-link" to="/tools/calendar">去日历看看</RouterLink>
@@ -387,6 +394,7 @@
                 <option v-for="s in IDEA_STATUS_OPTIONS" :key="s.value" :value="s.value">{{ s.label }}</option>
               </select>
               <button type="button" class="use-btn" @click="handleUse(idea)">用这个创作</button>
+              <button type="button" class="series-btn" @click="openSeriesDialogFromIdea(idea)">拆成系列</button>
               <button type="button" class="calendar-btn" @click="openCalendarDialog(idea)">加入日历</button>
               <button
                 type="button"
@@ -492,6 +500,199 @@
       </div>
     </div>
 
+    <!-- 拆成系列弹窗（第一步设置 → 第二步预览/入库/铺日历） -->
+    <div v-if="showSeriesDialog" class="idea-dialog-mask" @click.self="closeSeriesDialog">
+      <div
+        class="card idea-dialog series-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="series-dialog-title"
+      >
+        <!-- ── 第一步：设置 ── -->
+        <template v-if="seriesStep === 'setup'">
+          <h3 id="series-dialog-title" class="idea-dialog-title">拆成系列</h3>
+          <p class="series-dialog-subtitle">把大主题拆成递进连更的系列选题：系列中一篇爆，全系列被翻牌</p>
+
+          <div class="idea-dialog-field">
+            <label class="idea-dialog-label" for="series-theme-input">大主题 <span class="required-mark">*</span></label>
+            <input
+              id="series-theme-input"
+              v-model="seriesForm.theme"
+              class="idea-dialog-input"
+              type="text"
+              maxlength="100"
+              placeholder="如：新手化妆"
+              :disabled="seriesGenerating"
+            />
+          </div>
+
+          <div class="idea-dialog-field">
+            <label class="idea-dialog-label" for="series-count-input">
+              系列篇数：<span class="series-count-value">{{ seriesForm.count }} 集</span>
+            </label>
+            <input
+              id="series-count-input"
+              v-model.number="seriesForm.count"
+              class="series-count-slider"
+              type="range"
+              :min="SERIES_MIN_COUNT"
+              :max="SERIES_MAX_COUNT"
+              step="1"
+              :disabled="seriesGenerating"
+            />
+            <div class="series-count-scale" aria-hidden="true">
+              <span>{{ SERIES_MIN_COUNT }} 集</span>
+              <span>{{ SERIES_MAX_COUNT }} 集</span>
+            </div>
+          </div>
+
+          <div class="idea-dialog-field">
+            <label class="idea-dialog-label" for="series-name-input">系列名（选填，不填让 AI 起）</label>
+            <input
+              id="series-name-input"
+              v-model="seriesForm.seriesName"
+              class="idea-dialog-input"
+              type="text"
+              maxlength="30"
+              placeholder="如：新手化妆避坑"
+              :disabled="seriesGenerating"
+            />
+          </div>
+
+          <p v-if="seriesError" class="idea-dialog-error" role="alert">{{ seriesError }}</p>
+          <p v-if="seriesGenerating" class="series-loading-hint" role="status">
+            正在拆解系列（消耗一次 AI 调用），预计十几秒…
+          </p>
+
+          <div class="idea-dialog-actions">
+            <button type="button" class="btn btn-secondary" :disabled="seriesGenerating" @click="closeSeriesDialog">取消</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="seriesGenerating || !seriesForm.theme.trim()"
+              @click="handleGenerateSeries"
+            >
+              <span v-if="seriesGenerating" class="spinner-sm" aria-hidden="true"></span>
+              {{ seriesGenerating ? '正在拆解…' : '生成系列' }}
+            </button>
+          </div>
+        </template>
+
+        <!-- ── 第二步：预览 + 入库 / 铺日历 ── -->
+        <template v-else>
+          <h3 id="series-dialog-title" class="idea-dialog-title">
+            {{ seriesName }}
+            <span class="series-episode-count">共 {{ seriesEpisodes.length }} 集，已勾选 {{ checkedEpisodes.length }} 集</span>
+          </h3>
+
+          <div class="series-episode-list">
+            <label
+              v-for="ep in seriesEpisodes"
+              :key="ep.order"
+              class="series-episode-card"
+              :class="{ unchecked: !seriesChecked.has(ep.order) }"
+            >
+              <input
+                type="checkbox"
+                class="series-episode-checkbox"
+                :checked="seriesChecked.has(ep.order)"
+                :disabled="seriesSaving || seriesScheduling || showSeriesSchedule"
+                :aria-label="`勾选第 ${ep.order} 集`"
+                @change="toggleEpisode(ep.order)"
+              />
+              <span class="series-episode-order" aria-hidden="true">{{ String(ep.order).padStart(2, '0') }}</span>
+              <span class="series-episode-main">
+                <span class="series-episode-title">{{ ep.title }}</span>
+                <span v-if="ep.angle" class="series-episode-angle">{{ ep.angle }}</span>
+                <span v-if="ep.progression" class="series-episode-progression">递进作用：{{ ep.progression }}</span>
+              </span>
+            </label>
+          </div>
+
+          <!-- 铺日历的日期设置（「存入选题库并铺日历」入库成功后展开） -->
+          <div v-if="showSeriesSchedule" class="series-schedule-panel">
+            <p class="series-schedule-title">已入库，接着设置排期</p>
+            <div class="series-schedule-row">
+              <div class="idea-dialog-field series-schedule-field">
+                <label class="idea-dialog-label" for="series-start-date">起始日期</label>
+                <input
+                  id="series-start-date"
+                  v-model="scheduleStartDate"
+                  class="idea-dialog-input"
+                  type="date"
+                  :disabled="seriesScheduling"
+                />
+              </div>
+              <div class="idea-dialog-field series-schedule-field">
+                <span class="idea-dialog-label">更新频率</span>
+                <div class="series-frequency-row" role="radiogroup" aria-label="更新频率">
+                  <button
+                    v-for="option in SCHEDULE_FREQUENCY_OPTIONS"
+                    :key="option.value"
+                    type="button"
+                    class="filter-chip"
+                    role="radio"
+                    :aria-checked="scheduleFrequency === option.value"
+                    :class="{ active: scheduleFrequency === option.value }"
+                    :disabled="seriesScheduling"
+                    @click="scheduleFrequency = option.value"
+                  >{{ option.label }}</button>
+                </div>
+              </div>
+            </div>
+            <p v-if="scheduleEndDate" class="series-schedule-hint">
+              {{ checkedEpisodes.length }} 集将从 {{ scheduleStartDate }} 排到 {{ scheduleEndDate }}
+            </p>
+          </div>
+
+          <p v-if="seriesError" class="idea-dialog-error" role="alert">{{ seriesError }}</p>
+
+          <div class="idea-dialog-actions">
+            <template v-if="showSeriesSchedule">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                :disabled="seriesScheduling"
+                @click="closeSeriesDialog"
+              >先不排期</button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="seriesScheduling || !scheduleStartDate"
+                @click="handleScheduleSeries"
+              >
+                <span v-if="seriesScheduling" class="spinner-sm" aria-hidden="true"></span>
+                {{ seriesScheduling ? '正在铺入日历…' : `铺入日历 ${checkedEpisodes.length} 条` }}
+              </button>
+            </template>
+            <template v-else>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                :disabled="seriesSaving"
+                @click="backToSeriesSetup"
+              >返回设置</button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                :disabled="seriesSaving || checkedEpisodes.length === 0"
+                @click="handleSaveSeriesToLibrary"
+              >
+                <span v-if="seriesSaving" class="spinner-sm" aria-hidden="true"></span>
+                存入选题库
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                :disabled="seriesSaving || checkedEpisodes.length === 0"
+                @click="handleSaveSeriesAndSchedule"
+              >存入选题库并铺日历</button>
+            </template>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- 删除确认弹窗 -->
     <ConfirmDialog
       :visible="!!ideaDeleteTarget"
@@ -520,7 +721,15 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { generateTopics, type TopicIdea } from '../api/topic'
+import {
+  DEFAULT_SERIES_COUNT,
+  SERIES_MAX_COUNT,
+  SERIES_MIN_COUNT,
+  expandSeries,
+  generateTopics,
+  type SeriesEpisode,
+  type TopicIdea,
+} from '../api/topic'
 import {
   createIdea,
   deleteIdea,
@@ -530,14 +739,17 @@ import {
   type IdeaSource,
   type IdeaStatus,
 } from '../api/ideaLibrary'
+import { createPlan } from '../api/calendar'
 import { useGeneratorStore } from '../stores/generator'
-import { normalizeApiError, type AppError } from '../utils/errors'
+import { formatErrorMessage, normalizeApiError, type AppError } from '../utils/errors'
 import {
   addArchiveEntry,
   createTopicArchiveEntry,
+  ideaToPlanInput,
   loadTopicArchive,
   platformLabelToPlanPlatform,
   saveTopicArchive,
+  tomorrowDateStr,
   type CalendarIdeaLike,
   type TopicArchiveEntry,
 } from '../utils/ideaArchive'
@@ -1001,6 +1213,260 @@ async function handleAddIdea() {
     showToast('已入库')
   } else {
     addError.value = res.error_message || '添加失败，请重试'
+  }
+}
+
+// ==================== 拆成系列（大主题 → 递进连更系列） ====================
+
+/** 铺日历频率选项（days 为相邻两集的间隔天数） */
+const SCHEDULE_FREQUENCY_OPTIONS = [
+  { value: 'daily', label: '每天', days: 1 },
+  { value: 'every_other_day', label: '隔天', days: 2 },
+  { value: 'weekly', label: '每周', days: 7 },
+] as const
+
+type ScheduleFrequency = (typeof SCHEDULE_FREQUENCY_OPTIONS)[number]['value']
+
+const showSeriesDialog = ref(false)
+/** 弹窗两步流程：setup 设置 → preview 预览 */
+const seriesStep = ref<'setup' | 'preview'>('setup')
+const seriesGenerating = ref(false)
+const seriesError = ref('')
+
+// 第一步：设置表单（主题可编辑 / 篇数滑杆 / 系列名选填）
+const seriesForm = reactive({
+  theme: '',
+  count: DEFAULT_SERIES_COUNT,
+  seriesName: '',
+})
+
+// 触发入口带过来的赛道（生成结果用本批赛道，选题库条目用其 niche），入库时透传
+const seriesNiche = ref('')
+
+// 第二步：预览数据（系列名 + 每集卡片 + 勾选集合，默认全选）
+const seriesName = ref('')
+const seriesEpisodes = ref<SeriesEpisode[]>([])
+const seriesChecked = ref<Set<number>>(new Set())
+
+// 入库 / 铺日历状态
+const seriesSaving = ref(false)
+const seriesScheduling = ref(false)
+/** 「存入选题库并铺日历」入库成功后展开日期设置 */
+const showSeriesSchedule = ref(false)
+const scheduleStartDate = ref(tomorrowDateStr())
+const scheduleFrequency = ref<ScheduleFrequency>('daily')
+
+const checkedEpisodes = computed(() =>
+  seriesEpisodes.value.filter(ep => seriesChecked.value.has(ep.order))
+)
+
+const scheduleStepDays = computed(
+  () =>
+    SCHEDULE_FREQUENCY_OPTIONS.find(o => o.value === scheduleFrequency.value)?.days ?? 1
+)
+
+/** 铺日历的收尾日期（用于排期预览文案） */
+const scheduleEndDate = computed(() => {
+  const total = checkedEpisodes.value.length
+  if (total === 0 || !scheduleStartDate.value) return ''
+  return addDaysToDateStr(scheduleStartDate.value, scheduleStepDays.value * (total - 1))
+})
+
+/** YYYY-MM-DD 加 N 天（本地时区，避免 toISOString 的 UTC 偏移） */
+function addDaysToDateStr(dateStr: string, days: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  date.setDate(date.getDate() + days)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/** 入口 a：生成选题结果卡（带该选题标题作为大主题，赛道用本批结果赛道） */
+function openSeriesDialogFromTopic(item: TopicIdea) {
+  openSeriesDialog(item.title, resultNiche.value)
+}
+
+/** 入口 b：选题库条目（带条目标题作为大主题，赛道透传条目 niche） */
+function openSeriesDialogFromIdea(idea: IdeaItem) {
+  openSeriesDialog(idea.title, idea.niche)
+}
+
+function openSeriesDialog(theme: string, niche: string) {
+  seriesForm.theme = theme
+  seriesForm.count = DEFAULT_SERIES_COUNT
+  seriesForm.seriesName = ''
+  seriesNiche.value = niche
+  seriesStep.value = 'setup'
+  seriesName.value = ''
+  seriesEpisodes.value = []
+  seriesChecked.value = new Set()
+  showSeriesSchedule.value = false
+  scheduleStartDate.value = tomorrowDateStr()
+  scheduleFrequency.value = 'daily'
+  seriesError.value = ''
+  showSeriesDialog.value = true
+}
+
+function closeSeriesDialog() {
+  if (seriesGenerating.value || seriesSaving.value || seriesScheduling.value) return
+  showSeriesDialog.value = false
+}
+
+/** 预览页返回第一步重新设置（入库后不允许回退） */
+function backToSeriesSetup() {
+  if (seriesSaving.value || seriesScheduling.value || showSeriesSchedule.value) return
+  seriesStep.value = 'setup'
+  seriesError.value = ''
+}
+
+function toggleEpisode(order: number) {
+  // 入库后（日期设置已展开）勾选集合即锁定，避免日历与选题库不一致
+  if (seriesSaving.value || seriesScheduling.value || showSeriesSchedule.value) return
+  if (seriesChecked.value.has(order)) {
+    seriesChecked.value.delete(order)
+  } else {
+    seriesChecked.value.add(order)
+  }
+}
+
+async function handleGenerateSeries() {
+  if (!seriesForm.theme.trim() || seriesGenerating.value) return
+  seriesGenerating.value = true
+  seriesError.value = ''
+
+  try {
+    const result = await expandSeries({
+      theme: seriesForm.theme.trim(),
+      count: seriesForm.count,
+      ...(seriesNiche.value ? { niche: seriesNiche.value } : {}),
+      platform: platform.value,
+      ...(seriesForm.seriesName.trim()
+        ? { series_name: seriesForm.seriesName.trim() }
+        : {}),
+    })
+
+    if (result.success && result.episodes && result.episodes.length > 0) {
+      seriesName.value = result.series_name || seriesForm.theme.trim()
+      seriesEpisodes.value = result.episodes
+      // 默认全选
+      seriesChecked.value = new Set(result.episodes.map(ep => ep.order))
+      seriesStep.value = 'preview'
+    } else {
+      seriesError.value = formatErrorMessage(
+        result.error || result.error_message || '系列拆解失败',
+        '系列拆解失败'
+      )
+    }
+  } catch (err: unknown) {
+    seriesError.value = formatErrorMessage(err, '系列拆解失败')
+  } finally {
+    seriesGenerating.value = false
+  }
+}
+
+/** 单集入库的切入角度文案：本集角度 + 递进说明 */
+function episodeLibraryAngle(ep: SeriesEpisode): string {
+  const parts: string[] = []
+  if (ep.angle.trim()) parts.push(ep.angle.trim())
+  if (ep.progression.trim()) parts.push(`递进作用：${ep.progression.trim()}`)
+  return parts.join('；')
+}
+
+/** 勾选集循环入库，返回成功/失败数（source 用 topic，tags 含系列名） */
+async function saveCheckedEpisodesToLibrary(): Promise<{ ok: number; fail: number }> {
+  let ok = 0
+  let fail = 0
+  for (const ep of checkedEpisodes.value) {
+    const res = await createIdea({
+      title: ep.title,
+      angle: episodeLibraryAngle(ep),
+      tags: [seriesName.value],
+      source: 'topic',
+      niche: seriesNiche.value,
+    })
+    if (res.success && res.idea) {
+      ok++
+      // 选题库已加载过时同步头插，切过去即可见
+      if (ideasLoaded.value) ideas.value.unshift(res.idea)
+    } else {
+      fail++
+    }
+  }
+  return { ok, fail }
+}
+
+/** 入库结果的提示文案（部分失败如实提示成功/失败数） */
+function librarySaveToast(ok: number, fail: number): string {
+  return fail === 0 ? `已存入选题库 ${ok} 条` : `已存入选题库 ${ok} 条，失败 ${fail} 条`
+}
+
+/** 动作一：仅存入选题库 */
+async function handleSaveSeriesToLibrary() {
+  if (seriesSaving.value || seriesScheduling.value || checkedEpisodes.value.length === 0) return
+  seriesSaving.value = true
+  seriesError.value = ''
+
+  const { ok, fail } = await saveCheckedEpisodesToLibrary()
+  seriesSaving.value = false
+
+  if (ok > 0) {
+    showToast(librarySaveToast(ok, fail))
+    showSeriesDialog.value = false
+  } else {
+    seriesError.value = '存入选题库失败，请重试'
+  }
+}
+
+/** 动作二：先入库，成功后展开铺日历的日期设置 */
+async function handleSaveSeriesAndSchedule() {
+  if (seriesSaving.value || seriesScheduling.value || checkedEpisodes.value.length === 0) return
+  seriesSaving.value = true
+  seriesError.value = ''
+
+  const { ok, fail } = await saveCheckedEpisodesToLibrary()
+  seriesSaving.value = false
+
+  if (ok === 0) {
+    seriesError.value = '存入选题库失败，请重试'
+    return
+  }
+  showToast(librarySaveToast(ok, fail))
+  showSeriesSchedule.value = true
+}
+
+/** 日期设置确认后：勾选集按频率递推日期循环铺入日历 */
+async function handleScheduleSeries() {
+  if (seriesScheduling.value || !scheduleStartDate.value) return
+  seriesScheduling.value = true
+  seriesError.value = ''
+
+  // 平台透传：工具页当前选中平台映射为日历枚举，未知平台回退小红书
+  const planPlatform = defaultPlanPlatform.value || 'xiaohongshu'
+  let ok = 0
+  let fail = 0
+  let publishDate = scheduleStartDate.value
+
+  for (const ep of checkedEpisodes.value) {
+    const res = await createPlan(
+      ideaToPlanInput(
+        { title: ep.title, angle: episodeLibraryAngle(ep), tags: [seriesName.value] },
+        { platform: planPlatform, publishDate }
+      )
+    )
+    if (res.success) {
+      ok++
+    } else {
+      fail++
+    }
+    publishDate = addDaysToDateStr(publishDate, scheduleStepDays.value)
+  }
+  seriesScheduling.value = false
+
+  if (ok > 0) {
+    showToast(fail === 0 ? `已铺入日历 ${ok} 条` : `已铺入日历 ${ok} 条，失败 ${fail} 条`)
+    showSeriesDialog.value = false
+  } else {
+    seriesError.value = '铺入日历失败，请重试'
   }
 }
 </script>
@@ -2140,6 +2606,217 @@ textarea.idea-dialog-input {
   margin-top: var(--space-2);
 }
 
+/* ── 拆成系列按钮（结果卡/选题库条目共用，样式对齐 copy-btn 系按钮） ── */
+.series-btn {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  white-space: nowrap;
+}
+
+.series-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-fade);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.series-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* ── 拆成系列弹窗（基于手动添加选题弹窗的 idea-dialog 范式） ── */
+.series-dialog {
+  width: min(560px, 100%);
+  max-height: min(80vh, 720px);
+  overflow-y: auto;
+}
+
+.series-dialog-subtitle {
+  margin: -4px 0 0;
+  font-size: 13px;
+  color: var(--text-sub);
+  line-height: 1.6;
+}
+
+.series-count-value {
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.series-count-slider {
+  width: 100%;
+  margin: 4px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.series-count-slider:disabled {
+  cursor: wait;
+}
+
+.series-count-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-sub);
+  opacity: 0.85;
+}
+
+.series-loading-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--primary);
+}
+
+/* ── 第二步：每集预览卡片 ── */
+.series-episode-count {
+  margin-left: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+
+.series-episode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.series-episode-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--gray-1);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    opacity var(--transition-fast);
+}
+
+.series-episode-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.series-episode-card.unchecked {
+  opacity: 0.55;
+}
+
+.series-episode-checkbox {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.series-episode-checkbox:disabled {
+  cursor: default;
+}
+
+.series-episode-order {
+  flex-shrink: 0;
+  min-width: 26px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 26px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.series-episode-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.series-episode-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-main);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.series-episode-angle {
+  font-size: 12.5px;
+  color: var(--text-sub);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.series-episode-progression {
+  font-size: 12px;
+  color: var(--primary);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ── 铺日历日期设置面板 ── */
+.series-schedule-panel {
+  padding: 12px 14px;
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--primary-fade);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.series-schedule-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.series-schedule-row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.series-schedule-field {
+  flex: 1;
+  min-width: 160px;
+}
+
+.series-frequency-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.series-schedule-hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-sub);
+}
+
 /* ── 轻提示 toast ── */
 .lib-toast {
   position: fixed;
@@ -2325,6 +3002,8 @@ textarea.idea-dialog-input {
   .copy-btn:hover,
   .save-btn,
   .save-btn:hover,
+  .series-btn,
+  .series-btn:hover,
   .topic-card:hover {
     transform: none;
   }
