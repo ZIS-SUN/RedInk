@@ -66,10 +66,79 @@ def setup_logging():
     return root_logger
 
 
+# 视为"仅本机可访问"的环回监听地址（大小写不敏感）
+_LOOPBACK_HOSTS = frozenset({'127.0.0.1', '::1', 'localhost'})
+
+
+def validate_security_config(host, access_token, allow_insecure):
+    """启动期安全校验（fail-closed）。
+
+    监听非环回地址（不在 _LOOPBACK_HOSTS 内）意味着局域网/公网可达，此时若
+    未设置访问令牌 REDINK_ACCESS_TOKEN，任何能访问端口的人都可以调用全部
+    API——包括 /api/data/export?include_keys=true 导出明文 API Key。因此除非
+    显式设置 REDINK_ALLOW_INSECURE=1 声明接受风险，否则拒绝启动。
+    环回监听（本机自用）行为完全不变。
+
+    Args:
+        host: 监听地址（如 Config.HOST）。
+        access_token: REDINK_ACCESS_TOKEN 的值（空串/空白视同未设置）。
+        allow_insecure: 是否显式设置了 REDINK_ALLOW_INSECURE=1。
+
+    Returns:
+        None 表示校验通过且无需警告；返回字符串表示校验通过、
+        但调用方应把该文本作为醒目警告打印（显式豁免场景）。
+
+    Raises:
+        SystemExit: 非环回监听 + 无令牌 + 未显式豁免时，携带中文错误说明。
+    """
+    if (host or '').strip().lower() in _LOOPBACK_HOSTS:
+        return None
+
+    if (access_token or '').strip():
+        return None
+
+    if allow_insecure:
+        return (
+            "⚠️  REDINK_ALLOW_INSECURE=1：正在以【无鉴权】方式监听非环回地址 "
+            f"{host}。任何能访问该端口的人都可以调用全部 API（包括导出明文 "
+            "API Key）。仅建议在可信内网或已由反向代理完成鉴权的环境使用；"
+            "公网部署请删除该变量并设置 REDINK_ACCESS_TOKEN。"
+        )
+
+    raise SystemExit(
+        f"\n❌ 安全校验失败：监听地址 {host} 不是环回地址（127.0.0.1/::1/localhost），"
+        "但未设置访问令牌 REDINK_ACCESS_TOKEN。\n"
+        "   这意味着任何能访问该端口的人都可以无鉴权调用全部 API，"
+        "包括通过 /api/data/export?include_keys=true 导出明文 API Key，"
+        "存在密钥泄露风险，已拒绝启动。\n\n"
+        "   请任选一种方式解决：\n"
+        "   1. 设置访问令牌（推荐，公网部署必须）：\n"
+        "      export REDINK_ACCESS_TOKEN=<随机强密钥>\n"
+        "   2. 改回仅本机监听：\n"
+        "      export FLASK_HOST=127.0.0.1\n"
+        "   3. 确认环境可信（如仅内网、或已有反向代理鉴权/防火墙隔离），"
+        "显式声明接受不安全配置：\n"
+        "      export REDINK_ALLOW_INSECURE=1\n"
+    )
+
+
 def create_app():
     # 设置日志
     logger = setup_logging()
     logger.info("🚀 正在启动 红墨 AI图文生成器...")
+
+    # 启动期安全校验（fail-closed）：非环回监听且无令牌时拒绝启动
+    try:
+        insecure_warning = validate_security_config(
+            Config.HOST,
+            os.getenv('REDINK_ACCESS_TOKEN', ''),
+            os.getenv('REDINK_ALLOW_INSECURE', '').strip() == '1',
+        )
+    except SystemExit as e:
+        logger.error(str(e))
+        raise
+    if insecure_warning:
+        logger.warning(insecure_warning)
 
     # 检查是否存在前端构建产物（Docker / 桌面打包环境）
     frontend_dist = resource_path('frontend/dist')
