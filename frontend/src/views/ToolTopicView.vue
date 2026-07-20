@@ -60,6 +60,28 @@
       </button>
     </div>
 
+    <!-- 历史记录（本地存档） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">历史记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ entry.niche }} · {{ entry.platform }} · {{ entry.topics.length }} 条灵感</span>
+            <span class="history-time">{{ formatTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
     <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
     <div v-if="loading && topics.length === 0" class="skeleton-section" aria-hidden="true">
       <div v-for="n in 3" :key="n" class="skeleton-card">
@@ -143,6 +165,18 @@
               >
                 {{ copiedTitle === item.title ? '已复制' : '复制' }}
               </button>
+              <template v-if="addedTitles.has(item.title)">
+                <button type="button" class="calendar-btn added" disabled>已加入 ✓</button>
+                <RouterLink class="calendar-link" to="/tools/calendar">去日历看看</RouterLink>
+              </template>
+              <button
+                v-else
+                type="button"
+                class="calendar-btn"
+                @click="openCalendarDialog(item)"
+              >
+                加入日历
+              </button>
             </div>
           </div>
         </div>
@@ -161,6 +195,15 @@
       <p v-if="!hasGenerated" class="empty-example">试试：健身减脂、职场干货、亲子育儿</p>
     </div>
 
+    <!-- 加入日历弹窗 -->
+    <AddToCalendarDialog
+      v-if="calendarTarget"
+      :idea="calendarTarget"
+      :default-platform="defaultPlanPlatform"
+      @close="calendarTarget = null"
+      @added="onCalendarAdded"
+    />
+
     <ErrorCard
       v-if="error"
       class="topic-error"
@@ -178,7 +221,16 @@ import { useRouter } from 'vue-router'
 import { generateTopics, type TopicIdea } from '../api/topic'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  addArchiveEntry,
+  createTopicArchiveEntry,
+  loadTopicArchive,
+  platformLabelToPlanPlatform,
+  saveTopicArchive,
+  type TopicArchiveEntry,
+} from '../utils/ideaArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
+import AddToCalendarDialog from '../components/common/AddToCalendarDialog.vue'
 
 const PLATFORMS = ['小红书', '抖音', '视频号', 'B站', '公众号'] as const
 const ALL_FORMATS = '全部形式'
@@ -197,6 +249,17 @@ const topics = ref<TopicIdea[]>([])
 const sortByHeat = ref(true)
 const formatFilter = ref(ALL_FORMATS)
 const copiedTitle = ref('')
+
+// 本地存档（最近 10 次生成结果）
+const archive = ref<TopicArchiveEntry[]>(loadTopicArchive())
+const showArchive = ref(false)
+
+// 加入日历：当前弹窗对应的选题 + 已加入的选题标题集合
+const calendarTarget = ref<TopicIdea | null>(null)
+const addedTitles = ref<Set<string>>(new Set())
+
+/** 工具页选中的平台（中文名）映射为日历平台枚举，未知平台回退小红书 */
+const defaultPlanPlatform = computed(() => platformLabelToPlanPlatform(platform.value))
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -221,9 +284,11 @@ const displayTopics = computed(() => {
   return list
 })
 
-// 新一批结果生成后重置筛选，避免残留的筛选项把结果全部过滤掉
+// 新一批结果生成后重置筛选，避免残留的筛选项把结果全部过滤掉；
+// 同时重置「已加入日历」标记，避免同名标题跨批次误显示已加入
 watch(topics, () => {
   formatFilter.value = ALL_FORMATS
+  addedTitles.value = new Set()
 })
 
 function heatClass(heat: number): string {
@@ -249,6 +314,7 @@ async function handleGenerate() {
       topics.value = result.topics
       accountContextUsed.value = result.account_context_used === true
       hasGenerated.value = true
+      recordArchive(result.topics)
     } else {
       error.value = normalizeApiError(
         result.error || result.error_message || '生成选题灵感失败',
@@ -260,6 +326,52 @@ async function handleGenerate() {
   } finally {
     loading.value = false
   }
+}
+
+// ==================== 本地存档 ====================
+
+function recordArchive(resultTopics: TopicIdea[]) {
+  if (resultTopics.length === 0) return
+  const entry = createTopicArchiveEntry({
+    niche: niche.value.trim(),
+    platform: platform.value,
+    accountContextUsed: accountContextUsed.value,
+    topics: resultTopics,
+  })
+  archive.value = addArchiveEntry(archive.value, entry)
+  saveTopicArchive(archive.value)
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: TopicArchiveEntry) {
+  if (loading.value) return
+  niche.value = entry.niche
+  if ((PLATFORMS as readonly string[]).includes(entry.platform)) {
+    platform.value = entry.platform
+  }
+  topics.value = entry.topics
+  accountContextUsed.value = entry.accountContextUsed
+  hasGenerated.value = true
+  error.value = null
+}
+
+function formatTime(timestamp: number): string {
+  const d = new Date(timestamp)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// ==================== 加入内容日历 ====================
+
+function openCalendarDialog(item: TopicIdea) {
+  calendarTarget.value = item
+}
+
+function onCalendarAdded() {
+  if (calendarTarget.value) {
+    addedTitles.value.add(calendarTarget.value.title)
+  }
+  calendarTarget.value = null
 }
 
 /**
@@ -470,6 +582,85 @@ async function handleCopy(item: TopicIdea) {
 .generate-btn {
   margin-top: 22px;
   width: 100%;
+}
+
+/* ── 历史记录（本地存档，样式参照对标拆解的历史区） ── */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* ── 加载骨架（纯 CSS shimmer） ───── */
@@ -822,6 +1013,52 @@ async function handleCopy(item: TopicIdea) {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+}
+
+.calendar-btn {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  white-space: nowrap;
+}
+
+.calendar-btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.calendar-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.calendar-btn.added {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+  color: var(--color-success);
+  cursor: default;
+}
+
+.calendar-link {
+  font-size: 12px;
+  color: var(--primary);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.calendar-link:hover {
+  text-decoration: underline;
 }
 
 .result-disclaimer {

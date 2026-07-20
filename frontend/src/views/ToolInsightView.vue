@@ -50,6 +50,28 @@
       </button>
     </div>
 
+    <!-- 历史记录（本地存档） -->
+    <div v-if="archive.length > 0" class="card history-card">
+      <button type="button" class="history-toggle" @click="showArchive = !showArchive">
+        <span class="history-title">历史记录（{{ archive.length }}）</span>
+        <svg
+          class="history-chevron"
+          :class="{ open: showArchive }"
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true"
+        ><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <ul v-if="showArchive" class="history-list">
+        <li v-for="entry in archive" :key="entry.id">
+          <button type="button" class="history-item" @click="restoreFromArchive(entry)">
+            <span class="history-summary">{{ archiveSummary(entry) }}</span>
+            <span class="history-time">{{ formatTime(entry.createdAt) }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
     <!-- 加载骨架（仅首次生成时占位，重新生成时保留旧结果） -->
     <div v-if="loading && painPoints.length === 0" class="skeleton-section" aria-hidden="true">
       <div v-for="n in 2" :key="n" class="skeleton-card">
@@ -133,6 +155,18 @@
                 >
                   {{ copiedKey === `${pi}-${ti}` ? '已复制' : '复制' }}
                 </button>
+                <template v-if="addedKeys.has(`${pi}-${ti}`)">
+                  <button type="button" class="calendar-btn added" disabled>已加入 ✓</button>
+                  <RouterLink class="calendar-link" to="/tools/calendar">去日历看看</RouterLink>
+                </template>
+                <button
+                  v-else
+                  type="button"
+                  class="calendar-btn"
+                  @click="openCalendarDialog(topic, `${pi}-${ti}`)"
+                >
+                  加入日历
+                </button>
               </div>
             </div>
           </div>
@@ -152,6 +186,14 @@
       <p v-if="!hasGenerated" class="empty-example">评论越多，痛点聚类越准，建议 10 条以上</p>
     </div>
 
+    <!-- 加入日历弹窗 -->
+    <AddToCalendarDialog
+      v-if="calendarTarget"
+      :idea="calendarTarget"
+      @close="closeCalendarDialog"
+      @added="onCalendarAdded"
+    />
+
     <ErrorCard
       v-if="error"
       class="insight-error"
@@ -169,7 +211,15 @@ import { useRouter } from 'vue-router'
 import { mineInsights, type InsightTopicIdea, type PainPoint } from '../api/insight'
 import { useGeneratorStore } from '../stores/generator'
 import { normalizeApiError, type AppError } from '../utils/errors'
+import {
+  addArchiveEntry,
+  createInsightArchiveEntry,
+  loadInsightArchive,
+  saveInsightArchive,
+  type InsightArchiveEntry,
+} from '../utils/ideaArchive'
 import ErrorCard from '../components/common/ErrorCard.vue'
+import AddToCalendarDialog from '../components/common/AddToCalendarDialog.vue'
 
 const MAX_COMMENTS = 50
 
@@ -184,6 +234,15 @@ const error = ref<AppError | null>(null)
 const painPoints = ref<PainPoint[]>([])
 const commentCount = ref(0)
 const copiedKey = ref('')
+
+// 本地存档（最近 10 次挖掘结果）
+const archive = ref<InsightArchiveEntry[]>(loadInsightArchive())
+const showArchive = ref(false)
+
+// 加入日历：当前弹窗对应的选题 + 已加入的选题位置键（`${痛点序号}-${选题序号}`）
+const calendarTarget = ref<InsightTopicIdea | null>(null)
+const calendarTargetKey = ref('')
+const addedKeys = ref<Set<string>>(new Set())
 
 let copyTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -216,16 +275,20 @@ async function handleGenerate() {
   loading.value = true
   error.value = null
 
+  const usedComments = parsedComments.value.slice(0, MAX_COMMENTS)
+
   try {
     const result = await mineInsights({
-      comments: parsedComments.value.slice(0, MAX_COMMENTS),
+      comments: usedComments,
       niche: niche.value
     })
 
     if (result.success && result.pain_points) {
       painPoints.value = result.pain_points
-      commentCount.value = result.comment_count ?? parsedComments.value.length
+      commentCount.value = result.comment_count ?? usedComments.length
       hasGenerated.value = true
+      addedKeys.value = new Set()
+      recordArchive(usedComments, result.pain_points)
     } else {
       error.value = normalizeApiError(
         result.error || result.error_message || '评论洞察挖掘失败',
@@ -237,6 +300,66 @@ async function handleGenerate() {
   } finally {
     loading.value = false
   }
+}
+
+// ==================== 本地存档 ====================
+
+function recordArchive(usedComments: string[], resultPainPoints: PainPoint[]) {
+  if (resultPainPoints.length === 0) return
+  const entry = createInsightArchiveEntry({
+    niche: niche.value.trim(),
+    comments: usedComments,
+    commentCount: commentCount.value,
+    painPoints: resultPainPoints,
+  })
+  archive.value = addArchiveEntry(archive.value, entry)
+  saveInsightArchive(archive.value)
+}
+
+/** 点击存档条目：回填输入与完整结果，不重新调 AI */
+function restoreFromArchive(entry: InsightArchiveEntry) {
+  if (loading.value) return
+  commentsInput.value = entry.comments.join('\n')
+  niche.value = entry.niche
+  painPoints.value = entry.painPoints
+  commentCount.value = entry.commentCount
+  hasGenerated.value = true
+  addedKeys.value = new Set()
+  error.value = null
+}
+
+function formatTime(timestamp: number): string {
+  const d = new Date(timestamp)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** 存档条目摘要：赛道（如有）+ 评论数 + 痛点数 */
+function archiveSummary(entry: InsightArchiveEntry): string {
+  const parts = []
+  if (entry.niche) parts.push(entry.niche)
+  parts.push(`${entry.commentCount} 条评论`)
+  parts.push(`${entry.painPoints.length} 个痛点`)
+  return parts.join(' · ')
+}
+
+// ==================== 加入内容日历 ====================
+
+function openCalendarDialog(item: InsightTopicIdea, key: string) {
+  calendarTarget.value = item
+  calendarTargetKey.value = key
+}
+
+function closeCalendarDialog() {
+  calendarTarget.value = null
+  calendarTargetKey.value = ''
+}
+
+function onCalendarAdded() {
+  if (calendarTargetKey.value) {
+    addedKeys.value.add(calendarTargetKey.value)
+  }
+  closeCalendarDialog()
 }
 
 /**
@@ -400,6 +523,85 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
 .generate-btn {
   margin-top: 22px;
   width: 100%;
+}
+
+/* ── 历史记录（本地存档，样式参照对标拆解的历史区） ── */
+.history-card {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--text-main);
+}
+
+.history-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-chevron {
+  color: var(--text-sub);
+  transition: transform var(--transition-fast);
+}
+
+.history-chevron.open {
+  transform: rotate(180deg);
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--gray-1);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.history-item:hover {
+  border-color: var(--primary);
+  background: var(--primary-fade);
+}
+
+.history-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-time {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-sub);
 }
 
 /* ── 加载骨架（纯 CSS shimmer） ───── */
@@ -763,6 +965,52 @@ async function handleCopy(item: InsightTopicIdea, key: string) {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+}
+
+.calendar-btn {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
+  white-space: nowrap;
+}
+
+.calendar-btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.calendar-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+.calendar-btn.added {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+  color: var(--color-success);
+  cursor: default;
+}
+
+.calendar-link {
+  font-size: 12px;
+  color: var(--primary);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.calendar-link:hover {
+  text-decoration: underline;
 }
 
 .result-disclaimer {
