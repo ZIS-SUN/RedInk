@@ -143,9 +143,9 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
   background: var(--gray-0);
 }
 
-/* 当前激活行：主色微染 + 左侧细条强调，扫视时一眼可辨 */
+/* 当前激活行：中性浅灰底 + 左侧红色细条作品牌识别（粉底易误读为错误行，且与绿色徽标语义打架） */
 .table-row.active {
-  background: var(--primary-fade);
+  background: var(--gray-1);
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
@@ -178,7 +178,8 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 .btn-activate.active {
   background: var(--color-success-soft);
   border-color: rgba(31, 169, 92, 0.3);
-  color: var(--color-success);
+  /* 成功绿在 -soft 底上仅 2.71:1，加深到 4.79:1 */
+  color: #157A43;
   cursor: default;
 }
 

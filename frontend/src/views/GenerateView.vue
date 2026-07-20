@@ -48,8 +48,12 @@
         <span>本次生成使用风格：<strong>{{ activeStyle.name }}</strong></span>
       </template>
       <template v-else>
-        <span>未应用风格，</span>
-        <RouterLink to="/tools/style" class="style-hint-link">去风格模板库选择</RouterLink>
+        <!-- 生成中隐藏风格库入口：此时换风格对本次生成已无作用，点击还会诱发离开中断 -->
+        <span v-if="isGenerating">未应用风格，本次生成的风格已固定</span>
+        <template v-else>
+          <span>未应用风格，</span>
+          <RouterLink to="/tools/style" class="style-hint-link">去风格模板库选择</RouterLink>
+        </template>
       </template>
     </div>
 
@@ -62,9 +66,10 @@
         <div class="progress-bar" :style="{ width: progressPercent + '%' }" />
       </div>
 
-      <!-- 生成中的等待预期提示：告知单张耗时正常范围，降低"卡死"焦虑 -->
+      <!-- 生成中的等待预期提示：告知单张耗时正常范围，降低"卡死"焦虑。
+           注意措辞诚实：离开本页会中断还未开始的图片，不承诺"后台继续" -->
       <p v-if="isGenerating" class="progress-hint">
-        出图较慢属正常，单张约 1 分钟，可在此页等待或稍后到「我的创作」查看
+        出图较慢属正常，单张约 1 分钟；生成期间请保持本页打开，已完成的图片会实时保存到「我的创作」
       </p>
 
       <!-- 成功态：显式引导查看结果，不再强制自动跳转 -->
@@ -164,12 +169,12 @@
       </div>
     </div>
 
-    <!-- 生成中离开确认 -->
+    <!-- 生成中离开确认（诚实文案：离开即中止 SSE，剩余图片不会在后台继续生成） -->
     <ConfirmDialog
       :visible="showLeaveConfirm"
       title="生成还在进行中"
-      message="离开本页后，生成会在后台继续，稍后可在「我的创作」中查看进度和结果。"
-      confirm-text="离开本页"
+      message="离开会中断还没开始的图片，已完成的会保留到『我的创作』，回来后可点『重新生成失败图片』补全。"
+      confirm-text="中断并离开"
       cancel-text="留在本页"
       @confirm="confirmLeave"
       @cancel="cancelLeave"
@@ -329,10 +334,29 @@ function cancelLeave() {
   pendingLeavePath = null
 }
 
+// ==================== 生成中刷新/关标签页拦截 ====================
+// onBeforeRouteLeave 只能拦截应用内路由跳转；刷新或关闭标签页会直接中止 SSE，
+// 用原生 beforeunload 触发浏览器确认框兜底（提示文案由浏览器统一提供）
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  event.preventDefault()
+  // 部分浏览器要求设置 returnValue 才会弹出确认框
+  event.returnValue = ''
+}
+
+watch(isGenerating, (generating) => {
+  if (generating) {
+    window.addEventListener('beforeunload', handleBeforeUnload)
+  } else {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+  }
+}, { immediate: true })
+
 onMounted(startGenerationFlow)
 onUnmounted(() => {
   cleanupGenerationRunner()
   stopProgressTicker()
+  // 生成中直接卸载（如离开确认后跳转）时同步移除刷新拦截
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 

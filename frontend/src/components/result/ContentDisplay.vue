@@ -11,7 +11,7 @@
       </button>
     </div>
 
-    <!-- 加载状态 -->
+    <!-- 加载状态（可能由生成页出图时并行触发，到这里通常已在生成中） -->
     <div v-else-if="content.status === 'generating'" class="loading-section">
       <div class="loading-spinner"></div>
       <p>正在生成标题、文案和标签...</p>
@@ -105,6 +105,17 @@
               </svg>
               {{ copiedCopywriting ? '已复制' : '复制' }}
             </button>
+            <!-- 组合复制：正文 + 全部标签一次拼好，可直接粘贴进发布框 -->
+            <button class="copy-btn" @click="copyCopywritingWithTags" :class="{ copied: copiedCombo }">
+              <svg v-if="!copiedCombo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              {{ copiedCombo ? '已复制' : '复制正文+标签' }}
+            </button>
           </div>
         </div>
         <div v-if="editingCopywriting" class="copywriting-edit">
@@ -167,9 +178,9 @@
         </div>
       </div>
 
-      <!-- 重新生成按钮 -->
+      <!-- 重新生成按钮（有本地编辑时先确认覆盖，防止编辑成果被静默替换） -->
       <div class="regenerate-section">
-        <button class="btn btn-secondary" @click="handleGenerate" :disabled="loading">
+        <button class="btn btn-secondary" @click="handleRegenerateClick" :disabled="loading">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M23 4v6h-6M1 20v-6h6"/>
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
@@ -178,22 +189,35 @@
         </button>
       </div>
     </div>
+
+    <!-- 重新生成覆盖编辑内容的确认弹窗 -->
+    <ConfirmDialog
+      :visible="showOverwriteConfirm"
+      title="覆盖已编辑的内容？"
+      message="重新生成将覆盖你改过的标题、文案和标签，确定继续？"
+      confirm-text="覆盖并重新生成"
+      cancel-text="取消"
+      @confirm="confirmOverwriteRegenerate"
+      @cancel="showOverwriteConfirm = false"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useGeneratorStore } from '../../stores/generator'
-import { generateContent, updateHistory } from '../../api'
-import { formatErrorMessage } from '../../utils/errors'
+import { useContentGeneration } from '../../composables/useContentGeneration'
 import { addTag, removeAt } from '../../utils/contentEdit'
+import ConfirmDialog from '../../views/shared/ConfirmDialog.vue'
 
 const store = useGeneratorStore()
+// 内容生成逻辑与生成页共享（生成页出图时已并行触发过一次自动生成）
+const { generate, reconcileInterruptedGeneration, scheduleContentSync } = useContentGeneration()
 
-const loading = ref(false)
 const copiedTitles = ref(false)
 const copiedCopywriting = ref(false)
 const copiedTags = ref(false)
+const copiedCombo = ref(false)
 const copiedTitleIndex = ref<number | null>(null)
 const copiedTagIndex = ref<number | null>(null)
 const copyTimers: number[] = []
@@ -207,41 +231,19 @@ function setCopyTimeout(fn: () => void, ms: number) {
   copyTimers.push(id)
 }
 
+// 内容生成中途刷新会把持久化状态卡在 generating：挂载时校正为可重试的 error。
+// 正常情况（生成页并行触发、请求仍在进行）不受影响，继续显示 loading
+onMounted(reconcileInterruptedGeneration)
+
 onUnmounted(() => {
   copyTimers.forEach(id => clearTimeout(id))
   copyTimers.length = 0
-  if (contentSyncTimer !== null) {
-    clearTimeout(contentSyncTimer)
-    contentSyncTimer = null
-  }
 })
 
 const content = computed(() => store.content)
 
-// ==================== content 同步落库 ====================
-// 生成成功与每次编辑保存后，防抖 800ms 把标题/文案/标签同步进历史记录。
-// 失败静默（本地 store 已持久化到 localStorage，不打扰用户）。
-let contentSyncTimer: number | null = null
-
-function scheduleContentSync() {
-  if (!store.recordId) return
-  if (contentSyncTimer !== null) clearTimeout(contentSyncTimer)
-  contentSyncTimer = window.setTimeout(async () => {
-    contentSyncTimer = null
-    const recordId = store.recordId
-    if (!recordId) return
-    const result = await updateHistory(recordId, {
-      content: {
-        titles: [...store.content.titles],
-        copywriting: store.content.copywriting,
-        tags: [...store.content.tags]
-      }
-    })
-    if (!result.success) {
-      console.warn('同步发布内容到历史记录失败:', result.error_message || result.error)
-    }
-  }, 800)
-}
+// 生成中标志：状态在 store 里（可能由生成页并行触发），不再用本地 ref
+const loading = computed(() => content.value.status === 'generating')
 
 // 格式化文案（按换行分段）
 const formattedCopywriting = computed(() => {
@@ -249,31 +251,31 @@ const formattedCopywriting = computed(() => {
   return content.value.copywriting.split('\n').filter(p => p.trim())
 })
 
-// 生成内容
+// ==================== 重新生成前的覆盖确认 ====================
+// 用户编辑过标题/文案/标签后点「重新生成」，先确认再整体替换，防止编辑成果蒸发
+const contentDirty = ref(false)
+const showOverwriteConfirm = ref(false)
+
+// 生成内容（idle 首次生成 / error 重试入口共用，不做覆盖确认）
 async function handleGenerate() {
   if (loading.value) return
+  // 新一轮生成会整体替换内容，本地编辑标记随之清零
+  contentDirty.value = false
+  await generate()
+}
 
-  loading.value = true
-  store.startContentGeneration()
-
-  try {
-    const result = await generateContent(
-      store.topic,
-      store.outline.raw,
-      store.brandId || undefined
-    )
-
-    if (result.success && result.titles && result.copywriting && result.tags) {
-      store.setContent(result.titles, result.copywriting, result.tags)
-      scheduleContentSync()
-    } else {
-      store.setContentError(formatErrorMessage(result.error || result.error_message || '生成失败', '内容生成失败'))
-    }
-  } catch (error: unknown) {
-    store.setContentError(formatErrorMessage(error, '内容生成失败'))
-  } finally {
-    loading.value = false
+function handleRegenerateClick() {
+  if (loading.value) return
+  if (contentDirty.value) {
+    showOverwriteConfirm.value = true
+    return
   }
+  void handleGenerate()
+}
+
+function confirmOverwriteRegenerate() {
+  showOverwriteConfirm.value = false
+  void handleGenerate()
 }
 
 // 复制到剪贴板
@@ -340,6 +342,7 @@ function confirmTitleEdit() {
   if (editingTitleIndex.value === null) return
   store.updateContentTitle(editingTitleIndex.value, editingTitleText.value)
   editingTitleIndex.value = null
+  contentDirty.value = true
   scheduleContentSync()
 }
 
@@ -350,6 +353,7 @@ function cancelTitleEdit() {
 
 function handleRemoveTitle(index: number) {
   store.removeContentTitle(index)
+  contentDirty.value = true
   scheduleContentSync()
 }
 
@@ -368,6 +372,7 @@ async function startEditCopywriting() {
 function saveCopywriting() {
   store.updateCopywriting(editingCopywritingText.value)
   editingCopywriting.value = false
+  contentDirty.value = true
   scheduleContentSync()
 }
 
@@ -383,6 +388,7 @@ function handleAddTag() {
   const next = addTag(content.value.tags, newTagInput.value)
   if (next !== content.value.tags) {
     store.updateTags(next)
+    contentDirty.value = true
     scheduleContentSync()
   }
   newTagInput.value = ''
@@ -390,6 +396,7 @@ function handleAddTag() {
 
 function handleRemoveTag(index: number) {
   store.updateTags(removeAt(content.value.tags, index))
+  contentDirty.value = true
   scheduleContentSync()
 }
 
@@ -398,6 +405,15 @@ async function copyCopywriting() {
   if (await copyToClipboard(content.value.copywriting)) {
     copiedCopywriting.value = true
     setCopyTimeout(() => copiedCopywriting.value = false, 2000)
+  }
+}
+
+// 组合复制：正文 + 空行 + 全部标签，一次拼好直接粘贴进发布框
+async function copyCopywritingWithTags() {
+  const text = content.value.copywriting + '\n\n' + content.value.tags.map(t => `#${t}`).join(' ')
+  if (await copyToClipboard(text)) {
+    copiedCombo.value = true
+    setCopyTimeout(() => copiedCombo.value = false, 2000)
   }
 }
 

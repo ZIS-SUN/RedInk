@@ -6,6 +6,7 @@ import { generateImagesPost } from '../api'
 import { isAbortError } from '../api/client'
 import { formatErrorMessage, normalizeApiError, type AppError } from '../utils/errors'
 import { useGenerationRestore } from './useGenerationRestore'
+import { useContentGeneration } from './useContentGeneration'
 import { useStyleLibrary } from './useStyleLibrary'
 
 /**
@@ -27,6 +28,7 @@ export function useGenerationRunner(
   const store = useGeneratorStore()
   const { activeStyle } = useStyleLibrary()
   const { ensureRecord, restoreFromHistory, restoreInterruptedGeneration } = useGenerationRestore()
+  const { autoGenerateOnce } = useContentGeneration()
   const redirectTimer = ref<number | null>(null)
   let isUnmounted = false
   let abortController: AbortController | null = null
@@ -46,13 +48,20 @@ export function useGenerationRunner(
 
     await ensureRecord()
 
+    // 大纲编辑后必须强制后端重新出图（force=true）：
+    // 后端只要 record 里有旧图且 !force 就会原样回放缓存，编辑会静默失效。
+    // startGeneration() 会把 outlineDirty 重置为 false，所以必须在调用它之前取值
+    const mustForce = store.outlineDirty
+
     // 任务开始前就确定 taskId 并立即持久化，中途刷新也不会丢
     // 大纲编辑后的重新生成不复用旧任务ID，避免与已完成任务的状态混淆
-    const taskId = (!store.outlineDirty && store.taskId) || createLocalTaskId()
+    const taskId = (!mustForce && store.taskId) || createLocalTaskId()
     store.startGeneration()
     // 记录本次生成使用的风格提示词（空字符串表示未应用风格），
-    // 写入 store 并随 setTaskId 一起立即持久化，重试/刷新恢复时沿用同一风格
-    const stylePrompt = activeStyle.value?.stylePrompt || ''
+    // 写入 store 并随 setTaskId 一起立即持久化，重试/刷新恢复时沿用同一风格。
+    // 优先级：风格库已应用的风格 > 工具注入的风格（如封面 A/B 的视觉概念）> 无风格，
+    // 避免风格库为空时把工具注入的 stylePrompt 覆盖成空串
+    const stylePrompt = activeStyle.value?.stylePrompt || store.stylePrompt || ''
     store.setStylePrompt(stylePrompt)
     store.setTaskId(taskId)
 
@@ -106,9 +115,14 @@ export function useGenerationRunner(
       store.userImages.length > 0 ? store.userImages : undefined,
       store.topic,
       store.recordId,
-      false,
+      mustForce,
       { signal: abortController.signal, stylePrompt }
     )
+
+    // 出图已启动：并行触发一次标题/文案/标签生成（内容只依赖 topic + 大纲，
+    // 与图片零依赖），用户到结果页时内容通常已就绪，无需再手动点击等待。
+    // 同一记录只自动触发一次，失败时结果页保留手动重新生成入口兜底
+    autoGenerateOnce()
   }
 
   /**

@@ -9,7 +9,7 @@ export type ChecklistStatus = 'pass' | 'warn' | 'fail'
 
 /** 单条检查项 */
 export interface ChecklistItem {
-  /** 检查项标识：title_length / body_length / tags_count / image_count / banned_words / sensitive_words */
+  /** 检查项标识：title_length / body_length / tags_count / image_count / banned_words / sensitive_words / seo_title / seo_body / seo_tags */
   id: string
   /** 检查项名称（如"标题长度"） */
   label: string
@@ -50,6 +50,8 @@ export interface RunChecklistParams {
   imageCount: number
   /** 禁用词列表（可选；不传时服务端自动读取当前启用品牌档案的禁用词） */
   bannedWords?: string[]
+  /** 目标搜索词列表（可选；提供时服务端追加 seo_title/seo_body/seo_tags 三项搜索埋词检查） */
+  seoKeywords?: string[]
 }
 
 /**
@@ -65,6 +67,8 @@ export async function runChecklist(params: RunChecklistParams): Promise<Checklis
   if (params.body) body.body = params.body
   if (params.tags && params.tags.length > 0) body.tags = params.tags
   if (params.bannedWords) body.banned_words = params.bannedWords
+  // 未填搜索词时不携带该键，服务端不会追加埋词检查
+  if (params.seoKeywords && params.seoKeywords.length > 0) body.seo_keywords = params.seoKeywords
 
   const response = await http.post<ChecklistResponse>('/checklist', body)
   return response.data

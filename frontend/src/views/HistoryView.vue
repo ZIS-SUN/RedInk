@@ -16,7 +16,12 @@
           <div v-else class="spinner-small" style="margin-right: 6px;"></div>
           {{ isScanning ? '同步中...' : '同步历史' }}
         </button>
-        <button class="btn btn-primary" @click="router.push('/')">
+        <!-- 空态时中央已有同款主 CTA，右上角降级为次级样式，保证同屏只有一个主按钮 -->
+        <button
+          class="btn"
+          :class="!loading && records.length === 0 ? 'btn-secondary' : 'btn-primary'"
+          @click="router.push('/')"
+        >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           新建图文
         </button>
@@ -161,10 +166,23 @@
             </span>
           </button>
         </div>
-        <button v-if="!batchMode" type="button" class="add-plan-btn" @click="openPlanModal(record)">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="12" y1="14" x2="12" y2="18"></line><line x1="10" y1="16" x2="14" y2="16"></line></svg>
-          加入内容日历
-        </button>
+        <div v-if="!batchMode" class="card-actions">
+          <!-- 爆款迭代：仅已完成/部分完成的作品可「再做一版」 -->
+          <button
+            v-if="canIterate(record)"
+            type="button"
+            class="add-plan-btn iterate-btn"
+            title="把爆款再做一遍是最稳的流量打法"
+            @click="openIterateModal(record)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            再做一版
+          </button>
+          <button type="button" class="add-plan-btn" @click="openPlanModal(record)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><line x1="12" y1="14" x2="12" y2="18"></line><line x1="10" y1="16" x2="14" y2="16"></line></svg>
+            加入内容日历
+          </button>
+        </div>
       </div>
     </div>
 
@@ -250,6 +268,51 @@
             <button type="button" class="btn btn-secondary" @click="closePlanModal">取消</button>
             <button type="button" class="btn btn-primary" :disabled="planSaving" @click="doAddToPlan">
               {{ planSaving ? '添加中...' : '加入日历' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 爆款迭代「再做一版」方向选择弹窗 -->
+    <Teleport to="body">
+      <div v-if="iterateTarget" class="plan-modal-overlay" @click.self="closeIterateModal">
+        <div class="plan-modal iterate-modal" role="dialog" aria-modal="true" aria-label="再做一版">
+          <div class="plan-modal-head">
+            <h3>再做一版</h3>
+            <button type="button" class="close-btn" aria-label="关闭" @click="closeIterateModal">×</button>
+          </div>
+
+          <div class="plan-modal-body">
+            <p class="plan-modal-record" :title="iterateTarget.title">「{{ iterateTarget.title }}」</p>
+            <p class="iterate-hint">同一个选题重复做，是被验证过最稳的流量打法。选一个迭代方向：</p>
+
+            <div class="iterate-directions" role="radiogroup" aria-label="选择迭代方向">
+              <button
+                v-for="direction in ITERATE_DIRECTIONS"
+                :key="direction.key"
+                type="button"
+                class="direction-card"
+                :class="{ selected: iterateDirectionKey === direction.key }"
+                role="radio"
+                :aria-checked="iterateDirectionKey === direction.key"
+                @click="iterateDirectionKey = direction.key"
+              >
+                <span class="direction-label">{{ direction.label }}</span>
+                <span class="direction-desc">{{ direction.desc }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="plan-modal-foot">
+            <button type="button" class="btn btn-secondary" :disabled="iterateLoading" @click="closeIterateModal">取消</button>
+            <button
+              type="button"
+              class="btn btn-primary"
+              :disabled="!iterateDirectionKey || iterateLoading"
+              @click="doIterate"
+            >
+              {{ iterateLoading ? '准备中...' : '开始迭代' }}
             </button>
           </div>
         </div>
@@ -644,6 +707,120 @@ function doBatchDownload() {
     skipped > 0
       ? `已开始下载 ${downloadable.length} 条记录，${skipped} 条无图片已跳过`
       : `已开始下载 ${downloadable.length} 条记录`
+}
+
+// ==================== 爆款迭代「再做一版」 ====================
+
+/** 迭代方向定义：label/desc 用于弹窗展示，instruction 拼进新主题文本 */
+interface IterateDirection {
+  key: 'hook' | 'angle' | 'format' | 'sequel'
+  label: string
+  desc: string
+  instruction: string
+}
+
+const ITERATE_DIRECTIONS: IterateDirection[] = [
+  {
+    key: 'hook',
+    label: '换封面钩子',
+    desc: '同一内容，换个更强的开头抓人方式',
+    instruction:
+      '内容主体保持同一主题，但换一个更强的封面钩子和开头抓人方式（如反问、悬念、数字冲击、身份点名），确保第一屏就能让人停下来'
+  },
+  {
+    key: 'angle',
+    label: '换切入角度',
+    desc: '同一主题，从另一个人群/场景切入',
+    instruction:
+      '同一主题从另一个人群或场景切入（换一类目标读者、换一个使用场景），给出与上一篇不同的视角、案例和结论侧重'
+  },
+  {
+    key: 'format',
+    label: '换内容形式',
+    desc: '如清单体改故事体、教程改避坑',
+    instruction:
+      '换一种内容形式重新组织这个主题（如清单体改故事体、教程体改避坑体、干货罗列改亲身经历复盘），信息可以重叠但表达结构要完全不同'
+  },
+  {
+    key: 'sequel',
+    label: '做续集',
+    desc: '承接上一篇的延伸话题',
+    instruction:
+      '做上一篇的续集，承接上一篇的延伸话题（更进阶的方法、下一阶段会遇到的问题、上一篇没展开的细节），开头可以自然呼应上一篇'
+  }
+]
+
+// 迭代上下文的 sessionStorage 键：存原大纲与所选方向，供后续深化消费
+const ITERATE_CONTEXT_KEY = 'redink:iterate-context'
+
+const iterateTarget = ref<{ id: string; title: string } | null>(null)
+const iterateDirectionKey = ref<IterateDirection['key'] | ''>('')
+const iterateLoading = ref(false)
+
+/** 只有已完成/部分完成的作品才有「再做一版」的价值（草稿/失败没有可迭代的成品） */
+function canIterate(record: { status: string }): boolean {
+  return record.status === 'completed' || record.status === 'partial'
+}
+
+function openIterateModal(record: { id: string; title: string }) {
+  iterateTarget.value = { id: record.id, title: record.title }
+  iterateDirectionKey.value = ''
+}
+
+function closeIterateModal() {
+  if (iterateLoading.value) return
+  iterateTarget.value = null
+}
+
+/**
+ * 确认迭代：
+ * 1. 尽力拉取原作品大纲原文，与所选方向一起写入 sessionStorage
+ *    （迭代上下文供未来深化，取不到大纲不阻断主流程）
+ * 2. 按「原主题 + 迭代要求」构造新主题写入 generator store
+ * 3. 跳回首页，由现有机制自动带入主题，用户直接点生成
+ */
+async function doIterate() {
+  if (!iterateTarget.value || !iterateDirectionKey.value || iterateLoading.value) return
+  const target = iterateTarget.value
+  const direction = ITERATE_DIRECTIONS.find(d => d.key === iterateDirectionKey.value)
+  if (!direction) return
+
+  iterateLoading.value = true
+
+  // 尽力获取原大纲原文，失败静默（上下文里 outline_raw 为空串）
+  let outlineRaw = ''
+  try {
+    const res = await getHistory(target.id)
+    if (res.success && res.record) {
+      outlineRaw = res.record.outline.raw || ''
+    }
+  } catch {
+    // 忽略大纲拉取失败
+  }
+
+  try {
+    sessionStorage.setItem(ITERATE_CONTEXT_KEY, JSON.stringify({
+      record_id: target.id,
+      title: target.title,
+      direction: direction.key,
+      direction_label: direction.label,
+      instruction: direction.instruction,
+      outline_raw: outlineRaw,
+      created_at: new Date().toISOString()
+    }))
+  } catch {
+    // sessionStorage 不可用（如隐私模式）时忽略，不影响主题带入
+  }
+
+  const newTopic =
+    `${target.title}\n` +
+    `【迭代要求】基于我上一篇内容《${target.title}》做迭代：${direction.instruction}。` +
+    '保持同一赛道人设，但内容不要重复上一篇。'
+
+  store.setTopic(newTopic)
+  iterateLoading.value = false
+  iterateTarget.value = null
+  router.push('/')
 }
 
 /**
@@ -1185,6 +1362,17 @@ onMounted(async () => {
   gap: var(--space-2);
 }
 
+/* 卡片下方操作行：再做一版 / 加入日历 并排等分 */
+.card-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.card-actions .add-plan-btn {
+  flex: 1;
+  min-width: 0;
+}
+
 .add-plan-btn {
   display: inline-flex;
   align-items: center;
@@ -1209,6 +1397,69 @@ onMounted(async () => {
   background: var(--primary-light);
   box-shadow: var(--shadow-xs);
   transform: translateY(-1px);
+}
+
+/* 爆款迭代「再做一版」弹窗 */
+.iterate-modal {
+  max-width: 520px;
+}
+
+.iterate-hint {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.iterate-directions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.direction-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast),
+    box-shadow var(--transition-fast), transform var(--transition-fast);
+}
+
+.direction-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-xs);
+  transform: translateY(-1px);
+}
+
+.direction-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: var(--shadow-focus);
+}
+
+.direction-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.direction-card.selected .direction-label {
+  color: var(--primary);
+}
+
+.direction-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
 }
 
 /* 加入内容日历弹窗 */
@@ -1451,6 +1702,11 @@ onMounted(async () => {
   .add-plan-btn {
     font-size: 12px;
     padding: 6px 8px;
+  }
+
+  /* 移动端方向卡片改单列，避免文字挤压 */
+  .iterate-directions {
+    grid-template-columns: 1fr;
   }
 
   .plan-form-grid {

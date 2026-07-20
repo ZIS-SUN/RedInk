@@ -6,6 +6,18 @@
     <!-- 未配置 AI 服务商引导（检测失败或已配置时不渲染） -->
     <SetupGuideBanner />
 
+    <!-- 继续上次创作横幅：store 已持久化未完成流程，这里给一个安静的回访入口 -->
+    <div v-if="showResumeBanner" class="resume-banner" role="status">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+      <span class="resume-banner-text">
+        你有一篇未完成的创作<strong>《{{ resumeTopic }}》</strong>
+      </span>
+      <div class="resume-banner-actions">
+        <button type="button" class="resume-banner-btn primary" @click="resumeUnfinished">继续编辑</button>
+        <button type="button" class="resume-banner-btn" @click="dismissResumeBanner">关闭</button>
+      </div>
+    </div>
+
     <!-- Hero Area -->
     <div class="hero-section">
       <div class="hero-content">
@@ -86,8 +98,8 @@
           class="recent-card"
           role="link"
           tabindex="0"
-          @click="router.push('/history')"
-          @keydown.enter="router.push('/history')"
+          @click="router.push(`/history/${record.id}`)"
+          @keydown.enter="router.push(`/history/${record.id}`)"
         >
           <div class="recent-thumb">
             <img
@@ -132,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, onMounted, onUnmounted } from 'vue'
+import { nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
 import {
@@ -188,6 +200,79 @@ const EXAMPLE_TOPICS = [
 
 // 最近作品（最多 3 条；为空则整个区块不渲染）
 const recentRecords = ref<HistoryRecord[]>([])
+
+// ==================== 主题草稿防抖入 store ====================
+
+// 主题草稿的防抖定时器：输入停顿 300ms 后写入 store（store 有 localStorage 持久化）
+let topicDraftTimer: number | null = null
+
+// 输入主题实时防抖同步到 store，切页/刷新后草稿不丢。
+// 挂载回填、点示例等场景 topic 与 store 已一致，写入前比对可避免循环与冗余持久化
+watch(topic, (value) => {
+  if (topicDraftTimer !== null) {
+    clearTimeout(topicDraftTimer)
+  }
+  topicDraftTimer = window.setTimeout(() => {
+    topicDraftTimer = null
+    if (store.topic !== value) {
+      store.setTopic(value)
+    }
+  }, 300)
+})
+
+// ==================== 继续上次创作横幅 ====================
+
+// 「关闭」仅本次会话隐藏横幅（不清 store 数据），刷新新会话仍会提示
+const RESUME_BANNER_DISMISS_KEY = 'resume-banner-dismissed'
+
+/**
+ * 是否展示「继续上次创作」横幅：
+ * store 已恢复到中途阶段（stage 非 input）且确有内容（大纲页或图片）时提示
+ */
+function canShowResumeBanner(): boolean {
+  try {
+    if (sessionStorage.getItem(RESUME_BANNER_DISMISS_KEY) === '1') return false
+  } catch {
+    // sessionStorage 不可用时按未关闭处理
+  }
+  if (store.stage === 'input') return false
+  return store.outline.pages.length > 0 || store.images.length > 0
+}
+
+const showResumeBanner = ref(canShowResumeBanner())
+
+// 横幅标题取挂载时的快照：F12 的草稿防抖会实时改写 store.topic，
+// 避免用户在输入框打新主题时横幅里的《标题》跟着变
+const resumeTopic = ref(store.topic || '未命名主题')
+
+/**
+ * 按持久化的阶段跳回未完成的创作流程
+ */
+function resumeUnfinished() {
+  const hasPages = store.outline.pages.length > 0
+  const hasImages = store.images.length > 0
+  if (store.stage === 'result' && hasImages) {
+    router.push('/result')
+  } else if (store.stage === 'generating' && hasPages) {
+    router.push('/generate')
+  } else if (hasPages) {
+    router.push('/outline')
+  } else if (hasImages) {
+    router.push('/result')
+  }
+}
+
+/**
+ * 关闭横幅：sessionStorage 标记本次会话不再提示，store 数据保持不动
+ */
+function dismissResumeBanner() {
+  try {
+    sessionStorage.setItem(RESUME_BANNER_DISMISS_KEY, '1')
+  } catch {
+    // 存储失败仅影响"刷新后仍隐藏"，本次隐藏依然生效
+  }
+  showResumeBanner.value = false
+}
 
 // 从大纲页「上一步」返回时，回填之前输入的主题
 onMounted(() => {
@@ -306,18 +391,21 @@ async function handleGenerate() {
     const imageFiles = uploadedImageFiles.value
     const trimmedTopic = topic.value.trim()
     const brandId = store.brandId || undefined
+    // 目标搜索词（搜索埋词）：未填写时不传该参数，请求体保持向后兼容
+    const seoKeywords = store.seoKeywords.length > 0 ? [...store.seoKeywords] : undefined
 
     let result: OutlineResponse & { has_images?: boolean }
     if (imageFiles.length > 0) {
       // 流式版只支持无图路径：带图片直接走既有非流式接口
-      result = await generateOutline(trimmedTopic, imageFiles, brandId)
+      result = await generateOutline(trimmedTopic, imageFiles, brandId, seoKeywords)
     } else {
       try {
         result = await generateOutlineStream(
           trimmedTopic,
           brandId,
           { onDelta: handleStreamDelta },
-          { signal: abortController.signal }
+          { signal: abortController.signal },
+          seoKeywords
         )
       } catch (err) {
         // 离开页面导致的主动取消：静默结束，不回退也不报错
@@ -325,7 +413,7 @@ async function handleGenerate() {
         if (!shouldFallbackToNonStream(err)) throw err
         // 流式不可用（后端不支持/网络异常/断流）：无感回退非流式
         streamingText.value = ''
-        result = await generateOutline(trimmedTopic, undefined, brandId)
+        result = await generateOutline(trimmedTopic, undefined, brandId, seoKeywords)
       }
     }
 
@@ -383,10 +471,19 @@ async function handleGenerate() {
   }
 }
 
-// 卸载时中止流式 fetch，避免回调操作已卸载的组件
+// 卸载时中止流式 fetch，避免回调操作已卸载的组件；
+// 并把防抖窗口内未落盘的主题草稿立即写入 store，避免最后几个字丢失
+// （trim 后相同则跳过：生成成功时已写入 trim 值，不用未 trim 草稿覆盖它）
 onUnmounted(() => {
   abortController?.abort()
   abortController = null
+  if (topicDraftTimer !== null) {
+    clearTimeout(topicDraftTimer)
+    topicDraftTimer = null
+    if (store.topic !== topic.value && store.topic !== topic.value.trim()) {
+      store.setTopic(topic.value)
+    }
+  }
 })
 </script>
 
@@ -396,6 +493,75 @@ onUnmounted(() => {
   padding-top: 10px;
   position: relative;
   z-index: 1;
+}
+
+/* 继续上次创作横幅：浅底小字的回访入口，不与 hero 主输入框争夺注意力 */
+.resume-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: 10px 14px;
+  background: var(--primary-fade);
+  border: 1px solid var(--primary-light);
+  border-radius: var(--radius-md);
+  color: var(--text-sub);
+  font-size: var(--font-size-caption);
+  animation: fadeIn 0.4s var(--ease-out);
+}
+
+.resume-banner svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.resume-banner-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.resume-banner-text strong {
+  color: var(--text-main);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.resume-banner-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.resume-banner-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  background: var(--bg-card);
+  color: var(--text-sub);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.resume-banner-btn:hover {
+  color: var(--text-main);
+  border-color: var(--border-hover);
+}
+
+.resume-banner-btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.resume-banner-btn.primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 
 /* Hero Section */
@@ -717,7 +883,8 @@ onUnmounted(() => {
 
 .footer-license {
   font-size: var(--font-size-caption);
-  color: var(--text-placeholder);
+  /* --text-placeholder 对画布对比度仅 1.93:1，提升到三级文本色保证可读 */
+  color: var(--text-secondary);
 }
 
 .footer-license a {
@@ -755,6 +922,7 @@ onUnmounted(() => {
   .hero-section,
   .home-error,
   .recent-works,
+  .resume-banner,
   .stream-preview,
   .stream-cursor {
     animation: none;

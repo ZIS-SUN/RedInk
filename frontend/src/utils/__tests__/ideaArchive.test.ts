@@ -5,6 +5,7 @@ import {
   INSIGHT_ARCHIVE_KEY,
   TOPIC_ARCHIVE_KEY,
   addArchiveEntry,
+  buildCreationTopicFromPlan,
   createInsightArchiveEntry,
   createTopicArchiveEntry,
   ideaToPlanInput,
@@ -13,6 +14,7 @@ import {
   loadInsightArchive,
   loadTopicArchive,
   parseInsightArchiveJson,
+  parsePlanNotes,
   parseTopicArchiveJson,
   platformLabelToPlanPlatform,
   saveInsightArchive,
@@ -280,5 +282,42 @@ describe('ideaToPlanInput 选题→日历条目字段映射', () => {
       { platform: 'bilibili', publishDate: '2026-07-21' }
     )
     expect(onlyTags.notes).toBe('建议标签：#标签')
+  })
+})
+
+describe('parsePlanNotes 日历备注解析（ideaToPlanInput 的逆向）', () => {
+  it('解析出切入角度与建议标签（去掉 # 前缀）', () => {
+    const notes = '切入角度：反常识盘点，击中新手焦虑\n建议标签：#减脂 #新手健身'
+    expect(parsePlanNotes(notes)).toEqual({
+      angle: '反常识盘点，击中新手焦虑',
+      tags: ['减脂', '新手健身'],
+    })
+  })
+
+  it('手写备注 / 空备注不匹配时返回空值', () => {
+    expect(parsePlanNotes('记得带素材去公园拍')).toEqual({ angle: '', tags: [] })
+    expect(parsePlanNotes('')).toEqual({ angle: '', tags: [] })
+  })
+
+  it('ideaToPlanInput 写入的备注可无损还原角度与标签', () => {
+    const input = ideaToPlanInput(idea, { platform: 'xiaohongshu', publishDate: '2026-07-21' })
+    expect(parsePlanNotes(input.notes || '')).toEqual({ angle: idea.angle, tags: idea.tags })
+  })
+})
+
+describe('buildCreationTopicFromPlan 日历计划→创作主题文本', () => {
+  it('标题 + 角度 + 标签拼成多行主题（与选题送创作格式一致）', () => {
+    const topic = buildCreationTopicFromPlan(
+      '新手减脂的 5 个常见误区',
+      '切入角度：反常识盘点，击中新手焦虑\n建议标签：#减脂 #新手健身'
+    )
+    expect(topic).toBe(
+      '新手减脂的 5 个常见误区\n切入角度：反常识盘点，击中新手焦虑\n建议标签：减脂 新手健身'
+    )
+  })
+
+  it('备注无结构化信息时只保留标题', () => {
+    expect(buildCreationTopicFromPlan('标题', '随手记的备注')).toBe('标题')
+    expect(buildCreationTopicFromPlan('标题', '')).toBe('标题')
   })
 })

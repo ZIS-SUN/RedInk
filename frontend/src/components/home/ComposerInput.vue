@@ -20,6 +20,50 @@
       ></textarea>
     </div>
 
+    <!-- 目标搜索词（选填）：可折叠的搜索埋词输入 -->
+    <div class="seo-section">
+      <button
+        type="button"
+        class="seo-toggle"
+        :aria-expanded="seoExpanded"
+        aria-controls="seo-keywords-area"
+        @click="seoExpanded = !seoExpanded"
+      >
+        <svg
+          class="seo-chevron"
+          :class="{ expanded: seoExpanded }"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+        <span>目标搜索词（选填）</span>
+        <span v-if="store.seoKeywords.length > 0" class="seo-badge">{{ store.seoKeywords.length }}</span>
+      </button>
+
+      <div v-if="seoExpanded" id="seo-keywords-area" class="seo-body">
+        <input
+          v-model="seoRawInput"
+          type="text"
+          class="seo-input"
+          placeholder="最多 3 个，用逗号或顿号分隔，例如：秋冬穿搭、显瘦穿搭"
+          :disabled="loading"
+          @input="handleSeoInput"
+        />
+        <p class="seo-guide">从小红书搜索框下拉联想或创作中心「笔记灵感」里抄 1-3 个词，能吃到搜索流量</p>
+        <div v-if="store.seoKeywords.length > 0" class="seo-chips" aria-label="已识别的搜索词">
+          <span v-for="word in store.seoKeywords" :key="word" class="seo-chip">{{ word }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- 已上传图片预览 -->
     <div v-if="uploadedImages.length > 0" class="uploaded-images-preview">
       <div
@@ -72,6 +116,11 @@
       </div>
     </div>
 
+    <!-- 上传校验提示：超限/超大小时内联提示，几秒后自动消失 -->
+    <div v-if="uploadHint" class="upload-limit-hint" role="status" aria-live="polite">
+      {{ uploadHint }}
+    </div>
+
     <div v-if="loading" class="loading-hint" role="status" aria-live="polite">
       请稍后，这一步大概要 15-30 秒左右。
     </div>
@@ -80,12 +129,14 @@
 
 <script setup lang="ts">
 import { ref, onUnmounted } from 'vue'
+import { useGeneratorStore } from '../../stores/generator'
 
 /**
  * 主题输入组合框组件
  *
  * 功能：
  * - 主题文本输入（自动调整高度）
+ * - 目标搜索词输入（可折叠，选填，用于小红书搜索埋词）
  * - 参考图片上传（最多5张）
  * - 生成按钮
  */
@@ -114,6 +165,61 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
 // 已上传的图片
 const uploadedImages = ref<UploadedImage[]>([])
+
+// ==================== 目标搜索词（搜索埋词） ====================
+
+// 搜索词直接读写 generator store（随 store 的 localStorage 机制持久化）
+const store = useGeneratorStore()
+
+// 折叠状态：store 里已有搜索词（如从大纲页返回）时默认展开
+const seoExpanded = ref(store.seoKeywords.length > 0)
+
+// 搜索词原始输入文本（保留用户的分隔符书写习惯，解析结果才进 store）
+const seoRawInput = ref(store.seoKeywords.join('、'))
+
+/**
+ * 把原始输入解析为搜索词数组：
+ * 支持中英文逗号与顿号分隔；去空白、去重后最多保留 3 个
+ */
+function parseSeoKeywords(raw: string): string[] {
+  const words: string[] = []
+  for (const part of raw.split(/[,，、]/)) {
+    const word = part.trim()
+    if (word && !words.includes(word)) {
+      words.push(word)
+    }
+  }
+  return words.slice(0, 3)
+}
+
+/**
+ * 输入即解析写入 store（setter 内还有一层同规则归一化兜底）
+ */
+function handleSeoInput() {
+  store.setSeoKeywords(parseSeoKeywords(seoRawInput.value))
+}
+
+// 参考图数量上限与单张大小上限（后端按解码后 20MB 限制，前端按文件大小近似校验）
+const MAX_IMAGES = 5
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024
+
+// 上传校验提示文案（空字符串不显示），几秒后自动消失
+const uploadHint = ref('')
+let uploadHintTimer: number | null = null
+
+/**
+ * 显示上传校验提示，4 秒后自动消失
+ */
+function showUploadHint(message: string) {
+  uploadHint.value = message
+  if (uploadHintTimer !== null) {
+    clearTimeout(uploadHintTimer)
+  }
+  uploadHintTimer = window.setTimeout(() => {
+    uploadHint.value = ''
+    uploadHintTimer = null
+  }, 4000)
+}
 
 /**
  * 处理输入变化
@@ -145,22 +251,43 @@ function adjustHeight() {
 }
 
 /**
- * 处理图片上传
+ * 处理图片上传：
+ * - 单张超过 20MB 的图片直接拒绝并提示
+ * - 超出 5 张上限时保留前 5 张并提示，不再静默丢弃
  */
 function handleImageUpload(event: Event) {
   const target = event.target as HTMLInputElement
   if (!target.files) return
 
   const files = Array.from(target.files)
-  files.forEach((file) => {
+
+  // 先过滤超大文件，避免占用数量名额
+  const oversized = files.filter(file => file.size > MAX_IMAGE_SIZE)
+  const validFiles = files.filter(file => file.size <= MAX_IMAGE_SIZE)
+
+  let exceededLimit = false
+  validFiles.forEach((file) => {
     // 限制最多 5 张图片
-    if (uploadedImages.value.length >= 5) {
+    if (uploadedImages.value.length >= MAX_IMAGES) {
+      exceededLimit = true
       return
     }
     // 创建预览 URL
     const preview = URL.createObjectURL(file)
     uploadedImages.value.push({ file, preview })
   })
+
+  // 组合提示：大小超限优先说明，数量超限说明只保留了前 5 张
+  const hints: string[] = []
+  if (oversized.length > 0) {
+    hints.push('单张需小于 20MB，已忽略超出的图片')
+  }
+  if (exceededLimit) {
+    hints.push('最多 5 张参考图，已保留前 5 张')
+  }
+  if (hints.length > 0) {
+    showUploadHint(hints.join('；'))
+  }
 
   // 通知父组件
   emitImagesChange()
@@ -201,6 +328,10 @@ function clearPreviews() {
 // 组件卸载时清理
 onUnmounted(() => {
   clearPreviews()
+  if (uploadHintTimer !== null) {
+    clearTimeout(uploadHintTimer)
+    uploadHintTimer = null
+  }
 })
 
 // 暴露方法给父组件
@@ -260,6 +391,115 @@ defineExpose({
 .composer-textarea:disabled {
   background: transparent;
   color: var(--text-placeholder);
+}
+
+/* ==================== 目标搜索词（搜索埋词） ==================== */
+.seo-section {
+  margin-top: var(--space-2);
+}
+
+/* 折叠开关：安静的文字按钮，不与主输入框争夺注意力 */
+.seo-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px 8px;
+  margin-left: -8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-sub);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.seo-toggle:hover {
+  color: var(--text-main);
+  background: var(--gray-1);
+}
+
+.seo-chevron {
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.seo-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.seo-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.seo-body {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: var(--gray-1);
+  border-radius: var(--radius-md);
+}
+
+.seo-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-main);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.seo-input:focus {
+  border-color: var(--primary);
+}
+
+.seo-input:disabled {
+  color: var(--text-placeholder);
+  cursor: not-allowed;
+}
+
+.seo-input::placeholder {
+  color: var(--text-placeholder);
+}
+
+/* 引导文案：告诉用户去哪里抄词 */
+.seo-guide {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.seo-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.seo-chip {
+  padding: 2px 10px;
+  background: var(--primary-fade);
+  color: var(--primary);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 /* 已上传图片预览 */
@@ -419,6 +659,15 @@ defineExpose({
   font-size: 14px;
   line-height: 1.5;
   text-align: right;
+}
+
+/* 上传校验提示：warning 色内联小字，几秒后自动消失 */
+.upload-limit-hint {
+  margin-top: var(--space-2);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-warning);
+  text-align: left;
 }
 
 /* 加载动画 */

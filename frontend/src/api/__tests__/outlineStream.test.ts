@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  OUTLINE_STREAM_INTERRUPTED_MESSAGE,
   OutlineStreamFallbackError,
   appendOutlineDelta,
   generateOutlineStream,
@@ -76,6 +77,29 @@ describe('resolveOutlineStreamResult', () => {
     expect(() => resolveOutlineStreamResult(null, null))
       .toThrow(OutlineStreamFallbackError)
   })
+
+  it('已收到 delta 后截断 → 抛普通错误而不是回退信号（避免双倍 token）', () => {
+    let caught: unknown
+    try {
+      resolveOutlineStreamResult(null, null, { receivedDelta: true })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(Error)
+    expect(caught).not.toBeInstanceOf(OutlineStreamFallbackError)
+    expect((caught as Error).message).toBe(OUTLINE_STREAM_INTERRUPTED_MESSAGE)
+    expect(shouldFallbackToNonStream(caught)).toBe(false)
+  })
+
+  it('已收到 delta 但服务端给出结构化 error 时仍按真实错误返回', () => {
+    const result = resolveOutlineStreamResult(
+      null,
+      { message: '上游限流' },
+      { receivedDelta: true }
+    )
+    expect(result.success).toBe(false)
+    expect(result.error_message).toBe('上游限流')
+  })
 })
 
 // ==================== 集成：generateOutlineStream ====================
@@ -92,6 +116,24 @@ function makeSseFetchResponse(chunks: string[], ok = true, status = 200): Respon
     }
   })
   return { ok, status, body } as unknown as Response
+}
+
+/** 构造一个发送若干 chunk 后以网络错误中断的 SSE Response
+ *（用 pull 逐块下发，保证 chunk 先被消费到再中断——start 里直接 error 会丢弃队列） */
+function makeErroringSseResponse(chunks: string[], error: Error): Response {
+  const encoder = new TextEncoder()
+  let index = 0
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (index < chunks.length) {
+        controller.enqueue(encoder.encode(chunks[index]))
+        index += 1
+      } else {
+        controller.error(error)
+      }
+    }
+  })
+  return { ok: true, status: 200, body } as unknown as Response
 }
 
 function sse(event: string, data: unknown): string {
@@ -177,13 +219,57 @@ describe('generateOutlineStream', () => {
       .rejects.toThrow(OutlineStreamFallbackError)
   })
 
-  it('流被截断（没有 complete 事件）→ 抛回退错误', async () => {
+  it('流被截断且一个 delta 都没收到 → 抛回退错误（可安全自动回退非流式）', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSseFetchResponse([])))
+
+    await expect(generateOutlineStream('主题'))
+      .rejects.toThrow(OutlineStreamFallbackError)
+  })
+
+  it('已收到部分 delta 后流被截断 → 抛普通错误（不静默回退重付费）', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSseFetchResponse([
       sse('delta', { text: '只有增量' })
     ])))
 
+    const caught = await generateOutlineStream('主题').then(
+      () => { throw new Error('应当抛错') },
+      (err: unknown) => err
+    )
+    expect(caught).toBeInstanceOf(Error)
+    expect(caught).not.toBeInstanceOf(OutlineStreamFallbackError)
+    expect((caught as Error).message).toBe(OUTLINE_STREAM_INTERRUPTED_MESSAGE)
+    // 上层 shouldFallbackToNonStream 判定不回退 → 错误会被展示而不是重付费
+    expect(shouldFallbackToNonStream(caught)).toBe(false)
+  })
+
+  it('读流网络异常且未收到任何 delta → 抛回退错误', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeErroringSseResponse([], new TypeError('network error'))
+    ))
+
     await expect(generateOutlineStream('主题'))
       .rejects.toThrow(OutlineStreamFallbackError)
+  })
+
+  it('读流网络异常但已收到部分 delta → 抛普通错误（不静默回退）', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      makeErroringSseResponse(
+        [sse('delta', { text: '已产出的部分内容' })],
+        new TypeError('network error')
+      )
+    ))
+
+    const received: string[] = []
+    const caught = await generateOutlineStream('主题', undefined, {
+      onDelta: (fullText) => received.push(fullText)
+    }).then(
+      () => { throw new Error('应当抛错') },
+      (err: unknown) => err
+    )
+    expect(received).toEqual(['已产出的部分内容'])
+    expect(caught).not.toBeInstanceOf(OutlineStreamFallbackError)
+    expect((caught as Error).message).toBe(OUTLINE_STREAM_INTERRUPTED_MESSAGE)
+    expect(shouldFallbackToNonStream(caught)).toBe(false)
   })
 
   it('主动取消 → 原样抛出取消错误（不转为回退信号）', async () => {

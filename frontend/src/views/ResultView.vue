@@ -25,9 +25,18 @@
           </button>
         </div>
       </div>
-      <div style="display: flex; gap: 12px;">
+      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
         <button class="btn btn-secondary" @click="showResetConfirm = true">
           再来一篇
+        </button>
+        <button
+          class="btn btn-secondary"
+          :disabled="!store.recordId || addedToCalendar"
+          :title="store.recordId ? '把这篇作品加入内容日历' : '作品尚未保存到历史记录，暂不能加入日历'"
+          @click="showCalendarDialog = true"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+          {{ addedToCalendar ? '已加入日历' : '加入日历' }}
         </button>
         <button class="btn btn-secondary" @click="router.push('/tools/export')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><path d="M9 3v18"></path><path d="M3 9h6"></path></svg>
@@ -138,6 +147,14 @@
       confirm-text="再来一篇"
       @confirm="startOver"
       @cancel="showResetConfirm = false"
+    />
+
+    <!-- 加入内容日历弹窗（复用工具页通用弹窗：标题预填当前主题，日期/平台/时间在弹窗内选择） -->
+    <AddToCalendarDialog
+      v-if="showCalendarDialog"
+      :idea="calendarIdea"
+      @close="showCalendarDialog = false"
+      @added="onCalendarAdded"
     />
   </div>
 </template>
@@ -264,13 +281,16 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore, type GeneratedImage } from '../stores/generator'
-import { getHistory, regenerateImage, updateHistory, updateHistoryRating } from '../api'
+import { getHistory, regenerateImage, updateHistory, updateHistoryRating, updatePlan } from '../api'
+import type { PlanItem } from '../api/calendar'
 import { buildEditTrace, resolveNextRating } from '../utils/contentEdit'
+import type { CalendarIdeaLike } from '../utils/ideaArchive'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
 import ReviewPanel from '../components/result/ReviewPanel.vue'
 import ChecklistPanel from '../components/result/ChecklistPanel.vue'
 import EditPageTextModal from '../components/result/EditPageTextModal.vue'
 import ErrorCard from '../components/common/ErrorCard.vue'
+import AddToCalendarDialog from '../components/common/AddToCalendarDialog.vue'
 import StepIndicator from './shared/StepIndicator.vue'
 import ConfirmDialog from './shared/ConfirmDialog.vue'
 import { normalizeApiError, type AppError } from '../utils/errors'
@@ -319,6 +339,31 @@ const handleRate = async (star: number) => {
   if (!res.success) {
     rating.value = prev
     error.value = normalizeApiError(res.error || res.error_message || '保存评分失败', '保存评分失败')
+  }
+}
+
+// ==================== 加入内容日历 ====================
+const showCalendarDialog = ref(false)
+// 本次会话是否已加入过日历（防重复添加同一作品）
+const addedToCalendar = ref(false)
+
+// 弹窗标题预填当前主题；切入角度对成品作品不适用留空，标签复用已生成的发布标签
+const calendarIdea = computed<CalendarIdeaLike>(() => ({
+  title: store.topic,
+  angle: '',
+  tags: [...store.content.tags]
+}))
+
+const onCalendarAdded = async (plan: PlanItem | undefined) => {
+  showCalendarDialog.value = false
+  addedToCalendar.value = true
+  // 通用弹窗创建的计划不带来源记录 ID：创建成功后补写 record_id，
+  // 让日历条目能回链到本作品（失败静默，不影响计划本身已创建成功）
+  if (plan && store.recordId) {
+    const res = await updatePlan(plan.id, { record_id: store.recordId })
+    if (!res.success) {
+      console.warn('关联作品到日历条目失败:', res.error_message || res.error)
+    }
   }
 }
 

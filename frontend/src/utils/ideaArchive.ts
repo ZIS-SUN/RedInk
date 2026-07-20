@@ -319,3 +319,53 @@ export function ideaToPlanInput(
     notes: noteLines.join('\n'),
   }
 }
+
+// ==================== 日历备注 → 创作主题文本（ideaToPlanInput 的逆向解析） ====================
+
+/** 从日历备注中解析出的创作上下文 */
+export interface PlanNotesContext {
+  /** 切入角度（无则为空串） */
+  angle: string
+  /** 建议标签（已去掉 # 前缀，无则为空数组） */
+  tags: string[]
+}
+
+/**
+ * 解析日历备注中的「切入角度：」「建议标签：」结构化行
+ * （选题加入日历时由 ideaToPlanInput 写入；手写备注不匹配时返回空值）
+ */
+export function parsePlanNotes(notes: string): PlanNotesContext {
+  let angle = ''
+  let tags: string[] = []
+
+  for (const rawLine of (notes || '').split('\n')) {
+    const line = rawLine.trim()
+    if (line.startsWith('切入角度：')) {
+      angle = line.slice('切入角度：'.length).trim()
+    } else if (line.startsWith('建议标签：')) {
+      tags = line
+        .slice('建议标签：'.length)
+        .split(/\s+/)
+        .map(tag => tag.replace(/^#/, '').trim())
+        .filter(Boolean)
+    }
+  }
+
+  return { angle, tags }
+}
+
+/**
+ * 把日历计划（标题 + 备注里的角度/标签）拼成创作主题文本，
+ * 与选题工具「用这个创作」的主题格式完全一致（空字段跳过对应行）
+ */
+export function buildCreationTopicFromPlan(title: string, notes: string): string {
+  const lines = [title]
+  const { angle, tags } = parsePlanNotes(notes)
+  if (angle) {
+    lines.push(`切入角度：${angle}`)
+  }
+  if (tags.length > 0) {
+    lines.push(`建议标签：${tags.join(' ')}`)
+  }
+  return lines.join('\n')
+}

@@ -7,6 +7,32 @@ import type { AppError } from '../utils/errors'
  * 错误归一化由统一 axios 实例的响应拦截器 + getApiErrorPayload 完成。
  */
 
+/** 行业基准红黄绿评级（B10）：red=偏低 / yellow=待提升 / green=达标 */
+export type BenchmarkRating = 'red' | 'yellow' | 'green'
+
+/** 单个指标的值与评级（value/rating 为 null 表示无曝光数据无法评级） */
+export interface AnalyticsMetricScore {
+  value: number | null
+  rating: BenchmarkRating | null
+}
+
+/** 汇总层指标评级（附带基准阈值与说明，供指标卡 hover 展示） */
+export interface AnalyticsMetricRating extends AnalyticsMetricScore {
+  label: string
+  /** 低于该值为红 */
+  red_below: number
+  /** 达到该值为绿 */
+  green_at: number
+  note: string
+}
+
+/** 基准表元信息（来源标注「公开行业经验值，仅供参考」） */
+export interface AnalyticsBenchmarksMeta {
+  version: string
+  updated_at: string
+  source: string
+}
+
 /** 已发布内容的表现记录 */
 export interface AnalyticsRecord {
   id: string
@@ -40,6 +66,11 @@ export interface AnalyticsRecord {
   calendar_plan_id?: string
   created_at: string
   updated_at: string
+  /**
+   * 各指标的值与红黄绿评级（B10 新增的响应计算字段，旧后端可能缺失）
+   * 键：engagement_rate / like_rate / collect_rate / comment_rate
+   */
+  metrics?: Record<string, AnalyticsMetricScore>
 }
 
 /** 新建/更新记录时的入参（id 与时间戳由后端管理） */
@@ -62,6 +93,8 @@ export interface AnalyticsGroupSummary {
   followers_gained: number
   /** 互动率（百分比数值，如 5.21 表示 5.21%） */
   engagement_rate: number
+  /** 互动率的红黄绿评级（B10 新增，无曝光数据时为 null；旧后端可能缺失） */
+  engagement_rating?: BenchmarkRating | null
 }
 
 /** 按月趋势点 */
@@ -99,6 +132,10 @@ export interface AnalyticsStats {
   trend: AnalyticsTrendPoint[]
   /** 发布时段汇总（新增字段，旧后端可能缺失） */
   time_slots?: AnalyticsTimeSlot[]
+  /** 各指标的汇总评级（B10 新增，旧后端可能缺失） */
+  metric_ratings?: Record<string, AnalyticsMetricRating>
+  /** 行业基准表元信息（B10 新增，旧后端可能缺失） */
+  benchmarks_meta?: AnalyticsBenchmarksMeta
 }
 
 /** AI 复盘洞察结果 */
@@ -222,5 +259,40 @@ export async function generateAnalyticsInsight(): Promise<{
     return response.data
   } catch (error: unknown) {
     return { success: false, ...getApiErrorPayload(error, 'AI 复盘洞察失败') }
+  }
+}
+
+/** 截图 OCR 识别出的一行数据（识别不了的字段为 null，由用户在预览表格中补全） */
+export interface AnalyticsOcrRow {
+  title: string | null
+  /** YYYY-MM-DD */
+  publish_date: string | null
+  views: number | null
+  likes: number | null
+  collects: number | null
+  comments: number | null
+  shares: number | null
+  followers_gained: number | null
+}
+
+/**
+ * 截图 OCR 智能回填：上传 1-3 张创作者后台数据截图（base64 / data URL），
+ * 由后端调用当前激活的文本模型做多模态识别，返回结构化行数组。
+ * 只做识别不入库——确认后走 batchCreateAnalyticsRecords 批量入库。
+ */
+export async function ocrImportAnalyticsRecords(images: string[]): Promise<{
+  success: boolean
+  rows?: AnalyticsOcrRow[]
+  count?: number
+  model?: string
+  error?: AppError | string
+  error_message?: string
+}> {
+  try {
+    // 多模态识别耗时较长（约 10-30 秒），使用 LLM 专用超时
+    const response = await http.post('/analytics/ocr-import', { images }, { timeout: LLM_TIMEOUT })
+    return response.data
+  } catch (error: unknown) {
+    return { success: false, ...getApiErrorPayload(error, '截图识别失败') }
   }
 }

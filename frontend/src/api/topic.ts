@@ -5,7 +5,7 @@ import type { AppError } from '../utils/errors'
 export interface TopicIdea {
   /** 选题标题，可直接用于创作 */
   title: string
-  /** 切入角度：为什么这个选题可能火 */
+  /** 切入角度：为什么这个选题可能火（蹭热点模式下为蹭点角度） */
   angle: string
   /** 适合的内容形式，如：图文 / 口播 / 清单 / 教程 */
   format: string
@@ -13,6 +13,12 @@ export interface TopicIdea {
   heat: number
   /** 关联话题标签（不含 # 号） */
   tags: string[]
+  /** 蹭热点模式：对应的热点原词（常规模式无此字段） */
+  hot_topic?: string
+  /** 蹭热点模式：建议发布窗口，如「48 小时内」 */
+  publish_window?: string
+  /** 蹭热点模式：与账号赛道的关联度评估（高/中/低 + 理由） */
+  relevance?: string
 }
 
 export interface TopicResponse {
@@ -31,6 +37,11 @@ export interface GenerateTopicsParams {
   platform: string
   /** 是否结合账号数据（需先在数据复盘工具录入笔记数据），默认 false */
   use_account_data?: boolean
+  /**
+   * 手动粘贴的热榜词/热点标题（每行一条拆成数组）。
+   * 提供时进入「蹭热点」模式：对每个热点产出蹭点角度、建议发布窗口与关联度评估
+   */
+  hot_topics?: string[]
 }
 
 export async function generateTopics(

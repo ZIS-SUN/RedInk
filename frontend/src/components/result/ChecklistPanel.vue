@@ -148,8 +148,10 @@ async function handleCheck(target: ChecklistPlatform) {
       body: store.content.copywriting || undefined,
       tags: store.content.tags.length > 0 ? store.content.tags : undefined,
       // 只统计已成功生成的图片
-      imageCount: store.images.filter(img => img.status === 'done' && img.url).length
+      imageCount: store.images.filter(img => img.status === 'done' && img.url).length,
       // banned_words 不传：由服务端读取当前启用品牌档案的禁用词
+      // 用户填了目标搜索词时追加搜索埋词三项检查（未填时不传，三项不出现）
+      seoKeywords: store.seoKeywords.length > 0 ? [...store.seoKeywords] : undefined
     })
 
     if (result.success && result.items) {

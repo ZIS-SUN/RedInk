@@ -77,6 +77,10 @@ export interface GeneratorState {
   // 大纲生成与正文/标题/标签生成时都会作为 brand_id 传给后端
   brandId: string
 
+  // 目标搜索词（小红书搜索埋词，最多 3 个；空数组表示不做埋词）
+  // 大纲/内容生成与发布前体检都会作为 seo_keywords 传给后端
+  seoKeywords: string[]
+
   // 历史记录ID（用于保存和加载历史记录）
   recordId: string | null
 
@@ -136,6 +140,8 @@ function isValidPersistedState(data: unknown): data is Partial<GeneratorState> {
   if (d.stylePrompt !== undefined && typeof d.stylePrompt !== 'string') return false
   if (d.brandId !== undefined && typeof d.brandId !== 'string') return false
   if (d.outlineDirty !== undefined && typeof d.outlineDirty !== 'boolean') return false
+  // 目标搜索词：后加字段，旧数据没有该键（undefined）也视为合法，保证向后兼容
+  if (d.seoKeywords !== undefined && !Array.isArray(d.seoKeywords)) return false
 
   return true
 }
@@ -180,6 +186,7 @@ function saveState(state: GeneratorState) {
       taskId: state.taskId,                  // 任务ID
       stylePrompt: state.stylePrompt,        // 本次生成的风格提示词
       brandId: state.brandId,                // 本次创作使用的品牌档案ID
+      seoKeywords: state.seoKeywords,        // 目标搜索词（搜索埋词）
       recordId: state.recordId,              // 历史记录ID
       outlineDirty: state.outlineDirty,      // 大纲是否在上次生成后被编辑过
       content: state.content,                // 生成的内容（标题、文案、标签）
@@ -226,6 +233,12 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 本次创作使用的品牌档案ID
       brandId: saved.brandId || '',
+
+      // 目标搜索词（旧版持久化数据没有该字段时回退为空数组，向后兼容）
+      // 恢复时只保留字符串项，防止历史脏数据污染 store
+      seoKeywords: Array.isArray(saved.seoKeywords)
+        ? saved.seoKeywords.filter((word): word is string => typeof word === 'string')
+        : [],
 
       // 历史记录ID
       recordId: saved.recordId || null,
@@ -512,6 +525,23 @@ export const useGeneratorStore = defineStore('generator', {
     },
 
     /**
+     * 设置目标搜索词（小红书搜索埋词）
+     * 写入前做归一化：去首尾空白、去空项、去重，最多保留前 3 个，
+     * 与后端服务层的归一化规则保持一致
+     * @param keywords 搜索词数组，空数组表示不做埋词
+     */
+    setSeoKeywords(keywords: string[]) {
+      const normalized: string[] = []
+      for (const word of keywords) {
+        const trimmed = typeof word === 'string' ? word.trim() : ''
+        if (trimmed && !normalized.includes(trimmed)) {
+          normalized.push(trimmed)
+        }
+      }
+      this.seoKeywords = normalized.slice(0, 3)
+    },
+
+    /**
      * 把所有仍处于 queued/generating/retrying 状态的图片批量置为 error（可重试）
      * 用于 SSE 断流/网络中断时，让"补全失败图片"入口可用
      * @param error 错误信息，默认为断流提示
@@ -618,6 +648,9 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 清空本次创作使用的品牌档案ID
       this.brandId = ''
+
+      // 清空目标搜索词
+      this.seoKeywords = []
 
       // 清空历史记录ID
       this.recordId = null
@@ -810,6 +843,7 @@ export function setupAutoSave(debounceMs: number = 500) {
       taskId: store.taskId,                  // 任务ID
       stylePrompt: store.stylePrompt,        // 本次生成的风格提示词
       brandId: store.brandId,                // 本次创作使用的品牌档案ID
+      seoKeywords: store.seoKeywords,        // 目标搜索词（搜索埋词）
       recordId: store.recordId,              // 历史记录ID
       outlineDirty: store.outlineDirty,      // 大纲是否在上次生成后被编辑过
       content: store.content,                // 生成的内容

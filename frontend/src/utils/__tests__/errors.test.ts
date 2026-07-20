@@ -52,13 +52,48 @@ describe('normalizeApiError', () => {
 })
 
 describe('formatErrorMessage', () => {
-  it('格式为 标题：建议', () => {
-    expect(formatErrorMessage(appError)).toBe('上游限流或配额不足：请稍后重试')
+  it('格式为 标题：建议，并补显 detail 首行（真实原因不被藏住）', () => {
+    expect(formatErrorMessage(appError)).toBe(
+      '上游限流或配额不足：请稍后重试（原因：429 Too Many Requests）'
+    )
   })
 
-  it('没有 suggestion 时使用 detail', () => {
+  it('没有 suggestion 时使用 detail，不重复展示', () => {
     const noSuggestion = { ...appError, suggestion: '' }
     expect(formatErrorMessage(noSuggestion)).toBe('上游限流或配额不足：429 Too Many Requests')
+  })
+
+  it('detail 与 suggestion 相同时不重复展示', () => {
+    const duplicated = { ...appError, detail: '请稍后重试' }
+    expect(formatErrorMessage(duplicated)).toBe('上游限流或配额不足：请稍后重试')
+  })
+
+  it('多行 detail 只取首个非空行', () => {
+    const blocked: AppError = {
+      ...appError,
+      code: 'CONTENT_BLOCKED',
+      title: '内容被安全审核拦截',
+      detail: '\n  🛡️ 内容被安全过滤器拦截\n【说明】您的提示词触发了安全过滤机制。',
+      suggestion: '请修改该页文案后重试（更换敏感表述）。',
+      retryable: false
+    }
+    expect(formatErrorMessage(blocked)).toBe(
+      '内容被安全审核拦截：请修改该页文案后重试（更换敏感表述）。' +
+      '（原因：🛡️ 内容被安全过滤器拦截）'
+    )
+  })
+
+  it('detail 首行超长时截断，避免撑爆提示框', () => {
+    const longDetail = { ...appError, detail: 'x'.repeat(300) }
+    const message = formatErrorMessage(longDetail)
+    expect(message).toContain('（原因：')
+    expect(message.length).toBeLessThan(200)
+    expect(message.endsWith('…）')).toBe(true)
+  })
+
+  it('detail 为空时保持 标题：建议', () => {
+    const noDetail = { ...appError, detail: '' }
+    expect(formatErrorMessage(noDetail)).toBe('上游限流或配额不足：请稍后重试')
   })
 })
 

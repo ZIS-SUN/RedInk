@@ -1,4 +1,4 @@
-import { getApiErrorPayload, http } from './client'
+import { getApiErrorPayload, http, LLM_TIMEOUT } from './client'
 import type { AppError } from '../utils/errors'
 
 /**
@@ -112,6 +112,59 @@ export async function activateBrand(brandId: string): Promise<{
     return response.data
   } catch (error: unknown) {
     return { success: false, ...getApiErrorPayload(error, '启用品牌档案失败') }
+  }
+}
+
+/** 起号选题（新手定位向导生成的前 10 篇发布清单条目） */
+export interface BrandStarterTopic {
+  /** 选题标题，可直接拿去创作 */
+  title: string
+  /** 切入角度：这条为什么适合起号期发 */
+  angle: string
+}
+
+/** AI 生成的品牌档案草稿（新手账号定位向导） */
+export interface BrandDraft {
+  /** 账号名建议（2-3 个候选） */
+  name: string[]
+  /** 一句话定位 */
+  positioning: string
+  /** 语气风格描述 */
+  tone: string
+  /** 口头禅/开场白 */
+  catchphrases: string[]
+  /** 签名档/结尾话术 */
+  signature: string
+  /** 建议避免的词 */
+  banned_words: string[]
+  /** 赛道标签（3-5 个） */
+  niche_tags: string[]
+  /** 前 10 篇起号选题 */
+  starter_topics: BrandStarterTopic[]
+}
+
+/** 新手定位向导的三个回答 */
+export interface BrandDraftInput {
+  /** 你是谁（身份/经历） */
+  who: string
+  /** 做给谁看（目标人群） */
+  audience: string
+  /** 凭什么是你（独特优势） */
+  advantage: string
+}
+
+export async function generateBrandDraft(input: BrandDraftInput): Promise<{
+  success: boolean
+  draft?: BrandDraft
+  error?: AppError | string
+  error_message?: string
+}> {
+  try {
+    // 定位草稿生成走 LLM，耗时较长
+    const response = await http.post('/brand/draft', input, { timeout: LLM_TIMEOUT })
+    return response.data
+  } catch (error: unknown) {
+    return { success: false, ...getApiErrorPayload(error, '生成账号定位失败') }
   }
 }
 

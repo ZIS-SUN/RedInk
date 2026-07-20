@@ -6,11 +6,26 @@ export const API_BASE_URL = '/api'
 /** 普通接口的默认超时 */
 export const DEFAULT_TIMEOUT = 15_000
 
-/** LLM 类接口（大纲/文案/连通性测试）的超时，生成耗时较长 */
-export const LLM_TIMEOUT = 120_000
+/**
+ * LLM 类接口（大纲/文案/连通性测试/单张图片重绘）的超时。
+ *
+ * 对齐关系：后端上游单次请求预算为 300 秒（utils/text_client.py 与各
+ * generators 统一 timeout=300s），前端超时必须覆盖后端单次最坏时长并留余量
+ * （300s + 30s）。若前端先超时，后端线程仍在继续调用付费上游：
+ * 120-300 秒之间完成的调用会被误判失败丢弃（单张重绘的结果甚至已写入
+ * 历史），用户看到假失败后重试等于重复扣费。
+ */
+export const LLM_TIMEOUT = 330_000
 
-/** SSE 流的空闲超时：超过该时间没有收到任何字节则认为断流 */
-export const SSE_IDLE_TIMEOUT = 90_000
+/**
+ * SSE 流的空闲超时：超过该时间没有收到任何字节则认为断流。
+ *
+ * 后端图片生成流在阻塞生成期间每 15 秒下发一次 heartbeat 事件保活
+ * （backend/services/image.py HEARTBEAT_INTERVAL_SECONDS），正常慢生成
+ * 不会再触发空闲熔断；这里放宽到 120 秒作为双保险，仅在后端进程挂死或
+ * 网络真正悬挂时才断流。
+ */
+export const SSE_IDLE_TIMEOUT = 120_000
 
 /**
  * 统一的 axios 实例：

@@ -21,13 +21,20 @@ export interface PolishPageResponse {
 export async function generateOutline(
   topic: string,
   images?: File[],
-  brandId?: string
+  brandId?: string,
+  seoKeywords?: string[]
 ): Promise<OutlineResponse & { has_images?: boolean }> {
   if (images && images.length > 0) {
     const formData = new FormData()
     formData.append('topic', topic)
     if (brandId) {
       formData.append('brand_id', brandId)
+    }
+    // 目标搜索词：同名字段逐个追加，后端用 getlist 取回；未填时不携带该键
+    if (seoKeywords && seoKeywords.length > 0) {
+      seoKeywords.forEach((word) => {
+        formData.append('seo_keywords', word)
+      })
     }
     images.forEach((file) => {
       formData.append('images', file)
@@ -47,10 +54,18 @@ export async function generateOutline(
     return response.data
   }
 
+  // 不使用品牌人设/搜索词时不携带对应键，保持向后兼容
+  const payload: Record<string, unknown> = { topic }
+  if (brandId) {
+    payload.brand_id = brandId
+  }
+  if (seoKeywords && seoKeywords.length > 0) {
+    payload.seo_keywords = seoKeywords
+  }
+
   const response = await http.post<OutlineResponse>(
     '/outline',
-    // 不使用品牌人设时不携带 brand_id 键，保持向后兼容
-    brandId ? { topic, brand_id: brandId } : { topic },
+    payload,
     { timeout: LLM_TIMEOUT }
   )
   return response.data
@@ -78,15 +93,23 @@ export function appendOutlineDelta(current: string, delta: unknown): string {
   return typeof delta === 'string' ? current + delta : current
 }
 
+/** 已收到部分内容后断流的提示文案（上层按普通错误展示，不自动回退） */
+export const OUTLINE_STREAM_INTERRUPTED_MESSAGE = '大纲流式传输中断，请重试'
+
 /**
  * 归并流式事件的最终结果：
  * - 收到 complete 事件 → 返回与非流式接口同构的成功响应
  * - 只收到 error 事件 → 返回结构化失败响应（不回退，非流式会遇到同样的上游错误）
- * - 两者都没有（流被截断）→ 抛 OutlineStreamFallbackError，由调用方回退
+ * - 两者都没有（流被截断）：
+ *   - 一个 delta 都没收到 → 抛 OutlineStreamFallbackError，由调用方无感回退非流式
+ *   - 已收到部分 delta → 抛普通错误。此时上游已产出（并计费）大部分 token，
+ *     自动回退非流式从头再生成等于双倍 token；改为让上层现有 catch 展示错误，
+ *     由用户决定是否重试
  */
 export function resolveOutlineStreamResult(
   complete: (OutlineResponse & { has_images?: boolean }) | null,
-  errorEvent: { error?: AppError | string; message?: string } | null
+  errorEvent: { error?: AppError | string; message?: string } | null,
+  options: { receivedDelta?: boolean } = {}
 ): OutlineResponse & { has_images?: boolean } {
   if (complete && complete.success && complete.pages) {
     return complete
@@ -97,6 +120,9 @@ export function resolveOutlineStreamResult(
       error: errorEvent.error,
       error_message: errorEvent.message
     }
+  }
+  if (options.receivedDelta) {
+    throw new Error(OUTLINE_STREAM_INTERRUPTED_MESSAGE)
   }
   throw new OutlineStreamFallbackError('流式响应未包含完成事件')
 }
@@ -119,8 +145,18 @@ export async function generateOutlineStream(
   topic: string,
   brandId?: string,
   handlers: OutlineStreamHandlers = {},
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal } = {},
+  seoKeywords?: string[]
 ): Promise<OutlineResponse & { has_images?: boolean }> {
+  // 不使用品牌人设/搜索词时不携带对应键，保持与非流式接口一致
+  const payload: Record<string, unknown> = { topic }
+  if (brandId) {
+    payload.brand_id = brandId
+  }
+  if (seoKeywords && seoKeywords.length > 0) {
+    payload.seo_keywords = seoKeywords
+  }
+
   let response: Response
   try {
     response = await fetch(`${API_BASE_URL}/outline/stream`, {
@@ -128,8 +164,7 @@ export async function generateOutlineStream(
       headers: {
         'Content-Type': 'application/json'
       },
-      // 不使用品牌人设时不携带 brand_id 键，保持与非流式接口一致
-      body: JSON.stringify(brandId ? { topic, brand_id: brandId } : { topic }),
+      body: JSON.stringify(payload),
       signal: options.signal
     })
   } catch (err) {
@@ -144,6 +179,7 @@ export async function generateOutlineStream(
   }
 
   let fullText = ''
+  let receivedDelta = false
   let complete: (OutlineResponse & { has_images?: boolean }) | null = null
   let errorEvent: { error?: AppError | string; message?: string } | null = null
 
@@ -154,6 +190,8 @@ export async function generateOutlineStream(
         const next = appendOutlineDelta(fullText, delta)
         if (next !== fullText) {
           fullText = next
+          // 跟踪是否已收到内容：断流时据此区分「回退非流式」还是「报错」
+          receivedDelta = true
           handlers.onDelta?.(fullText, delta as string)
         }
       },
@@ -166,12 +204,17 @@ export async function generateOutlineStream(
     }, { signal: options.signal })
   } catch (err) {
     if (isAbortError(err)) throw err
-    // 服务端已给出结构化错误时按真实错误返回，否则视为断流回退
+    // 服务端已给出结构化错误时按真实错误返回，否则视为断流
     if (errorEvent) return resolveOutlineStreamResult(null, errorEvent)
+    if (receivedDelta) {
+      // 已收到部分内容（上游已计费）：不再静默回退非流式从头重新生成，
+      // 抛普通错误交由上层展示，避免双倍 token
+      throw new Error(OUTLINE_STREAM_INTERRUPTED_MESSAGE)
+    }
     throw new OutlineStreamFallbackError('流式连接中断', err)
   }
 
-  return resolveOutlineStreamResult(complete, errorEvent)
+  return resolveOutlineStreamResult(complete, errorEvent, { receivedDelta })
 }
 
 /**

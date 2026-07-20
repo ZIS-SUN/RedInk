@@ -28,6 +28,8 @@ export interface ReplyGenerateParams {
   tone: ReplyTone
   /** 是否同时生成一条置顶引导评论 */
   includePinned?: boolean
+  /** 品牌档案 ID（可选），提供时后端以博主人设口吻生成回复 */
+  brandId?: string
 }
 
 export async function generateReplies(
@@ -38,7 +40,8 @@ export async function generateReplies(
     {
       comments: params.comments,
       tone: params.tone,
-      include_pinned: params.includePinned ?? false
+      include_pinned: params.includePinned ?? false,
+      ...(params.brandId ? { brand_id: params.brandId } : {})
     },
     // 神回复生成走 LLM，耗时较长
     { timeout: LLM_TIMEOUT }
