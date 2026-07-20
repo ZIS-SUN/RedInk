@@ -36,10 +36,13 @@ def create_topic_blueprint():
         - use_account_data: 是否结合数据复盘工具录入的账号数据（可选，默认 False）
         - brand_id: 品牌档案 ID（可选）；未提供时自动使用「当前启用」档案，
           取不到品牌数据时静默跳过品牌注入
+        - hot_topics: 手动粘贴的热榜词/热点标题，字符串数组（可选）。
+          提供时进入「蹭热点」模式，非法类型静默忽略（等同常规模式）
 
         返回：
         - success: 是否成功
         - topics: 选题列表，每条含 title/angle/format/heat/tags
+          （蹭热点模式下可能另含 hot_topic/publish_window/relevance）
         - account_context_used: 本次是否实际结合了账号数据
         """
         start_time = time.time()
@@ -50,11 +53,13 @@ def create_topic_blueprint():
             platform = (data.get('platform') or '小红书').strip() or '小红书'
             use_account_data = bool(data.get('use_account_data', False))
             brand_id = data.get('brand_id')
+            hot_topics = data.get('hot_topics')
 
             log_request('/topic', {
                 'niche': niche[:50],
                 'platform': platform,
                 'use_account_data': use_account_data,
+                'hot_topics_count': len(hot_topics) if isinstance(hot_topics, list) else 0,
             })
 
             # 验证必填参数
@@ -72,7 +77,8 @@ def create_topic_blueprint():
             logger.info(f"🔄 开始生成选题灵感，领域: {niche[:50]}，平台: {platform}")
             topic_service = get_topic_service()
             result = topic_service.generate_topics(
-                niche, platform, use_account_data=use_account_data, brand=brand
+                niche, platform, use_account_data=use_account_data, brand=brand,
+                hot_topics=hot_topics
             )
 
             # 记录结果

@@ -44,6 +44,7 @@ def create_api_blueprint():
     from .hotspot_routes import create_hotspot_blueprint
     from .data_routes import create_data_blueprint
     from .preference_routes import create_preference_blueprint
+    from .idea_routes import create_idea_blueprint
 
     # 创建主 API 蓝图
     api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -74,6 +75,8 @@ def create_api_blueprint():
     api_bp.register_blueprint(create_data_blueprint())
     # 创作偏好画像
     api_bp.register_blueprint(create_preference_blueprint())
+    # 我的选题库
+    api_bp.register_blueprint(create_idea_blueprint())
 
     return api_bp
 

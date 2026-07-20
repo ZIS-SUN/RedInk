@@ -3,8 +3,9 @@
 
 包含功能：
 - 已发布内容表现记录的增删改查 (CRUD)
-- 统计概览（总数、各平台/各类型汇总、平均互动率、按月趋势）
-- AI 复盘洞察（把数据摘要发给 LLM，输出表现分析与下一步建议）
+- 统计概览（总数、各平台/各类型汇总、平均互动率、按月趋势、行业基准红黄绿评级）
+- 截图 OCR 智能回填（识别创作者后台数据截图为结构化行，识别后走批量创建入库）
+- AI 复盘洞察（把数据摘要与行业基准发给 LLM，输出表现分析与下一步建议）
 
 所有响应遵循 { success: true, ... } / 统一错误对象 的对外契约。
 """
@@ -196,6 +197,50 @@ def create_analytics_blueprint():
 
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/analytics/records/<id>", "record_id": record_id})
+
+    @analytics_bp.route('/analytics/ocr-import', methods=['POST'])
+    def ocr_import():
+        """
+        截图 OCR 智能回填
+
+        上传 1-3 张创作者后台数据截图（base64，可带 data URL 前缀，
+        单张解码后 ≤10MB），调用当前激活的文本模型做多模态识别。
+        只做识别不落盘，识别结果由前端预览确认后走批量创建接口入库。
+
+        请求体：
+        - images: base64 字符串数组（1-3 张）
+
+        返回：
+        - success: 是否成功
+        - rows: [{ title, publish_date, views, likes, collects,
+                   comments, shares, followers_gained }]（识别不了的字段为 null）
+        - count: 有效行数
+        - model: 实际使用的模型名（便于排查识别质量问题）
+
+        模型不支持视觉或识别失败时返回结构化错误
+        （error.suggestion 明确提示改用手动录入）。
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            images = data.get('images')
+
+            analytics_service = get_analytics_service()
+            result = analytics_service.ocr_import(images)
+
+            return jsonify({
+                "success": True,
+                **result
+            }), 200
+
+        except ValueError as e:
+            # 图片参数校验失败 / 文本服务商配置缺失 -> 400
+            return api_error_response(
+                validation_error(str(e), "请检查上传的截图与服务商配置后重试。"),
+                context={"endpoint": "/api/analytics/ocr-import"},
+            )
+        except Exception as e:
+            # AppErrorException（识别失败的结构化错误）也走这里统一解包
+            return api_error_response(e, context={"endpoint": "/api/analytics/ocr-import"})
 
     @analytics_bp.route('/analytics/stats', methods=['GET'])
     def get_stats():

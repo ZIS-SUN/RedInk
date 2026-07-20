@@ -225,8 +225,8 @@ def test_get_stats_keeps_existing_fields(tmp_path):
     assert isinstance(stats["platforms"], list)
     assert isinstance(stats["content_types"], list)
     assert isinstance(stats["trend"], list)
-    # 旧分组结构不变
-    assert set(stats["platforms"][0].keys()) == {
+    # 旧分组字段一个都不能少（服务契约允许新增字段，如 B10 的 engagement_rating）
+    assert set(stats["platforms"][0].keys()) >= {
         "name", "count", "views", "likes", "collects",
         "comments", "shares", "followers_gained", "engagement_rate",
     }

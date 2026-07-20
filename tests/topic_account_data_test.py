@@ -187,7 +187,9 @@ class FakeTopicService:
             "account_context_used": True,
         }
 
-    def generate_topics(self, niche, platform, use_account_data=False, brand=None):
+    def generate_topics(self, niche, platform, use_account_data=False, brand=None,
+                        hot_topics=None):
+        # hot_topics 仅为兼容路由新增参数，本测试不关心其值
         self.calls.append({
             "niche": niche,
             "platform": platform,

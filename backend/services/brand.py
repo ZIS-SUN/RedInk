@@ -30,6 +30,14 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from backend.paths import get_data_root
+from backend.utils.llm_utils import (
+    classify_llm_error,
+    generate_and_parse_json,
+    get_text_client,
+    load_prompt_template,
+    load_text_config,
+    resolve_generation_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +350,125 @@ def resolve_brand_for_prompt(brand_id: Optional[str] = None) -> Optional[Dict]:
     except Exception as e:
         logger.warning("读取品牌档案失败，忽略品牌人设: %s", e)
         return None
+
+
+# ==================== 新手账号定位向导（AI 生成档案草稿） ====================
+
+# 草稿里的字符串列表字段（缺失/非法时统一容错为空列表）
+_DRAFT_LIST_FIELDS = ("catchphrases", "banned_words", "niche_tags")
+# 草稿里的纯字符串字段（缺失/非法时统一容错为空串）
+_DRAFT_STR_FIELDS = ("positioning", "tone", "signature")
+
+
+def _normalize_starter_topics(value) -> List[Dict[str, str]]:
+    """
+    把 AI 返回的起号选题收敛为 [{title, angle}] 结构：
+    - 字符串条目视为只有标题
+    - 字典条目缺 angle 时容错为空串
+    - 无标题/非法类型的条目直接丢弃
+    """
+    if not isinstance(value, list):
+        return []
+    topics = []
+    for item in value:
+        if isinstance(item, str):
+            title, angle = item.strip(), ""
+        elif isinstance(item, dict):
+            title = str(item.get("title") or "").strip()
+            angle = str(item.get("angle") or "").strip()
+        else:
+            continue
+        if title:
+            topics.append({"title": title, "angle": angle})
+    return topics
+
+
+def normalize_brand_draft(data) -> Dict:
+    """
+    把 AI 返回的定位草稿收敛为标准结构（缺字段容错，全部给默认值）：
+
+    - name: 账号名建议列表（模型只回单个字符串时包装成单元素列表）
+    - positioning / tone / signature: 字符串
+    - catchphrases / banned_words / niche_tags: 字符串列表
+    - starter_topics: [{title, angle}]
+    """
+    if not isinstance(data, dict):
+        data = {}
+
+    names = data.get("name")
+    if isinstance(names, str):
+        names = [names]
+
+    draft = {
+        "name": BrandService._normalize_list(names),
+        "starter_topics": _normalize_starter_topics(data.get("starter_topics")),
+    }
+    for field in _DRAFT_STR_FIELDS:
+        draft[field] = BrandService._normalize_str(data.get(field))
+    for field in _DRAFT_LIST_FIELDS:
+        draft[field] = BrandService._normalize_list(data.get(field))
+    return draft
+
+
+def generate_brand_draft(who: str, audience: str, advantage: str) -> Dict:
+    """
+    根据新手定位向导的三个回答，由 AI 生成品牌档案草稿。
+
+    Args:
+        who: 「你是谁」——身份/经历
+        audience: 「做给谁看」——目标人群
+        advantage: 「凭什么是你」——独特优势
+
+    Returns:
+        成功: {"success": True, "draft": {name/positioning/tone/catchphrases/
+            signature/banned_words/niche_tags/starter_topics}}
+        失败: {"success": False, "error": 面向用户的详细错误文案}
+    """
+    try:
+        logger.info(
+            f"开始生成账号定位草稿: who={who[:30]}, audience={audience[:30]}"
+        )
+        text_config = load_text_config()
+        client = get_text_client(text_config)
+        prompt = load_prompt_template('backend/prompts/brand_draft_prompt.txt').format(
+            who=who, audience=audience, advantage=advantage
+        )
+
+        model, temperature, max_output_tokens = resolve_generation_params(
+            text_config, default_max_output_tokens=6000
+        )
+
+        logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
+        # 生成 + 解析 JSON（json_mode 约束输出格式；解析失败自动带纠正提示重试一次）
+        draft_data = generate_and_parse_json(
+            lambda prompt_suffix: client.generate_text(
+                prompt=prompt + prompt_suffix,
+                model=model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                json_mode=True
+            )
+        )
+
+        draft = normalize_brand_draft(draft_data)
+
+        # 个别字段缺失可容错（前端预览可手动补全），但核心字段全空视为无效输出
+        if not draft["name"] and not draft["positioning"] and not draft["starter_topics"]:
+            logger.error("AI 返回结果中没有可用的定位草稿字段")
+            raise ValueError("AI 未返回有效的定位内容，请重试")
+
+        logger.info(
+            f"账号定位草稿生成完成: {len(draft['name'])} 个账号名建议，"
+            f"{len(draft['starter_topics'])} 条起号选题"
+        )
+        return {"success": True, "draft": draft}
+
+    except Exception as e:
+        logger.error(f"账号定位草稿生成失败: {e}")
+        return {
+            "success": False,
+            "error": classify_llm_error(e, task_label="账号定位草稿生成失败")
+        }
 
 
 _service_instance = None

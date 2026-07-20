@@ -68,6 +68,9 @@ history/*
 # Analytics data (user manually-entered performance metrics, local data)
 /analytics_data/
 
+# 选题库数据（用户本地数据，不进版本库）
+/idea_library/
+
 # Publish assistant accounts (user local data)
 /publish_accounts.json
 

@@ -25,6 +25,7 @@
 - created_at / updated_at: ISO 时间戳
 """
 
+import base64
 import os
 import json
 import logging
@@ -33,9 +34,10 @@ import tempfile
 import threading
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from backend.paths import get_data_root
+from backend.errors import AppError, AppErrorException
+from backend.paths import get_data_root, resource_path
 from backend.utils.llm_utils import (
     classify_llm_error,
     generate_and_parse_json,
@@ -73,6 +75,133 @@ _TIME_SLOTS = (
 
 # 宽松的时间格式：H:MM / HH:MM，允许全角冒号和秒数
 _TIME_PATTERN = re.compile(r"^(\d{1,2})[:：](\d{1,2})(?:[:：]\d{1,2})?$")
+
+# ==================== 行业基准（红黄绿评级） ====================
+
+# 评级常量：低于下限 red、达到达标线 green、两者之间 yellow
+RATING_RED = "red"
+RATING_YELLOW = "yellow"
+RATING_GREEN = "green"
+
+# 行业基准 JSON 数据文件（随包分发；基准调整时只需更新该文件）
+_BENCHMARKS_FILE_REL_PATH = "backend/data/analytics_benchmarks.json"
+
+# 内置默认基准（JSON 缺失/损坏时的回退值，须与 analytics_benchmarks.json 同步）。
+# 数值为公开行业经验值，仅供参考；red_below=红线下限，green_at=达标线
+_DEFAULT_BENCHMARK_METRICS: Dict[str, Dict] = {
+    "engagement_rate": {
+        "label": "互动率", "formula": "（点赞+收藏+评论+转发）/ 曝光", "unit": "%",
+        "red_below": 3.0, "green_at": 5.0,
+        "note": "图文内容互动率 ≥5% 达标；3%-5% 待提升；低于 3% 偏低，选题或封面标题需要优化",
+    },
+    "like_rate": {
+        "label": "点赞率", "formula": "点赞 / 曝光", "unit": "%",
+        "red_below": 1.5, "green_at": 3.0,
+        "note": "点赞率 ≥3% 达标；低于 1.5% 通常说明内容共鸣不足或封面进来的流量不精准",
+    },
+    "collect_rate": {
+        "label": "收藏率", "formula": "收藏 / 曝光", "unit": "%",
+        "red_below": 1.0, "green_at": 3.0,
+        "note": "收藏率 ≥3% 达标；收藏是干货留存价值的信号，低于 1% 建议增加可保存的清单/步骤类信息",
+    },
+    "comment_rate": {
+        "label": "评论率", "formula": "评论 / 曝光", "unit": "%",
+        "red_below": 0.2, "green_at": 0.5,
+        "note": "评论率 ≥0.5% 达标；低于 0.2% 建议在文末增加互动提问或争议性话题引导讨论",
+    },
+}
+
+# 回退时的基准元信息（version 固定为 builtin，便于排查是否读到了 JSON）
+_DEFAULT_BENCHMARKS_META = {
+    "version": "builtin",
+    "updated_at": "2026-07-20",
+    "source": "公开行业经验值，仅供参考",
+}
+
+
+def _validate_benchmarks_data(metrics) -> bool:
+    """校验基准 JSON 的结构完整性（缺字段/类型不对视为损坏，整体回退）。"""
+    if not isinstance(metrics, dict) or not metrics:
+        return False
+    for rule in metrics.values():
+        if not isinstance(rule, dict) or not str(rule.get("label") or "").strip():
+            return False
+        red_below, green_at = rule.get("red_below"), rule.get("green_at")
+        for value in (red_below, green_at):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                return False
+        if red_below > green_at:
+            return False
+    return True
+
+
+def _load_benchmarks() -> Tuple[Dict[str, Dict], Dict[str, str]]:
+    """
+    读取外置行业基准 JSON，返回 (指标规则表, 元信息 {version, updated_at, source})。
+
+    任何读取/解析/结构错误都整体回退到内置默认值（与 checklist 的
+    platform_rules.json 相同的策略）——基准展示不能因数据文件问题而不可用。
+    """
+    try:
+        benchmarks_path = resource_path(_BENCHMARKS_FILE_REL_PATH)
+        with open(benchmarks_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        metrics = data.get("metrics") if isinstance(data, dict) else None
+        if not _validate_benchmarks_data(metrics):
+            raise ValueError("analytics_benchmarks.json 结构不完整或字段类型非法")
+        meta = {
+            "version": str(data.get("version") or "unknown"),
+            "updated_at": str(data.get("updated_at") or "unknown"),
+            "source": str(data.get("source") or _DEFAULT_BENCHMARKS_META["source"]),
+        }
+        logger.info(
+            "行业基准已从 JSON 加载: version=%s, updated_at=%s",
+            meta["version"], meta["updated_at"],
+        )
+        return metrics, meta
+    except Exception as e:
+        logger.warning("行业基准 JSON 读取失败，回退内置默认基准: %s", e)
+        return dict(_DEFAULT_BENCHMARK_METRICS), dict(_DEFAULT_BENCHMARKS_META)
+
+
+# 模块加载（启动）时读取一次；失败自动回退内置默认，保证功能可用
+ANALYTICS_BENCHMARKS, ANALYTICS_BENCHMARKS_META = _load_benchmarks()
+
+
+def rate_by_benchmark(metric_key: str, value: Optional[float]) -> Optional[str]:
+    """
+    按行业基准给指标值打红黄绿评级。
+
+    Args:
+        metric_key: 指标键（engagement_rate / like_rate / collect_rate / comment_rate）
+        value: 指标值（百分比数值，如 5.2 表示 5.2%）；None 表示无曝光数据无法评级
+
+    Returns:
+        'red' | 'yellow' | 'green'；无对应基准或值为 None 时返回 None
+    """
+    rule = ANALYTICS_BENCHMARKS.get(metric_key)
+    if rule is None or value is None:
+        return None
+    if value >= rule["green_at"]:
+        return RATING_GREEN
+    if value < rule["red_below"]:
+        return RATING_RED
+    return RATING_YELLOW
+
+
+# ==================== 截图 OCR 导入（B3）常量 ====================
+
+# 单次最多识别的截图张数
+_OCR_MAX_IMAGES = 3
+# 单张截图 base64 解码后的大小上限（10MB），防止滥用
+_OCR_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+# OCR 返回行的全部字段（缺失为 None，前端预览时由用户补全）
+_OCR_STR_FIELDS = ("title", "publish_date")
+_OCR_INT_FIELDS = ("views", "likes", "collects", "comments", "shares", "followers_gained")
+# 中文数量单位 -> 倍数（模型偶尔不换算时后端二次清洗）
+_CN_NUMBER_UNITS = (("亿", 100000000), ("万", 10000), ("w", 10000), ("W", 10000))
+# OCR 识别的日期归一化：2026-7-1 / 2026/07/01 / 2026.7.1 / 2026年7月1日
+_OCR_DATE_PATTERN = re.compile(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})")
 
 
 class AnalyticsStoreCorruptedError(RuntimeError):
@@ -213,7 +342,8 @@ class AnalyticsService:
         获取全部表现记录
 
         Returns:
-            Dict: { records: [...] }（按发布日期倒序，其次按创建时间倒序）
+            Dict: { records: [...] }（按发布日期倒序，其次按创建时间倒序）。
+            每条记录附带 metrics 计算字段（各指标值与红黄绿评级，纯计算不落盘）。
         """
         store = self._load_store()
         records = list(store.get("records", []))
@@ -221,7 +351,8 @@ class AnalyticsService:
             key=lambda r: (str(r.get("publish_date") or ""), str(r.get("created_at") or "")),
             reverse=True,
         )
-        return {"records": records}
+        # 返回附加了指标评级的副本，避免把计算字段写回存储
+        return {"records": [self._with_record_metrics(r) for r in records]}
 
     def get_record(self, record_id: str) -> Optional[Dict]:
         """按 ID 获取记录，不存在返回 None。"""
@@ -447,6 +578,71 @@ class AnalyticsService:
         total_engagements = sum(cls._engagements(r) for r in records)
         return round(total_engagements / total_views * 100, 2)
 
+    # ==================== 行业基准评级（B10） ====================
+
+    @classmethod
+    def _metric_values(cls, records: List[Dict]) -> Dict[str, Optional[float]]:
+        """
+        计算一组记录的各基准指标值（百分比，保留两位小数）。
+
+        无曝光数据时全部为 None（表示无法评级，与 0% 语义不同）。
+        指标键与 analytics_benchmarks.json 的 metrics 键一一对应。
+        """
+        total_views = sum(int(r.get("views") or 0) for r in records)
+        if total_views <= 0:
+            return {
+                "engagement_rate": None, "like_rate": None,
+                "collect_rate": None, "comment_rate": None,
+            }
+
+        def _pct(numerator: int) -> float:
+            return round(numerator / total_views * 100, 2)
+
+        return {
+            "engagement_rate": _pct(sum(cls._engagements(r) for r in records)),
+            "like_rate": _pct(sum(int(r.get("likes") or 0) for r in records)),
+            "collect_rate": _pct(sum(int(r.get("collects") or 0) for r in records)),
+            "comment_rate": _pct(sum(int(r.get("comments") or 0) for r in records)),
+        }
+
+    @classmethod
+    def _build_metric_ratings(cls, records: List[Dict]) -> Dict[str, Dict]:
+        """
+        汇总层的指标评级（带基准阈值与说明，供前端指标卡展示）。
+
+        Returns:
+            { 指标键: { value, rating, label, red_below, green_at, note } }
+            只输出基准表中存在规则的指标。
+        """
+        ratings: Dict[str, Dict] = {}
+        for key, value in cls._metric_values(records).items():
+            rule = ANALYTICS_BENCHMARKS.get(key)
+            if not rule:
+                continue
+            ratings[key] = {
+                "value": value,
+                "rating": rate_by_benchmark(key, value),
+                "label": rule.get("label") or key,
+                "red_below": rule.get("red_below"),
+                "green_at": rule.get("green_at"),
+                "note": str(rule.get("note") or ""),
+            }
+        return ratings
+
+    @classmethod
+    def _with_record_metrics(cls, record: Dict) -> Dict:
+        """
+        返回附加了 metrics 计算字段的记录副本（不修改入参、不落盘）。
+
+        metrics 结构：{ 指标键: { value: 百分比值或 None, rating: red/yellow/green/None } }
+        """
+        metrics = {
+            key: {"value": value, "rating": rate_by_benchmark(key, value)}
+            for key, value in cls._metric_values([record]).items()
+            if key in ANALYTICS_BENCHMARKS
+        }
+        return {**record, "metrics": metrics}
+
     def get_stats(self) -> Dict:
         """
         统计概览
@@ -461,6 +657,9 @@ class AnalyticsService:
                 trend: 按月趋势（升序，[{month, count, views, engagements}]）,
                 time_slots: 发布时段汇总（仅含有 publish_time 的记录，
                     [{name, count, avg_engagement}]，按时段固定顺序）,
+                metric_ratings: 各基准指标的汇总评级（B10 新增，
+                    {指标键: {value, rating, label, red_below, green_at, note}}）,
+                benchmarks_meta: 基准表元信息（B10 新增，{version, updated_at, source}）,
             }
 
         注意：已有字段的结构/名字保持向后兼容，只允许新增字段。
@@ -482,6 +681,9 @@ class AnalyticsService:
         stats["content_types"] = self._group_summary(records, "content_type")
         stats["trend"] = self._monthly_trend(records)
         stats["time_slots"] = self._time_slot_summary(records)
+        # B10 纯增量字段：汇总指标的红黄绿评级与基准元信息
+        stats["metric_ratings"] = self._build_metric_ratings(records)
+        stats["benchmarks_meta"] = dict(ANALYTICS_BENCHMARKS_META)
         return stats
 
     @classmethod
@@ -494,16 +696,22 @@ class AnalyticsService:
 
         summary = []
         for name, group in groups.items():
+            views = sum(int(r.get("views") or 0) for r in group)
+            engagement_rate = cls._engagement_rate(group)
             summary.append({
                 "name": name,
                 "count": len(group),
-                "views": sum(int(r.get("views") or 0) for r in group),
+                "views": views,
                 "likes": sum(int(r.get("likes") or 0) for r in group),
                 "collects": sum(int(r.get("collects") or 0) for r in group),
                 "comments": sum(int(r.get("comments") or 0) for r in group),
                 "shares": sum(int(r.get("shares") or 0) for r in group),
                 "followers_gained": sum(int(r.get("followers_gained") or 0) for r in group),
-                "engagement_rate": cls._engagement_rate(group),
+                "engagement_rate": engagement_rate,
+                # B10 纯增量字段：无曝光数据时不评级（None）
+                "engagement_rating": rate_by_benchmark(
+                    "engagement_rate", engagement_rate if views > 0 else None
+                ),
             })
         summary.sort(key=lambda item: item["views"], reverse=True)
         return summary
@@ -569,6 +777,286 @@ class AnalyticsService:
                 "followers_gained": sum(int(r.get("followers_gained") or 0) for r in group),
             })
         return trend
+
+    # ==================== 截图 OCR 智能回填（B3） ====================
+
+    @staticmethod
+    def _decode_ocr_images(images_base64) -> List[bytes]:
+        """
+        校验并解码 OCR 导入的 base64 图片列表。
+
+        接受裸 base64 或带 data URL 前缀（data:image/png;base64,...）的字符串。
+
+        Raises:
+            ValueError: 非 1-3 张、base64 非法、或单张解码后超过 10MB 时抛出
+        """
+        if not isinstance(images_base64, list) or not images_base64:
+            raise ValueError("images 必须是非空数组（1-3 张截图的 base64 字符串）")
+        if len(images_base64) > _OCR_MAX_IMAGES:
+            raise ValueError(
+                f"一次最多识别 {_OCR_MAX_IMAGES} 张截图，当前 {len(images_base64)} 张"
+            )
+
+        images: List[bytes] = []
+        for index, item in enumerate(images_base64):
+            label = f"第 {index + 1} 张图片"
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError(f"{label}数据为空或格式错误")
+
+            payload = item.strip()
+            # 允许 data URL 前缀，取逗号后的 base64 部分
+            if payload.startswith("data:"):
+                _, _, payload = payload.partition(",")
+            # 去掉换行/空白后再严格校验 base64
+            payload = re.sub(r"\s+", "", payload)
+            if not payload:
+                raise ValueError(f"{label}数据为空或格式错误")
+            try:
+                data = base64.b64decode(payload, validate=True)
+            except Exception:
+                raise ValueError(f"{label}不是合法的 base64 图片数据")
+            if not data:
+                raise ValueError(f"{label}数据为空或格式错误")
+            if len(data) > _OCR_MAX_IMAGE_BYTES:
+                size_mb = len(data) / (1024 * 1024)
+                raise ValueError(
+                    f"{label}解码后 {size_mb:.1f}MB，超过单张 10MB 上限，请压缩或裁剪后重试"
+                )
+            images.append(data)
+        return images
+
+    @staticmethod
+    def _clean_ocr_number(value) -> Optional[int]:
+        """
+        OCR 数字字段的后端二次清洗（模型没按要求换算时兜底）：
+        - None / 空串 / 无法解析 / 负数 -> None（表示识别失败，与 0 区分）
+        - int / float -> 非负整数
+        - "1.2万" / "3.5w" / "2.3亿" / "1,024" -> 换算后的整数
+        """
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            number = int(value)
+            return number if number >= 0 else None
+
+        text = str(value).strip().replace(",", "").replace("，", "").replace(" ", "").replace("+", "")
+        if not text:
+            return None
+        multiplier = 1
+        for unit, factor in _CN_NUMBER_UNITS:
+            if text.endswith(unit):
+                multiplier = factor
+                text = text[: -len(unit)]
+                break
+        try:
+            number = round(float(text) * multiplier)
+        except (TypeError, ValueError):
+            return None
+        return number if number >= 0 else None
+
+    @classmethod
+    def _clean_ocr_date(cls, value) -> Optional[str]:
+        """OCR 日期字段清洗：归一化为 YYYY-MM-DD，无法解析返回 None。"""
+        text = cls._normalize_str(value)
+        if not text:
+            return None
+        match = _OCR_DATE_PATTERN.search(text)
+        if not match:
+            return None
+        year, month, day = match.group(1), int(match.group(2)), int(match.group(3))
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            return None
+        return f"{year}-{month:02d}-{day:02d}"
+
+    @classmethod
+    def _clean_ocr_row(cls, row: Dict) -> Dict:
+        """
+        清洗单行 OCR 识别结果，输出固定字段结构（识别不了的字段为 None）。
+        """
+        cleaned: Dict[str, Any] = {}
+        title = cls._normalize_str(row.get("title"))
+        cleaned["title"] = title or None
+        cleaned["publish_date"] = cls._clean_ocr_date(row.get("publish_date"))
+        for field in _OCR_INT_FIELDS:
+            cleaned[field] = cls._clean_ocr_number(row.get(field))
+        return cleaned
+
+    @staticmethod
+    def _is_empty_ocr_row(row: Dict) -> bool:
+        """标题与全部数字字段都是 None 的行视为无效行，过滤掉。"""
+        if row.get("title"):
+            return False
+        return all(row.get(field) is None for field in _OCR_INT_FIELDS)
+
+    @staticmethod
+    def _parse_ocr_rows(response_text: str) -> List[Dict]:
+        """
+        解析模型返回的 JSON 数组（多级容错）：
+
+        1. 直接 json.loads 原文
+        2. 从 ```json ... ``` / ``` ... ``` 代码块中提取
+        3. 截取首个 '[' 到最后一个 ']' 之间的内容（应对前后杂文本）
+        4. 兜底走共享的 parse_llm_json（含保守 JSON 修复），
+           兼容模型把数组包在 { "rows": [...] } 之类对象里的情况
+
+        Raises:
+            ValueError: 所有策略均失败时抛出
+        """
+        def _extract_rows(value) -> Optional[List]:
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                # 模型偶尔把数组包进对象：优先常见键名，再兜底取第一个列表值
+                for key in ("rows", "records", "data", "items", "list"):
+                    if isinstance(value.get(key), list):
+                        return value[key]
+                for candidate in value.values():
+                    if isinstance(candidate, list):
+                        return candidate
+            return None
+
+        candidates = [response_text]
+        fence_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)\n?```", response_text)
+        if fence_match:
+            candidates.append(fence_match.group(1).strip())
+        start_idx = response_text.find("[")
+        end_idx = response_text.rfind("]")
+        if start_idx != -1 and end_idx > start_idx:
+            candidates.append(response_text[start_idx:end_idx + 1])
+
+        for candidate in candidates:
+            try:
+                rows = _extract_rows(json.loads(candidate))
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if rows is not None:
+                return rows
+
+        # 最后兜底：共享解析器带保守修复能力（尾逗号/单引号/裸换行等）
+        try:
+            rows = _extract_rows(parse_llm_json(response_text))
+            if rows is not None:
+                return rows
+        except ValueError:
+            pass
+        raise ValueError("AI 返回的内容不是可解析的 JSON 数组")
+
+    @staticmethod
+    def _resolve_vision_provider(text_config: dict) -> dict:
+        """
+        取出当前激活服务商的完整配置（校验逻辑与 llm_utils.get_text_client
+        一致，但只返回配置不构建客户端——视觉调用由 vision_ocr 模块自行分发）。
+
+        Raises:
+            ValueError: 无服务商配置 / 激活服务商不存在 / 未配置 API Key
+        """
+        active_provider = text_config.get("active_provider", "")
+        providers = text_config.get("providers", {})
+        if not providers:
+            raise ValueError(
+                "未找到任何文本生成服务商配置。\n"
+                "解决方案：在系统设置页面添加文本生成服务商"
+            )
+        if active_provider not in providers:
+            available = ", ".join(providers.keys())
+            raise ValueError(
+                f"未找到文本生成服务商配置: {active_provider}\n"
+                f"可用的服务商: {available}\n"
+                "解决方案：在系统设置中选择一个可用的服务商"
+            )
+        provider_config = providers.get(active_provider) or {}
+        if not provider_config.get("api_key"):
+            raise ValueError(
+                f"文本服务商 {active_provider} 未配置 API Key\n"
+                "解决方案：在系统设置页面编辑该服务商，填写 API Key"
+            )
+        return provider_config
+
+    @staticmethod
+    def _call_vision_model(
+        provider_config: dict, *, prompt: str, images: List[bytes],
+        model: str, max_output_tokens: int,
+    ) -> str:
+        """调用多模态视觉识别（惰性导入，便于测试 mock 与保持 CRUD 路径轻量）。"""
+        from backend.utils.vision_ocr import generate_vision_text
+        return generate_vision_text(
+            provider_config,
+            prompt=prompt,
+            images=images,
+            model=model,
+            max_output_tokens=max_output_tokens,
+        )
+
+    @staticmethod
+    def _load_ocr_prompt_template() -> str:
+        """加载截图 OCR 识别提示词模板。"""
+        return load_prompt_template("backend/prompts/analytics_ocr_prompt.txt")
+
+    def ocr_import(self, images_base64: List) -> Dict[str, Any]:
+        """
+        截图 OCR 智能回填：识别 1-3 张创作者后台数据截图，返回结构化行数组。
+
+        只做识别不落盘——识别结果由前端预览确认后走既有批量创建接口入库。
+
+        Args:
+            images_base64: base64 字符串列表（允许 data URL 前缀），1-3 张，
+                单张解码后 ≤10MB
+
+        Returns:
+            Dict: { rows: [{title, publish_date, views, likes, collects,
+                comments, shares, followers_gained}], count, model }
+                识别不了的字段为 None
+
+        Raises:
+            ValueError: 图片参数校验失败 / 文本服务商配置缺失（走 400）
+            AppErrorException: 模型不支持视觉或识别/解析失败
+                （结构化错误，建议文案明确「请改用手动录入」）
+        """
+        images = self._decode_ocr_images(images_base64)
+
+        # 配置类错误（无服务商/无 API Key）保持 ValueError 语义，走 400 校验错误
+        text_config = self._load_text_config()
+        provider_config = self._resolve_vision_provider(text_config)
+        model, _temperature, max_output_tokens = resolve_generation_params(
+            text_config, default_max_output_tokens=4000
+        )
+        # 日期缺少年份时按当前年份补全（prompt 中说明）
+        prompt = self._load_ocr_prompt_template().format(current_year=datetime.now().year)
+
+        try:
+            logger.info("调用截图 OCR 识别: model=%s, images=%d", model, len(images))
+            response_text = self._call_vision_model(
+                provider_config,
+                prompt=prompt,
+                images=images,
+                model=model,
+                max_output_tokens=max_output_tokens,
+            )
+            raw_rows = self._parse_ocr_rows(response_text)
+        except Exception as e:
+            logger.error("截图 OCR 识别失败: %s", e)
+            # 统一归类为结构化错误：视觉不支持与识别失败对用户的处置一致（改手动录入）
+            raise AppErrorException(AppError(
+                code="VISION_OCR_FAILED",
+                title="截图识别失败",
+                detail=f"当前模型不支持图片识别或识别失败：{str(e)[:300]}",
+                suggestion="当前模型不支持图片识别或识别失败，请改用手动录入。",
+                status=400,
+                retryable=False,
+                diagnostics={"model": model, "image_count": len(images)},
+            )) from e
+
+        rows = [
+            cleaned
+            for item in raw_rows
+            if isinstance(item, dict)
+            for cleaned in [self._clean_ocr_row(item)]
+            if not self._is_empty_ocr_row(cleaned)
+        ]
+        logger.info("截图 OCR 识别完成: 原始 %d 行, 有效 %d 行", len(raw_rows), len(rows))
+        return {"rows": rows, "count": len(rows), "model": model}
 
     # ==================== AI 复盘洞察 ====================
 
@@ -636,6 +1124,30 @@ class AnalyticsService:
 
         return "\n".join(lines)
 
+    def _build_benchmark_block(self, records: List[Dict]) -> str:
+        """
+        把行业基准与当前账号各指标的达标情况整理成给 LLM 的文本块（B10）。
+
+        每行包含：阈值说明 + 当前值 + 评级 + 距达标线的差距，
+        供 AI 洞察给出「距及格线差多少、优先修哪个指标」的结论。
+        """
+        meta = ANALYTICS_BENCHMARKS_META
+        lines = [f"行业基准（{meta.get('source', '公开行业经验值，仅供参考')}，更新于 {meta.get('updated_at', '未知')}）："]
+
+        rating_text = {RATING_RED: "红·偏低", RATING_YELLOW: "黄·待提升", RATING_GREEN: "绿·达标"}
+        for item in self._build_metric_ratings(records).values():
+            threshold = f"达标线 ≥{item['green_at']}%、及格下限 {item['red_below']}%"
+            if item["value"] is None:
+                lines.append(f"- {item['label']}：{threshold}；当前无曝光数据，无法评级")
+                continue
+            gap = round(item["green_at"] - item["value"], 2)
+            gap_text = f"距达标线还差 {gap} 个百分点" if gap > 0 else "已达标"
+            lines.append(
+                f"- {item['label']}：{threshold}；"
+                f"当前 {item['value']}%（{rating_text[item['rating']]}，{gap_text}）"
+            )
+        return "\n".join(lines)
+
     @staticmethod
     def _load_text_config() -> dict:
         """加载文本生成配置（text_providers.yaml，与 content 服务保持一致）。"""
@@ -689,7 +1201,11 @@ class AnalyticsService:
         try:
             text_config = self._load_text_config()
             client = self._get_client(text_config)
-            prompt = self._load_prompt_template().format(data_summary=data_summary)
+            # B10：把行业基准表与当前达标情况注入洞察 prompt
+            prompt = self._load_prompt_template().format(
+                data_summary=data_summary,
+                benchmark_summary=self._build_benchmark_block(records),
+            )
 
             model, temperature, max_output_tokens = resolve_generation_params(
                 text_config, default_max_output_tokens=4000

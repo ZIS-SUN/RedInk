@@ -516,6 +516,31 @@ def test_reply_route_passes_active_brand(client, monkeypatch):
     assert service.calls[0]["kwargs"]["brand"] == BRAND
 
 
+def test_reply_route_passes_explicit_brand_id(client, monkeypatch):
+    """前端评论助手显式选择品牌时，brand_id 交给品牌解析并把档案透传给服务"""
+    service = RecordingService("generate_replies", {
+        "success": True,
+        "replies": [{"comment": "好", "suggestions": ["回"]}],
+        "pinned_comment": "",
+    })
+    resolved = []
+
+    def fake_resolve(brand_id=None):
+        resolved.append(brand_id)
+        return BRAND
+
+    monkeypatch.setattr(reply_routes, "get_reply_service", lambda: service)
+    monkeypatch.setattr(reply_routes, "resolve_brand_for_prompt", fake_resolve)
+
+    response = client.post("/api/reply", json={
+        "comments": ["好"], "brand_id": "brand-001",
+    })
+
+    assert response.status_code == 200
+    assert resolved == ["brand-001"]
+    assert service.calls[0]["kwargs"]["brand"] == BRAND
+
+
 def test_cover_route_passes_brand_id(client, monkeypatch):
     service = RecordingService("generate_cover_directions", {
         "success": True,

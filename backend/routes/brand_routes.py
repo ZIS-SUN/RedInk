@@ -4,15 +4,22 @@
 包含功能：
 - 品牌档案的增删改查 (CRUD)
 - 设置/获取「当前启用」的档案
+- 新手账号定位向导：根据三个回答由 AI 生成档案草稿
 
 所有响应遵循 { success: true, ... } / 统一错误对象 的对外契约。
 """
 
 import logging
+import time
 from flask import Blueprint, request, jsonify
 
-from backend.services.brand import get_brand_service
-from .utils import api_error_response, validation_error
+from backend.services.brand import generate_brand_draft, get_brand_service
+from .utils import (
+    api_error_response,
+    log_error,
+    normalize_error_result,
+    validation_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +186,67 @@ def create_brand_blueprint():
 
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/brands/<id>", "brand_id": brand_id})
+
+    @brand_bp.route('/brand/draft', methods=['POST'])
+    def generate_draft():
+        """
+        新手账号定位向导：根据三个回答由 AI 生成品牌档案草稿
+
+        请求体（application/json，三项均必填）：
+        - who: 「你是谁」——身份/经历
+        - audience: 「做给谁看」——目标人群
+        - advantage: 「凭什么是你」——独特优势
+
+        返回：
+        - success: 是否成功
+        - draft: 档案草稿，含 name（账号名建议列表）/positioning（一句话定位）/
+          tone/catchphrases/signature/banned_words/niche_tags/
+          starter_topics（前 10 篇起号选题，每条含 title/angle）
+        """
+        start_time = time.time()
+
+        try:
+            data = request.get_json(silent=True) or {}
+            who = str(data.get('who') or '').strip()
+            audience = str(data.get('audience') or '').strip()
+            advantage = str(data.get('advantage') or '').strip()
+
+            # 三个回答都是生成定位的必要输入，缺一不可
+            missing_hints = []
+            if not who:
+                missing_hints.append("「你是谁」")
+            if not audience:
+                missing_hints.append("「做给谁看」")
+            if not advantage:
+                missing_hints.append("「凭什么是你」")
+            if missing_hints:
+                return api_error_response(
+                    validation_error(
+                        f"缺少必填回答: {'、'.join(missing_hints)}",
+                        "请先完成三个定位问题的回答。",
+                    ),
+                    context={"endpoint": "/api/brand/draft"},
+                )
+
+            logger.info(f"🔄 开始生成账号定位草稿: who={who[:30]}")
+            result = generate_brand_draft(who, audience, advantage)
+
+            elapsed = time.time() - start_time
+            if result.get("success"):
+                logger.info(f"✅ 账号定位草稿生成成功，耗时 {elapsed:.2f}s")
+                return jsonify(result), 200
+
+            logger.error(f"❌ 账号定位草稿生成失败: {result.get('error', '未知错误')}")
+            result = normalize_error_result(
+                result,
+                context={"endpoint": "/api/brand/draft"},
+                fallback_status=500,
+            )
+            return jsonify(result), result["error"].get("status", 500)
+
+        except Exception as e:
+            log_error('/brand/draft', e)
+            return api_error_response(e, context={"endpoint": "/api/brand/draft"})
 
     @brand_bp.route('/brands/<brand_id>/activate', methods=['POST'])
     def activate_brand(brand_id):

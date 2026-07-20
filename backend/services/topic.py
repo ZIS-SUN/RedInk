@@ -26,6 +26,12 @@ DEFAULT_TOPIC_COUNT = 10
 # format 字段的合法取值，AI 返回超出范围时回退为「图文」
 VALID_FORMATS = ('图文', '口播', '清单', '教程', '测评', 'Vlog', '对比', '合集', '问答', '剧情')
 
+# 蹭热点模式：单次最多接受的热点条数（约束 prompt 体积）
+MAX_HOT_TOPICS = 20
+
+# 蹭热点模式：单条热点词的最大长度（防超长文本挤爆 prompt）
+MAX_HOT_TOPIC_LEN = 100
+
 
 class TopicService:
     """选题灵感服务：生成选题标题、切入角度、内容形式、热度预估和话题标签"""
@@ -145,6 +151,57 @@ class TopicService:
             "并结合近期趋势给出更有把握的选题方向。"
         )
 
+    @staticmethod
+    def normalize_hot_topics(hot_topics) -> list:
+        """
+        归一化用户粘贴的热榜词/热点标题列表：
+        - 非列表输入一律返回空列表（等同于常规选题模式）
+        - 逐条转字符串、去首尾空白、丢弃空行
+        - 单条截断到 MAX_HOT_TOPIC_LEN，总条数截断到 MAX_HOT_TOPICS
+        """
+        if not isinstance(hot_topics, list):
+            return []
+        result = []
+        for item in hot_topics:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            result.append(text[:MAX_HOT_TOPIC_LEN])
+            if len(result) >= MAX_HOT_TOPICS:
+                break
+        return result
+
+    @staticmethod
+    def _apply_hot_topics(prompt: str, hot_topics: list) -> str:
+        """
+        在已构建好的 prompt 末尾追加蹭热点指令段落。
+
+        与 _apply_account_context 相同：用运行时字符串拼接而非模板占位符，
+        避免给模板新增占位符导致其他 .format 调用点 KeyError。
+        hot_topics 为空时原样返回（保持常规选题行为完全不变）。
+        """
+        if not hot_topics:
+            return prompt
+
+        hot_lines = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(hot_topics))
+        return (
+            f"{prompt}\n\n"
+            "### 蹭热点模式（用户手动粘贴的热榜词/热点标题，每行一条）：\n"
+            f"{hot_lines}\n\n"
+            "本次进入「蹭热点」模式，请调整生成策略：\n"
+            "1. 不再基于常青角度自由发挥，改为围绕上面列出的每个热点逐一产出选题，"
+            "每个热点至少产出 1 条，把热点与用户的领域/赛道自然结合\n"
+            "2. angle 字段写清「蹭点角度」：这个热点怎么和用户赛道挂钩、借哪股情绪或流量\n"
+            "3. 每条选题在原有字段基础上额外输出以下字段（都是字符串）：\n"
+            '   - "hot_topic": 对应的热点原词（与上面列表中的某一条一致）\n'
+            '   - "publish_window": 建议发布窗口（如"48 小时内""3 天内"，热点时效性越强窗口越短）\n'
+            '   - "relevance": 与用户赛道的关联度评估（高/中/低 + 一句话理由，'
+            "关联度低的热点也要如实标注，帮用户判断值不值得蹭）\n"
+            "4. 其余输出格式要求（JSON 结构、title/format/heat/tags 的标准）保持不变"
+        )
+
     def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
         """解析 AI 返回的 JSON 响应"""
         return parse_llm_json(response_text)
@@ -177,7 +234,7 @@ class TopicService:
             tags = []
         tags = [str(t).strip().lstrip('#') for t in tags if str(t).strip()]
 
-        return {
+        topic = {
             'title': title,
             'angle': angle,
             'format': content_format,
@@ -185,13 +242,22 @@ class TopicService:
             'tags': tags
         }
 
+        # 蹭热点模式的增量字段（可选）：仅在 AI 返回了非空值时透传
+        for optional_field in ('hot_topic', 'publish_window', 'relevance'):
+            value = str(item.get(optional_field, '') or '').strip()
+            if value:
+                topic[optional_field] = value
+
+        return topic
+
     def generate_topics(
         self,
         niche: str,
         platform: str = '小红书',
         count: int = DEFAULT_TOPIC_COUNT,
         use_account_data: bool = False,
-        brand: Optional[Dict] = None
+        brand: Optional[Dict] = None,
+        hot_topics: Optional[list] = None
     ) -> Dict[str, Any]:
         """
         生成选题灵感列表
@@ -202,16 +268,22 @@ class TopicService:
             count: 期望生成的选题条数
             use_account_data: 是否结合数据复盘工具录入的账号数据（无记录时静默忽略）
             brand: 品牌档案字典（可选），提供时会把品牌人设约束注入 prompt
+            hot_topics: 用户手动粘贴的热榜词/热点标题列表（可选）。
+                提供时进入「蹭热点」模式：围绕每个热点产出蹭点角度、
+                建议发布窗口与赛道关联度评估（增量字段可选）
 
         返回：
-            包含 topics 列表的字典，每条含 title/angle/format/heat/tags；
+            包含 topics 列表的字典，每条含 title/angle/format/heat/tags
+            （蹭热点模式下可能另含 hot_topic/publish_window/relevance）；
             另含 account_context_used 表示本次是否实际注入了账号画像
         """
         account_context_used = False
         try:
+            normalized_hot_topics = self.normalize_hot_topics(hot_topics)
             logger.info(
                 f"开始生成选题灵感: niche={niche[:50]}, platform={platform}, "
-                f"use_account_data={use_account_data}"
+                f"use_account_data={use_account_data}, "
+                f"hot_topics={len(normalized_hot_topics)} 条"
             )
 
             # 构建提示词
@@ -220,6 +292,11 @@ class TopicService:
                 platform=platform,
                 count=count
             )
+
+            # 蹭热点模式：把热点列表与蹭点要求追加到 prompt 末尾（空列表时不改变行为）
+            if normalized_hot_topics:
+                prompt = self._apply_hot_topics(prompt, normalized_hot_topics)
+                logger.info("已注入蹭热点指令到选题 prompt")
 
             # 结合账号数据：有记录时把账号画像追加到 prompt 末尾，无记录时静默忽略
             if use_account_data:
