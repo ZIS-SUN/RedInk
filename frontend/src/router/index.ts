@@ -154,6 +154,16 @@ const router = createRouter({
       component: () => import('../views/ToolPublishView.vue')
     },
     {
+      path: '/tools/script',
+      name: 'tool-script',
+      component: () => import('../views/ToolScriptView.vue')
+    },
+    {
+      path: '/tools/insight',
+      name: 'tool-insight',
+      component: () => import('../views/ToolInsightView.vue')
+    },
+    {
       // 404 兜底：所有未匹配路径统一进入 NotFound 页
       path: '/:pathMatch(.*)*',
       name: 'not-found',

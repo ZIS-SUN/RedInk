@@ -39,6 +39,9 @@ def create_api_blueprint():
     from .benchmark_routes import create_benchmark_blueprint
     from .reply_routes import create_reply_blueprint
     from .checklist_routes import create_checklist_blueprint
+    from .script_routes import create_script_blueprint
+    from .insight_routes import create_insight_blueprint
+    from .hotspot_routes import create_hotspot_blueprint
 
     # 创建主 API 蓝图
     api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -61,6 +64,10 @@ def create_api_blueprint():
     api_bp.register_blueprint(create_benchmark_blueprint())
     api_bp.register_blueprint(create_reply_blueprint())
     api_bp.register_blueprint(create_checklist_blueprint())
+    # 自媒体工具（第三阶段新增）
+    api_bp.register_blueprint(create_script_blueprint())
+    api_bp.register_blueprint(create_insight_blueprint())
+    api_bp.register_blueprint(create_hotspot_blueprint())
 
     return api_bp
 

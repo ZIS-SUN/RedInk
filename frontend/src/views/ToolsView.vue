@@ -80,7 +80,9 @@ const ICON = {
   calendar: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>',
   analytics: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>',
   cardStudio: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" y1="20" x2="15" y2="20"></line><line x1="12" y1="4" x2="12" y2="20"></line></svg>',
-  publish: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>'
+  publish: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>',
+  script: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>',
+  insight: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="15" x2="12.01" y2="15"></line></svg>'
 }
 
 const stages: Stage[] = [
@@ -89,7 +91,8 @@ const stages: Stage[] = [
     sub: '不知道写什么？从这里开始',
     tools: [
       { name: 'tool-topic', title: '选题灵感', desc: '输入赛道，生成一批带角度与热度预估的选题', tone: 'primary', icon: ICON.topic },
-      { name: 'tool-benchmark', title: '对标拆解', desc: '粘贴爆款，拆解它为什么火并生成同款套路草稿', tone: 'info', icon: ICON.benchmark }
+      { name: 'tool-benchmark', title: '对标拆解', desc: '粘贴爆款，拆解它为什么火并生成同款套路草稿', tone: 'info', icon: ICON.benchmark },
+      { name: 'tool-insight', title: '评论洞察', desc: '粘贴粉丝评论，聚类真实痛点并挖出下一批选题', tone: 'warning', icon: ICON.insight }
     ]
   },
   {
@@ -98,7 +101,8 @@ const stages: Stage[] = [
     tools: [
       { name: 'tool-title', title: '爆款标题', desc: '生成一批带评分与爆款要素的候选标题', tone: 'warning', icon: ICON.title },
       { name: 'tool-rewrite', title: '多平台改写', desc: '一段文案改写成各平台风格', tone: 'primary', icon: ICON.rewrite },
-      { name: 'tool-reply', title: '评论助手', desc: '生成高互动神回复与置顶引导', tone: 'success', icon: ICON.reply }
+      { name: 'tool-reply', title: '评论助手', desc: '生成高互动神回复与置顶引导', tone: 'success', icon: ICON.reply },
+      { name: 'tool-script', title: '口播脚本', desc: '把图文内容变成带时间轴分镜的短视频口播脚本', tone: 'info', icon: ICON.script }
     ]
   },
   {
