@@ -17,7 +17,9 @@ vi.mock('../client', () => ({
   LLM_TIMEOUT: 1000,
   http: { post: vi.fn() },
   isAbortError: () => false,
-  readSseResponse: vi.fn()
+  readSseResponse: vi.fn(),
+  // 流式请求会合并部署级令牌头，测试环境无令牌返回空对象
+  getAuthHeaders: () => ({})
 }))
 
 const mockPost = vi.mocked(http.post)

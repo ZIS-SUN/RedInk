@@ -3,6 +3,7 @@
 
 包含功能：
 - 生成大纲（支持图片上传）
+- 批量生成差异化大纲变体（抖音图文量产，存草稿）
 - 单页 AI 润色
 """
 
@@ -12,7 +13,14 @@ import base64
 import logging
 from flask import Blueprint, request, jsonify, Response
 from backend.errors import AppError, ensure_app_error
-from backend.services.outline import get_outline_service
+from backend.services.outline import (
+    DEFAULT_VARIANT_COUNT,
+    MAX_VARIANT_COUNT,
+    MIN_VARIANT_COUNT,
+    extract_title_hint,
+    get_outline_service,
+)
+from backend.services.history import get_history_service
 from backend.services.brand import get_brand_service
 from backend.utils.text_stream import (
     StreamingNotSupportedError,
@@ -246,6 +254,158 @@ def create_outline_blueprint():
         except Exception as e:
             log_error('/outline/stream', e)
             return api_error_response(e, context={"endpoint": "/api/outline/stream"})
+
+    @outline_bp.route('/outline/variants', methods=['POST'])
+    def generate_outline_variants():
+        """
+        同一选题批量生成多套差异化大纲变体（抖音图文量产）
+
+        请求体（application/json）：
+        - topic: 主题文本（必填）
+        - count: 变体套数，2-5 的整数（默认 3）
+        - dimensions: 差异化维度数组（可选：hook 换钩子 / angle 换角度 /
+          format 换形式），缺省或非法时默认全选
+        - brand_id / seo_keywords: 可选，透传现有品牌人设与搜索埋词机制
+
+        行为：
+        - 串行调用 count 次大纲生成（每次都是一次付费 LLM 调用），
+          每套注入不同的差异化指令；单套失败不中断整批
+        - 每套成功的变体立即存为草稿历史记录（status=draft，
+          标题带变体标注如「主题【变体2·换钩子+换角度】」），
+          可在历史记录中逐套打开生成图片
+
+        返回：
+        - success: 整批是否受理成功（全部失败时走统一错误响应）
+        - total / succeeded / failed: 如实统计的总数 / 成功 / 失败套数
+        - variants: 与请求顺序一致的逐套结果
+          - 成功：{success, record_id, variant_label, title_hint, page_count}
+          - 失败：{success, variant_label, error}
+        """
+        start_time = time.time()
+
+        try:
+            data = request.get_json(silent=True) or {}
+            topic = data.get('topic')
+            count = data.get('count', DEFAULT_VARIANT_COUNT)
+            dimensions = data.get('dimensions')
+            brand_id = data.get('brand_id')
+            seo_keywords = data.get('seo_keywords')
+
+            log_request('/outline/variants', {
+                'topic': topic,
+                'count': count,
+                'dimensions': dimensions,
+            })
+
+            # 参数校验：topic 非空（与 /outline 一致的 400 规范）
+            if not topic or not isinstance(topic, str) or not topic.strip():
+                logger.warning("批量变体请求缺少 topic 参数")
+                return api_error_response(
+                    validation_error("topic 不能为空", "请输入要生成图文的主题内容。"),
+                    context={"endpoint": "/api/outline/variants"},
+                )
+
+            # 参数校验：count 必须是 2-5 的整数（bool 是 int 子类，显式排除）
+            if isinstance(count, bool) or not isinstance(count, int) or not (
+                MIN_VARIANT_COUNT <= count <= MAX_VARIANT_COUNT
+            ):
+                logger.warning(f"批量变体请求 count 非法: {count!r}")
+                return api_error_response(
+                    validation_error(
+                        f"count 必须是 {MIN_VARIANT_COUNT}-{MAX_VARIANT_COUNT} 的整数",
+                        "请选择 2-5 套变体数量。",
+                    ),
+                    context={"endpoint": "/api/outline/variants"},
+                )
+
+            topic = topic.strip()
+
+            # 按 brand_id 取品牌档案（取不到/异常一律置 None，静默忽略）
+            brand = _load_brand(brand_id)
+
+            logger.info(f"🔄 开始批量生成 {count} 套大纲变体，主题: {topic[:50]}...")
+            outline_service = get_outline_service()
+            batch = outline_service.generate_outline_variants(
+                topic,
+                count=count,
+                dimensions=dimensions,
+                brand=brand,
+                seo_keywords=seo_keywords,
+            )
+
+            # 每套成功的变体立即建档为草稿（复用历史服务现有创建函数，
+            # 与 POST /history 的建档方式一致：status 初始即 draft）；
+            # 建档失败同样只影响该套，不中断整批
+            history_service = get_history_service()
+            variants = []
+            first_error = None
+            for item in batch["variants"]:
+                label = item["variant_label"]
+                if not item["success"]:
+                    if first_error is None:
+                        first_error = item.get("error")
+                    variants.append({
+                        "success": False,
+                        "variant_label": label,
+                        "error": item.get("error", "大纲生成失败"),
+                    })
+                    continue
+
+                try:
+                    # 标题带变体标注，草稿箱里一眼可辨识（如「主题【变体2·换角度】」）
+                    record_id = history_service.create_record(
+                        f"{topic}【{label}】",
+                        {
+                            "raw": item.get("outline", ""),
+                            "pages": item.get("pages", []),
+                        },
+                    )
+                    variants.append({
+                        "success": True,
+                        "record_id": record_id,
+                        "variant_label": label,
+                        # 标题预览：封面页首行文案，供结果列表快速辨识
+                        "title_hint": extract_title_hint(item.get("pages")),
+                        "page_count": len(item.get("pages", [])),
+                    })
+                except Exception as e:
+                    log_error('/outline/variants', e)
+                    if first_error is None:
+                        first_error = f"变体草稿保存失败: {e}"
+                    variants.append({
+                        "success": False,
+                        "variant_label": label,
+                        "error": f"大纲已生成但草稿保存失败: {e}",
+                    })
+
+            succeeded = sum(1 for v in variants if v["success"])
+            failed = len(variants) - succeeded
+            elapsed = time.time() - start_time
+
+            # 整批全部失败：走项目统一错误响应（不再包装成 200）
+            if succeeded == 0:
+                logger.error(f"❌ 批量变体全部失败（{failed}/{count} 套）")
+                result = normalize_error_result(
+                    {"success": False, "error": first_error or "批量变体生成失败"},
+                    context={"endpoint": "/api/outline/variants"},
+                    fallback_status=500,
+                )
+                return jsonify(result), result["error"].get("status", 500)
+
+            logger.info(
+                f"✅ 批量变体完成，耗时 {elapsed:.2f}s，成功 {succeeded} / 失败 {failed}"
+            )
+            return jsonify({
+                "success": True,
+                "total": count,
+                "succeeded": succeeded,
+                "failed": failed,
+                "variants": variants,
+            }), 200
+
+        except Exception as e:
+            log_error('/outline/variants', e)
+            return api_error_response(e, context={"endpoint": "/api/outline/variants"})
 
     @outline_bp.route('/outline/polish', methods=['POST'])
     def polish_page():

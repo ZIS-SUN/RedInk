@@ -35,6 +35,16 @@
           <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
           {{ regenerating ? '生成中…' : '换一版' }}
         </button>
+        <button
+          class="btn btn-secondary"
+          :disabled="variantsLoading || !store.topic.trim()"
+          :title="store.topic.trim() ? '同一选题一次生成多套差异化大纲，存入草稿箱（抖音图文量产）' : '缺少主题，无法批量生成变体'"
+          @click="openVariantsDialog"
+        >
+          <span v-if="variantsLoading" class="btn-spinner" aria-hidden="true"></span>
+          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          {{ variantsLoading ? '批量生成中…' : '批量变体' }}
+        </button>
         <button class="btn btn-primary" :disabled="regenerating" @click="startGeneration">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"></path><line x1="16" y1="8" x2="2" y2="22"></line><line x1="17.5" y1="15" x2="9" y2="15"></line></svg>
           开始生成图片
@@ -225,6 +235,132 @@
       @confirm="confirmGenerateAnyway"
       @cancel="cancelBlankPagesConfirm"
     />
+
+    <!-- 批量变体配置弹窗：数量 + 差异化维度 + 消耗提示（视觉沿用 ConfirmDialog 风格） -->
+    <Teleport to="body">
+      <div
+        v-if="showVariantsDialog"
+        class="variants-overlay"
+        @click.self="closeVariantsDialog"
+      >
+        <div class="variants-dialog" role="dialog" aria-modal="true" aria-label="批量生成大纲变体">
+          <h3 class="variants-title">批量生成大纲变体</h3>
+          <p class="variants-desc">同一选题一次产出多套明显不同的大纲，全部存入草稿箱</p>
+
+          <div class="variants-field">
+            <div class="variants-field-label">变体数量</div>
+            <div class="variants-count-options">
+              <button
+                v-for="n in VARIANT_COUNT_OPTIONS"
+                :key="n"
+                type="button"
+                class="variants-count-btn"
+                :class="{ active: variantCount === n }"
+                :disabled="variantsLoading"
+                @click="variantCount = n"
+              >{{ n }} 套</button>
+            </div>
+          </div>
+
+          <div class="variants-field">
+            <div class="variants-field-label">差异化维度（多选，至少一项）</div>
+            <div class="variants-dim-chips">
+              <button
+                v-for="dim in VARIANT_DIMENSION_OPTIONS"
+                :key="dim.key"
+                type="button"
+                class="variants-dim-chip"
+                :class="{ active: variantDimensions.includes(dim.key) }"
+                :disabled="variantsLoading"
+                :aria-pressed="variantDimensions.includes(dim.key)"
+                @click="toggleVariantDimension(dim.key)"
+              >{{ dim.label }}</button>
+            </div>
+          </div>
+
+          <!-- 醒目的消耗提示：批量变体是 N 次付费 LLM 调用 -->
+          <div class="variants-cost-notice" role="note">
+            将调用 {{ variantCount }} 次大纲生成（不出图），适合抖音图文多账号/高频发布测试
+          </div>
+
+          <div v-if="variantsLoading" class="variants-loading" role="status">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            正在生成 {{ variantCount }} 套变体，约 1-2 分钟…
+          </div>
+
+          <div v-if="variantsError" class="variants-error" role="alert">{{ variantsError }}</div>
+
+          <div class="variants-actions">
+            <button
+              type="button"
+              class="variants-btn cancel"
+              :disabled="variantsLoading"
+              @click="closeVariantsDialog"
+            >取消</button>
+            <button
+              type="button"
+              class="variants-btn confirm"
+              :disabled="variantsLoading"
+              @click="runGenerateVariants"
+            >{{ variantsLoading ? '生成中…' : '开始批量生成' }}</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 批量变体结果弹窗：每套一张卡 + 跳转历史记录草稿 -->
+    <Teleport to="body">
+      <div
+        v-if="variantsResult"
+        class="variants-overlay"
+        @click.self="closeVariantsResult"
+      >
+        <div class="variants-dialog result" role="dialog" aria-modal="true" aria-label="批量变体结果">
+          <h3 class="variants-title">批量变体完成</h3>
+          <!-- 部分失败时如实展示成功/失败套数 -->
+          <p class="variants-desc">
+            <template v-if="variantsResult.failed > 0">
+              成功 {{ variantsResult.succeeded }} 套 / 失败 {{ variantsResult.failed }} 套
+            </template>
+            <template v-else>共生成 {{ variantsResult.succeeded }} 套变体</template>
+          </p>
+
+          <div class="variants-result-list">
+            <div
+              v-for="(variant, idx) in variantsResult.variants"
+              :key="idx"
+              class="variants-result-card"
+              :class="{ failed: !variant.success }"
+            >
+              <div class="variants-result-info">
+                <span class="variants-result-label" :class="{ failed: !variant.success }">
+                  {{ variant.variant_label }}
+                </span>
+                <template v-if="variant.success">
+                  <span class="variants-result-hint">{{ variant.title_hint || '（无标题预览）' }}</span>
+                  <span class="variants-result-pages">{{ variant.page_count }} 页</span>
+                </template>
+                <span v-else class="variants-result-fail-text">{{ variantErrorText(variant) }}</span>
+              </div>
+              <button
+                v-if="variant.success && variant.record_id"
+                type="button"
+                class="variants-open-btn"
+                @click="openVariantRecord(variant.record_id)"
+              >在历史记录中打开</button>
+            </div>
+          </div>
+
+          <p v-if="variantsResult.succeeded > 0" class="variants-result-footer">
+            已存入草稿箱，可逐套打开生成图片
+          </p>
+
+          <div class="variants-actions">
+            <button type="button" class="variants-btn confirm" @click="closeVariantsResult">完成</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -237,9 +373,12 @@ import {
   updateHistory,
   createHistory,
   generateOutline,
+  generateOutlineVariants,
   polishPage,
+  type OutlineVariantItem,
   type Page,
-  type PolishInstruction
+  type PolishInstruction,
+  type VariantDimension
 } from '../api'
 import { getApiErrorPayload } from '../api/client'
 import StepIndicator from './shared/StepIndicator.vue'
@@ -475,6 +614,132 @@ const doRegenerate = async () => {
   } finally {
     regenerating.value = false
   }
+}
+
+// ==================== 批量变体（抖音图文量产） ====================
+
+// 可选变体套数（与后端 2-5 的校验范围一致，默认 3）
+const VARIANT_COUNT_OPTIONS = [2, 3, 4, 5]
+
+// 差异化维度选项（key 与后端维度池对应，label 与后端变体标签文案一致）
+const VARIANT_DIMENSION_OPTIONS: Array<{ key: VariantDimension; label: string }> = [
+  { key: 'hook', label: '换钩子' },
+  { key: 'angle', label: '换角度' },
+  { key: 'format', label: '换形式' }
+]
+
+// 结果弹窗使用的归一化数据（succeeded/failed 计数 + 逐套结果）
+interface VariantsResultView {
+  succeeded: number
+  failed: number
+  variants: OutlineVariantItem[]
+}
+
+// 配置弹窗可见性
+const showVariantsDialog = ref(false)
+// 变体数量（默认 3 套）
+const variantCount = ref(3)
+// 已选差异化维度（默认全选）
+const variantDimensions = ref<VariantDimension[]>(['hook', 'angle', 'format'])
+// 批量生成进行中（按钮与弹窗 loading 态）
+const variantsLoading = ref(false)
+// 批量生成失败的错误提示（展示在配置弹窗内）
+const variantsError = ref('')
+// 批量生成结果（非 null 时展示结果弹窗）
+const variantsResult = ref<VariantsResultView | null>(null)
+
+/**
+ * 点击「批量变体」：打开配置弹窗（数量 + 维度 + 消耗提示）
+ */
+const openVariantsDialog = () => {
+  if (variantsLoading.value) return
+  variantsError.value = ''
+  showVariantsDialog.value = true
+}
+
+const closeVariantsDialog = () => {
+  // 生成中不允许关闭：后端串行调用已在计费，关掉弹窗只会丢失结果入口
+  if (variantsLoading.value) return
+  showVariantsDialog.value = false
+}
+
+/**
+ * 切换差异化维度：至少保留一项；勾选时按固定顺序回填，
+ * 保证与后端维度池顺序（换钩子/换角度/换形式）一致
+ */
+const toggleVariantDimension = (dim: VariantDimension) => {
+  if (variantDimensions.value.includes(dim)) {
+    if (variantDimensions.value.length > 1) {
+      variantDimensions.value = variantDimensions.value.filter(d => d !== dim)
+    }
+  } else {
+    variantDimensions.value = VARIANT_DIMENSION_OPTIONS
+      .map(option => option.key)
+      .filter(key => key === dim || variantDimensions.value.includes(key))
+  }
+}
+
+/**
+ * 确认批量生成：调用变体端点（只读 store 的 topic/brandId/seoKeywords），
+ * 成功后关闭配置弹窗、打开结果弹窗；失败时错误展示在配置弹窗内
+ */
+const runGenerateVariants = async () => {
+  if (variantsLoading.value) return
+
+  const topic = store.topic.trim()
+  if (!topic) {
+    variantsError.value = '缺少主题，无法批量生成变体'
+    return
+  }
+
+  variantsLoading.value = true
+  variantsError.value = ''
+
+  try {
+    const result = await generateOutlineVariants(
+      topic,
+      variantCount.value,
+      [...variantDimensions.value],
+      store.brandId || undefined,
+      store.seoKeywords.length > 0 ? [...store.seoKeywords] : undefined
+    )
+
+    if (result.success && result.variants && result.variants.length > 0) {
+      const succeeded = result.succeeded
+        ?? result.variants.filter(variant => variant.success).length
+      const failed = result.failed ?? (result.variants.length - succeeded)
+      showVariantsDialog.value = false
+      variantsResult.value = { succeeded, failed, variants: result.variants }
+    } else {
+      variantsError.value =
+        result.error_message
+        || (typeof result.error === 'string' ? result.error : '')
+        || '批量生成变体失败，请稍后重试'
+    }
+  } catch (error) {
+    variantsError.value = getApiErrorPayload(error, '批量生成变体失败，请稍后重试').error_message
+  } finally {
+    variantsLoading.value = false
+  }
+}
+
+/**
+ * 失败卡片的简短错误文案：后端错误详情可能多行，只取第一行
+ */
+const variantErrorText = (variant: OutlineVariantItem): string => {
+  const raw = typeof variant.error === 'string' ? variant.error.trim() : ''
+  return raw.split('\n')[0] || '生成失败，请稍后重试'
+}
+
+/**
+ * 「在历史记录中打开」：跳转该套变体的草稿详情，可直接开始生成图片
+ */
+const openVariantRecord = (recordId: string) => {
+  router.push(`/history/${recordId}`)
+}
+
+const closeVariantsResult = () => {
+  variantsResult.value = null
 }
 
 // ==================== 生成前空白页校验 + 成本预告 ====================
@@ -780,6 +1045,283 @@ watch(
   border-top-color: transparent;
   border-radius: var(--radius-full);
   animation: polish-spin 0.7s linear infinite;
+}
+
+/* ==================== 批量变体弹窗 ==================== */
+/* 遮罩与卡片视觉沿用 ConfirmDialog 的样式语言（同 z-index 层级） */
+.variants-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(33, 30, 27, 0.55);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  animation: variants-fade 0.2s var(--ease-out);
+}
+
+@keyframes variants-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.variants-dialog {
+  background: var(--bg-card);
+  border-radius: var(--radius-xl);
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  width: 100%;
+  max-width: 420px;
+  box-shadow: var(--shadow-lg);
+  animation: variants-pop 0.2s var(--ease-out);
+}
+
+/* 结果弹窗略宽，容纳每套一张卡的列表 */
+.variants-dialog.result {
+  max-width: 520px;
+}
+
+@keyframes variants-pop {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.variants-title {
+  margin: 0 0 var(--space-2);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-main);
+}
+
+.variants-desc {
+  margin: 0 0 var(--space-4);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-sub);
+}
+
+.variants-field {
+  margin-bottom: var(--space-4);
+}
+
+.variants-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.variants-count-options,
+.variants-dim-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.variants-count-btn,
+.variants-dim-chip {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.variants-count-btn:hover:not(:disabled),
+.variants-dim-chip:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.variants-count-btn.active,
+.variants-dim-chip.active {
+  color: var(--primary);
+  background: var(--primary-fade);
+  border-color: var(--primary);
+}
+
+.variants-count-btn:disabled,
+.variants-dim-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 醒目的消耗提示：批量变体 = N 次付费 LLM 调用 */
+.variants-cost-notice {
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  font-weight: 600;
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning-soft);
+  border-radius: var(--radius-sm, 8px);
+  margin-bottom: var(--space-4);
+}
+
+.variants-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--color-info);
+  margin-bottom: var(--space-3);
+}
+
+.variants-loading .btn-spinner {
+  margin-right: 0;
+}
+
+.variants-error {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-xs);
+  word-break: break-word;
+  margin-bottom: var(--space-3);
+}
+
+.variants-actions {
+  display: flex;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.variants-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: var(--tracking-tight);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.variants-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.variants-btn.cancel {
+  border: 1px solid var(--border-hover);
+  background: var(--bg-card);
+  color: var(--text-main);
+  box-shadow: var(--shadow-xs);
+}
+
+.variants-btn.cancel:hover:not(:disabled) {
+  background: var(--gray-0);
+  border-color: var(--gray-5);
+}
+
+.variants-btn.confirm {
+  border: none;
+  background: var(--primary);
+  color: white;
+  box-shadow: var(--shadow-xs), 0 4px 12px var(--primary-fade);
+}
+
+.variants-btn.confirm:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+/* 结果列表：每套变体一张卡 */
+.variants-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: var(--space-3);
+}
+
+.variants-result-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--bg-card);
+}
+
+.variants-result-card.failed {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger-soft);
+}
+
+.variants-result-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.variants-result-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.variants-result-label.failed {
+  color: var(--color-danger);
+}
+
+.variants-result-hint {
+  font-size: 13px;
+  color: var(--text-main);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variants-result-pages {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.variants-result-fail-text {
+  font-size: 12px;
+  color: var(--color-danger);
+  word-break: break-word;
+}
+
+.variants-open-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--primary);
+  background: var(--primary-fade);
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+
+.variants-open-btn:hover {
+  opacity: 0.85;
+}
+
+.variants-result-footer {
+  margin: 0 0 var(--space-2);
+  font-size: 12px;
+  color: var(--color-success);
 }
 
 /* 换一版失败的错误提示 */

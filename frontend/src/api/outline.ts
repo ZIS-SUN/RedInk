@@ -1,6 +1,7 @@
 import {
   API_BASE_URL,
   LLM_TIMEOUT,
+  getAuthHeaders,
   http,
   isAbortError,
   readSseResponse
@@ -162,7 +163,9 @@ export async function generateOutlineStream(
     response = await fetch(`${API_BASE_URL}/outline/stream`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        // 部署级访问令牌（未设置时为空对象，不添加任何头）
+        ...getAuthHeaders()
       },
       body: JSON.stringify(payload),
       signal: options.signal
@@ -215,6 +218,81 @@ export async function generateOutlineStream(
   }
 
   return resolveOutlineStreamResult(complete, errorEvent, { receivedDelta })
+}
+
+// ==================== 批量变体（抖音图文量产） ====================
+
+/** 差异化维度：hook 换钩子 / angle 换角度 / format 换形式 */
+export type VariantDimension = 'hook' | 'angle' | 'format'
+
+/** 单套变体结果：成功时带草稿记录信息，失败时带错误文本 */
+export interface OutlineVariantItem {
+  success: boolean
+  /** 变体标签，如「变体2·换角度」 */
+  variant_label: string
+  /** 成功时：草稿历史记录 ID（可跳转 /history/:id 打开） */
+  record_id?: string
+  /** 成功时：标题预览（封面页首行文案） */
+  title_hint?: string
+  /** 成功时：该套大纲页数 */
+  page_count?: number
+  /** 失败时：错误描述 */
+  error?: string
+}
+
+export interface OutlineVariantsResponse {
+  success: boolean
+  /** 请求的总套数 */
+  total?: number
+  /** 成功套数（每套成功即已存为草稿） */
+  succeeded?: number
+  /** 失败套数 */
+  failed?: number
+  /** 与请求顺序一致的逐套结果 */
+  variants?: OutlineVariantItem[]
+  error?: AppError | string
+  error_message?: string
+}
+
+/**
+ * 同一选题批量生成多套差异化大纲变体（抖音图文量产）
+ *
+ * 后端串行调用 count 次大纲生成（每次都是一次付费 LLM 调用），
+ * 每套成功的变体立即存为草稿历史记录；单套失败不中断整批。
+ *
+ * @param topic 主题（必填）
+ * @param count 变体套数（2-5）
+ * @param dimensions 差异化维度（可选），缺省时后端默认全选
+ * @param brandId 品牌档案 ID（可选），透传现有品牌人设机制
+ * @param seoKeywords 目标搜索词（可选），透传现有搜索埋词机制
+ */
+export async function generateOutlineVariants(
+  topic: string,
+  count: number,
+  dimensions?: VariantDimension[],
+  brandId?: string,
+  seoKeywords?: string[]
+): Promise<OutlineVariantsResponse> {
+  const payload: Record<string, unknown> = { topic, count }
+  if (dimensions && dimensions.length > 0) {
+    payload.dimensions = dimensions
+  }
+  // 不使用品牌人设/搜索词时不携带对应键，与单篇大纲接口保持一致
+  if (brandId) {
+    payload.brand_id = brandId
+  }
+  if (seoKeywords && seoKeywords.length > 0) {
+    payload.seo_keywords = seoKeywords
+  }
+
+  const response = await http.post<OutlineVariantsResponse>(
+    '/outline/variants',
+    payload,
+    // N 套串行 LLM 调用：超时按套数放大，避免前端先超时把仍在计费的
+    // 批量任务误判为失败（超时对齐原则见 client.ts 的 LLM_TIMEOUT 注释）
+    { timeout: LLM_TIMEOUT * count }
+  )
+  return response.data
 }
 
 /**

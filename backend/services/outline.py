@@ -70,6 +70,122 @@ def build_seo_keywords_constraint(seo_keywords) -> str:
     )
 
 
+# ==================== 批量变体（抖音图文量产） ====================
+
+# 变体数量约束：抖音图文日更 3-5 条的量产节奏，单批最多 5 套
+MIN_VARIANT_COUNT = 2
+MAX_VARIANT_COUNT = 5
+DEFAULT_VARIANT_COUNT = 3
+
+# 差异化维度的中文名（变体标签与前端展示共用同一套文案）
+VARIANT_DIMENSION_LABELS = {
+    "hook": "换钩子",
+    "angle": "换角度",
+    "format": "换形式",
+}
+
+# 维度默认顺序（未指定 dimensions 时全选，轮转错位也按此顺序）
+DEFAULT_VARIANT_DIMENSIONS = ["hook", "angle", "format"]
+
+# 变体差异化指令池：三个维度各备 3-4 条具体指令文案（中文、贴合小红书/
+# 抖音语感）。生成第 i 套变体时按「变体序号 + 维度位次」错位轮转取指令，
+# 池长取 4/4/3 错开步长，保证全选三维度时 2-5 套的指令组合两两不同。
+# 指令全部在运行时以字符串拼接注入 prompt，不改 outline_prompt.txt 模板。
+VARIANT_INSTRUCTION_POOLS = {
+    "hook": [
+        "本套封面标题采用悬念反问式钩子：用一个直戳痛点的反问开头（如“为什么你的××一直没效果？”），把答案留到内页，让人不点进来心痒",
+        "本套封面标题采用数字清单式钩子：标题里带明确数字（如“3 个细节”“5 步搞定”），让人一眼觉得干货密度高、照做就行",
+        "本套封面标题采用反常识颠覆式钩子：直接推翻一个大家习以为常的做法（如“××根本不用买贵的”），制造“原来我一直做错了”的认知冲击",
+        "本套封面标题采用结果前置式钩子：把最诱人的结果或改变放到标题最前面（如“靠这招××直接翻倍”），先给甜头再讲方法",
+    ],
+    "angle": [
+        "本套从新手踩坑视角切入：以过来人口吻复盘最容易犯的错，先讲坑再给解法，通篇带“我踩过所以你别踩”的语气",
+        "本套从效率党视角切入：只讲最省时省力的做法，强调“懒人也能照做”，删掉一切可有可无的步骤",
+        "本套从对比测评视角切入：把两种以上做法或方案放在一起横向对比，给出明确的优劣结论，让读者直接抄作业",
+        "本套从亲身经历视角切入：用第一人称讲一段具体经历（时间、场景、转折都要有），让读者有强代入感",
+    ],
+    "format": [
+        "本套整体采用清单体结构：每页用序号或要点符号罗列干货短句，一页 3-5 条，读起来像可以直接截图保存的清单",
+        "本套整体采用问答体结构：每个内容页先抛出一个读者最关心的问题，再给出干脆利落的回答，一问一答推进",
+        "本套整体采用步骤教程结构：按“第一步/第二步”的操作顺序推进，每页聚焦一个动作，看完就能上手照做",
+    ],
+}
+
+
+def normalize_variant_dimensions(dimensions) -> List[str]:
+    """
+    归一化差异化维度：仅保留合法维度键并按默认顺序去重；
+    非列表/空列表/全非法时回落为默认全选，保证维度是可选增强、
+    脏数据绝不影响批量生成主链路。
+    """
+    if not isinstance(dimensions, list):
+        return list(DEFAULT_VARIANT_DIMENSIONS)
+    valid = [d for d in DEFAULT_VARIANT_DIMENSIONS if d in dimensions]
+    return valid or list(DEFAULT_VARIANT_DIMENSIONS)
+
+
+def build_variant_label(variant_index: int, dimensions: List[str]) -> str:
+    """
+    组装变体标签，如「变体2·换角度」「变体1·换钩子+换角度+换形式」。
+    用于历史记录标题标注与前端结果展示。
+    """
+    dims = normalize_variant_dimensions(dimensions)
+    dim_text = "+".join(VARIANT_DIMENSION_LABELS[d] for d in dims)
+    return f"变体{variant_index + 1}·{dim_text}"
+
+
+def build_variant_instruction(variant_index: int, dimensions: List[str]) -> str:
+    """
+    组装第 variant_index 套（0 起）变体的差异化指令 prompt 片段。
+
+    每个所选维度按「变体序号 + 维度位次」错位轮转从指令池取一条，
+    多维度组合两两错开；片段以字符串追加方式融入 prompt
+    （与品牌人设/搜索埋词同模式），不改动模板占位符。
+    """
+    dims = normalize_variant_dimensions(dimensions)
+    lines = []
+    for dim_pos, dim in enumerate(dims):
+        pool = VARIANT_INSTRUCTION_POOLS[dim]
+        lines.append(f"- {pool[(variant_index + dim_pos) % len(pool)]}")
+    return (
+        f"\n\n## 本套大纲的差异化要求（第 {variant_index + 1} 套变体）\n"
+        "这是同一主题批量生成的多套大纲之一，本套必须严格执行以下差异化指令，"
+        "并确保与其他套在开头钩子、切入角度、行文结构上明显不同、不复用同样的表达：\n"
+        + "\n".join(lines)
+    )
+
+
+def extract_title_hint(pages) -> str:
+    """
+    从解析后的页面列表提取标题预览（封面页首行文案）。
+
+    取第一个封面页（无封面页则取第一页）内容中去掉 [封面] 类型标记后的
+    第一行非空文本，并剥掉「标题：」前缀，供变体结果列表快速预览。
+    结构异常一律返回空字符串，不影响批量生成主链路。
+    """
+    if not isinstance(pages, list) or not pages:
+        return ""
+    cover = next(
+        (p for p in pages if isinstance(p, dict) and p.get("type") == "cover"),
+        None,
+    )
+    page = cover if cover is not None else pages[0]
+    content = page.get("content") if isinstance(page, dict) else None
+    if not isinstance(content, str):
+        return ""
+    for line in content.splitlines():
+        text = line.strip()
+        # 跳过空行与 [封面] 之类的页面类型标记行
+        if not text or re.fullmatch(r"\[\S+\]", text):
+            continue
+        for prefix in ("标题：", "标题:"):
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+                break
+        return text
+    return ""
+
+
 def clean_llm_text(text: str) -> str:
     """清洗 LLM 返回的文本：去掉首尾空白，剥掉可能的 ``` 代码块包裹"""
     if not text:
@@ -210,7 +326,8 @@ class OutlineService:
         topic: str,
         images: Optional[List[bytes]] = None,
         brand: Optional[Dict] = None,
-        seo_keywords: Optional[List[str]] = None
+        seo_keywords: Optional[List[str]] = None,
+        variant_instruction: Optional[str] = None
     ) -> str:
         """
         组装大纲生成 prompt（流式与非流式共用，保证两条链路产出完全一致）
@@ -220,6 +337,9 @@ class OutlineService:
             images: 参考图片列表（可选，仅影响 prompt 中的提示文案）
             brand: 品牌档案字典（可选），提供时追加品牌人设约束
             seo_keywords: 目标搜索词列表（可选），提供时追加搜索埋词要求
+            variant_instruction: 变体差异化指令片段（可选，批量变体专用），
+                提供时以字符串追加方式融入 prompt，不改模板占位符；
+                未提供时 prompt 与旧行为完全一致
         """
         prompt = self.prompt_template.format(topic=topic)
 
@@ -246,6 +366,12 @@ class OutlineService:
         if seo_constraint:
             logger.info(f"注入目标搜索词埋入要求: keywords={normalize_seo_keywords(seo_keywords)}")
             prompt += seo_constraint
+
+        # 变体差异化指令（批量变体专用，与品牌人设同模式）：
+        # 未提供时不追加任何内容，单篇生成链路行为完全不变
+        if variant_instruction:
+            logger.info("注入变体差异化指令片段")
+            prompt += variant_instruction
 
         return prompt
 
@@ -298,13 +424,15 @@ class OutlineService:
         topic: str,
         images: Optional[List[bytes]] = None,
         brand: Optional[Dict] = None,
-        seo_keywords: Optional[List[str]] = None
+        seo_keywords: Optional[List[str]] = None,
+        variant_instruction: Optional[str] = None
     ) -> Dict[str, Any]:
         try:
             logger.info(f"开始生成大纲: topic={topic[:50]}..., images={len(images) if images else 0}")
             # prompt 组装收敛到 build_outline_prompt，与流式端点共用同一逻辑
             prompt = self.build_outline_prompt(
-                topic, images=images, brand=brand, seo_keywords=seo_keywords
+                topic, images=images, brand=brand, seo_keywords=seo_keywords,
+                variant_instruction=variant_instruction
             )
 
             # 从配置中获取模型参数
@@ -387,6 +515,86 @@ class OutlineService:
                 "success": False,
                 "error": detailed_error
             }
+
+    def generate_outline_variants(
+        self,
+        topic: str,
+        count: int = DEFAULT_VARIANT_COUNT,
+        dimensions: Optional[List[str]] = None,
+        brand: Optional[Dict] = None,
+        seo_keywords: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        同一选题批量生成多套差异化大纲（抖音图文量产）
+
+        串行循环 count 次复用 generate_outline 的核心逻辑，每次注入不同的
+        变体差异化指令（运行时字符串拼接，不改 prompt 模板文件）；每次循环
+        都是一次付费 LLM 调用。单套失败不中断整批：记录错误后继续下一套。
+
+        参数：
+            topic: 用户主题
+            count: 变体套数（调用方需先校验 2-5 范围）
+            dimensions: 差异化维度键列表（hook/angle/format），
+                非法或缺省时回落为默认全选
+            brand / seo_keywords: 透传现有品牌人设与搜索埋词机制
+
+        返回：
+            {
+                "success": True,
+                "variants": [  # 与请求顺序一致，成功失败都在列
+                    {"variant_index": 0, "variant_label": "变体1·换钩子+…",
+                     "success": True, "outline": 原始文本, "pages": 页面列表}
+                    或
+                    {"variant_index": 1, "variant_label": "…",
+                     "success": False, "error": "错误详情"}
+                ],
+                "succeeded": 成功套数,
+                "failed": 失败套数,
+            }
+        """
+        dims = normalize_variant_dimensions(dimensions)
+        logger.info(
+            f"开始批量生成大纲变体: topic={topic[:50]}..., "
+            f"count={count}, dimensions={dims}"
+        )
+
+        variants: List[Dict[str, Any]] = []
+        for i in range(count):
+            label = build_variant_label(i, dims)
+            instruction = build_variant_instruction(i, dims)
+            # generate_outline 内部已捕获所有异常并返回 success=False，
+            # 天然满足「单套失败不中断整批」
+            result = self.generate_outline(
+                topic,
+                brand=brand,
+                seo_keywords=seo_keywords,
+                variant_instruction=instruction,
+            )
+            if result.get("success"):
+                variants.append({
+                    "variant_index": i,
+                    "variant_label": label,
+                    "success": True,
+                    "outline": result.get("outline", ""),
+                    "pages": result.get("pages", []),
+                })
+            else:
+                logger.warning(f"变体生成失败（继续下一套）: {label}")
+                variants.append({
+                    "variant_index": i,
+                    "variant_label": label,
+                    "success": False,
+                    "error": result.get("error", "大纲生成失败"),
+                })
+
+        succeeded = sum(1 for v in variants if v["success"])
+        logger.info(f"批量变体生成完成: 成功 {succeeded}/{count} 套")
+        return {
+            "success": True,
+            "variants": variants,
+            "succeeded": succeeded,
+            "failed": count - succeeded,
+        }
 
 
 def get_outline_service() -> OutlineService:
