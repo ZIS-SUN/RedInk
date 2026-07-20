@@ -15,7 +15,8 @@ import json
 import base64
 import logging
 from flask import Blueprint, request, jsonify, Response, send_from_directory
-from backend.errors import ensure_app_error
+from backend.errors import AppErrorException, ensure_app_error
+from backend.paths import get_data_root
 from backend.services.image import get_image_service
 from .utils import (
     api_error_response,
@@ -30,6 +31,18 @@ logger = logging.getLogger(__name__)
 # 任务 ID 仅允许 UUID 风格字符，文件名仅允许安全的图片名（可含 thumb_ 前缀）
 _TASK_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]+$')
 _IMAGE_FILENAME_PATTERN = re.compile(r'^[A-Za-z0-9_.-]+\.(png|jpg|jpeg|webp)$', re.IGNORECASE)
+
+# 扩展名 → MIME 类型（不依赖系统 mimetypes 注册表，保证 webp 等推断一致）
+_IMAGE_MIMETYPES = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+}
+
+# 用户参考图上限：最多 5 张，单张解码后不超过 20MB
+_MAX_USER_IMAGES = 5
+_MAX_USER_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 def create_image_blueprint():
@@ -158,11 +171,8 @@ def create_image_blueprint():
             # 检查是否请求缩略图
             thumbnail = request.args.get('thumbnail', 'true').lower() == 'true'
 
-            # 构建 history 目录路径
-            history_root = os.path.realpath(os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "history"
-            ))
+            # 构建 history 目录路径（可写数据根目录下）
+            history_root = os.path.realpath(str(get_data_root() / "history"))
 
             def _safe_send(target_filename: str):
                 """经 realpath 二次确认目标仍在 history_root 内后再发送"""
@@ -174,10 +184,12 @@ def create_image_blueprint():
                 if not os.path.isfile(filepath):
                     return None
                 # send_from_directory 内部使用 safe_join，双重保险
+                # MIME 类型按扩展名推断，避免 jpg/webp 被硬编码成 image/png
+                ext = os.path.splitext(target_filename)[1].lower()
                 return send_from_directory(
                     history_root,
                     os.path.join(task_id, target_filename),
-                    mimetype='image/png'
+                    mimetype=_IMAGE_MIMETYPES.get(ext, 'image/png')
                 )
 
             if thumbnail:
@@ -464,21 +476,58 @@ def _parse_base64_images(images_base64: list) -> list:
     """
     解析 base64 编码的图片列表
 
+    限制图片数量（≤5）与单张解码后大小（≤20MB），
+    非法数据抛出 400 校验错误而不是 500。
+
     Args:
         images_base64: base64 编码的图片字符串列表
 
     Returns:
         list: 解码后的图片二进制数据列表
+
+    Raises:
+        AppErrorException: 数量超限 / 单张过大 / base64 非法时抛出（400）
     """
     if not images_base64:
         return []
 
+    if not isinstance(images_base64, list):
+        raise AppErrorException(validation_error(
+            "user_images 必须是图片列表", "请以列表形式提交 base64 编码的参考图片。"
+        ))
+
+    if len(images_base64) > _MAX_USER_IMAGES:
+        raise AppErrorException(validation_error(
+            f"参考图片数量超出上限（最多 {_MAX_USER_IMAGES} 张）",
+            "请减少参考图片数量后重试。",
+        ))
+
     images = []
     for img_b64 in images_base64:
+        if not isinstance(img_b64, str):
+            raise AppErrorException(validation_error(
+                "参考图片必须是 base64 字符串", "请重新上传图片后重试。"
+            ))
+
         # 移除可能的 data URL 前缀（如 data:image/png;base64,）
         if ',' in img_b64:
             img_b64 = img_b64.split(',')[1]
-        images.append(base64.b64decode(img_b64))
+
+        # 去掉空白字符（部分客户端会在 base64 中插入换行），再严格校验解码
+        img_b64 = ''.join(img_b64.split())
+        try:
+            decoded = base64.b64decode(img_b64, validate=True)
+        except Exception:
+            raise AppErrorException(validation_error(
+                "参考图片不是合法的 base64 数据", "请重新上传图片后重试。"
+            ))
+
+        if len(decoded) > _MAX_USER_IMAGE_BYTES:
+            raise AppErrorException(validation_error(
+                f"单张参考图片过大（解码后超过 {_MAX_USER_IMAGE_BYTES // (1024 * 1024)}MB）",
+                "请压缩图片后重新上传。",
+            ))
+        images.append(decoded)
 
     return images
 

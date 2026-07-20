@@ -1,7 +1,8 @@
 import logging
 import os
 import yaml
-from pathlib import Path
+
+from backend.paths import get_data_root
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class Config:
         if cls._image_providers_config is not None:
             return cls._image_providers_config
 
-        config_path = Path(__file__).parent.parent / 'image_providers.yaml'
+        config_path = get_data_root() / 'image_providers.yaml'
         logger.debug(f"加载图片服务商配置: {config_path}")
 
         if not config_path.exists():
@@ -56,7 +57,7 @@ class Config:
         if cls._text_providers_config is not None:
             return cls._text_providers_config
 
-        config_path = Path(__file__).parent.parent / 'text_providers.yaml'
+        config_path = get_data_root() / 'text_providers.yaml'
         logger.debug(f"加载文本服务商配置: {config_path}")
 
         if not config_path.exists():

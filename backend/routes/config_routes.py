@@ -9,12 +9,17 @@
 
 import ipaddress
 import logging
+import os
 import socket
+import string
+import tempfile
+import threading
 from pathlib import Path
 from typing import NamedTuple, Optional
 from urllib.parse import urlparse
 import yaml
 from flask import Blueprint, request, jsonify
+from backend.paths import get_data_root, resource_path
 from .utils import (
     api_error_response,
     prepare_providers_for_response,
@@ -29,10 +34,18 @@ class LlmSmokeResult(NamedTuple):
     source: str
     finish_reason: str
 
-# 配置文件路径
-CONFIG_DIR = Path(__file__).parent.parent.parent
+# 配置文件路径（统一放在可写数据根目录下）
+CONFIG_DIR = get_data_root()
 IMAGE_CONFIG_PATH = CONFIG_DIR / 'image_providers.yaml'
 TEXT_CONFIG_PATH = CONFIG_DIR / 'text_providers.yaml'
+
+# 配置文件写入锁：串行化「读-改-写」，防止并发保存互相覆盖或写坏 YAML
+# （RLock：_update_provider_config 持锁期间还会调用 _write_config）
+_CONFIG_WRITE_LOCK = threading.RLock()
+
+# 图片 Prompt 模板占位符（PUT 时必须包含 REQUIRED 中的占位符）
+IMAGE_PROMPT_PLACEHOLDERS = ("page_content", "page_type", "user_topic", "full_outline")
+IMAGE_PROMPT_REQUIRED_PLACEHOLDERS = ("page_content", "page_type")
 
 
 # 禁止访问的地址段（SSRF 防护）。
@@ -222,6 +235,100 @@ def create_config_blueprint():
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/config"})
 
+    # ==================== 图片 Prompt 模板 ====================
+
+    @config_bp.route('/config/image-prompt', methods=['GET'])
+    def get_image_prompt():
+        """
+        获取当前生效的图片生成 Prompt 模板
+
+        返回：
+        - success: 是否成功
+        - template: 当前生效模板全文（自定义优先，否则包内默认）
+        - is_custom: 是否为用户自定义模板
+        - placeholders: 模板支持的占位符列表
+        """
+        try:
+            custom_template = _read_custom_image_prompt()
+            if custom_template is not None:
+                template = custom_template
+                is_custom = True
+            else:
+                template = _read_default_image_prompt()
+                is_custom = False
+
+            return jsonify({
+                "success": True,
+                "template": template,
+                "is_custom": is_custom,
+                "placeholders": list(IMAGE_PROMPT_PLACEHOLDERS),
+            })
+        except Exception as e:
+            return api_error_response(e, context={"endpoint": "/api/config/image-prompt"})
+
+    @config_bp.route('/config/image-prompt', methods=['PUT'])
+    def save_image_prompt():
+        """
+        保存自定义图片生成 Prompt 模板
+
+        请求体：
+        - template: 模板全文（必须包含 {page_content} 和 {page_type} 占位符）
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            template = data.get('template')
+
+            if not isinstance(template, str) or not template.strip():
+                return api_error_response(
+                    validation_error("template 不能为空", "请填写模板内容后再保存。")
+                )
+
+            missing = [
+                f"{{{name}}}" for name in IMAGE_PROMPT_REQUIRED_PLACEHOLDERS
+                if f"{{{name}}}" not in template
+            ]
+            if missing:
+                return api_error_response(
+                    validation_error(
+                        f"模板缺少必需占位符: {'、'.join(missing)}",
+                        "模板必须包含 {page_content} 和 {page_type} 两个占位符。",
+                    )
+                )
+
+            render_error = _validate_image_prompt_template(template)
+            if render_error:
+                return api_error_response(validation_error(*render_error))
+
+            custom_path = _custom_image_prompt_path()
+            custom_path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(custom_path, template)
+
+            _reset_image_service_safely()
+
+            return jsonify({
+                "success": True,
+                "message": "图片 Prompt 模板已保存"
+            })
+        except Exception as e:
+            return api_error_response(e, context={"endpoint": "/api/config/image-prompt"})
+
+    @config_bp.route('/config/image-prompt', methods=['DELETE'])
+    def reset_image_prompt():
+        """删除自定义图片生成 Prompt 模板，恢复包内默认"""
+        try:
+            custom_path = _custom_image_prompt_path()
+            if custom_path.exists():
+                custom_path.unlink()
+
+            _reset_image_service_safely()
+
+            return jsonify({
+                "success": True,
+                "message": "已恢复默认图片 Prompt 模板"
+            })
+        except Exception as e:
+            return api_error_response(e, context={"endpoint": "/api/config/image-prompt"})
+
     # ==================== 连接测试 ====================
 
     @config_bp.route('/config/test', methods=['POST'])
@@ -267,6 +374,17 @@ def create_config_blueprint():
             # 如果没有提供 api_key，从配置文件读取
             if not config['api_key'] and provider_name:
                 config = _load_provider_config(provider_type, provider_name, config)
+                # 安全约束（与 _update_provider_config 对齐）：请求的 base_url 与已保存值
+                # 不一致且未显式提供 api_key 时，拒绝回填已存密钥，
+                # 避免把已保存的真实 Key 外发到攻击者可控地址
+                if config.pop('_api_key_withheld', False) and not config['api_key']:
+                    return api_error_response(
+                        validation_error(
+                            "base_url 与已保存配置不一致，已拒绝使用已保存的 API Key",
+                            "修改 Base URL 后请重新输入 API Key 再测试连接。",
+                        ),
+                        context=_error_context(provider_type, provider_name, config),
+                    )
 
             if not config['api_key']:
                 return api_error_response(
@@ -301,6 +419,77 @@ def create_config_blueprint():
 
 # ==================== 辅助函数 ====================
 
+def _validate_image_prompt_template(template: str):
+    """
+    用 string.Formatter 预解析模板，拦截未知占位符与未配对的大括号，
+    避免保存后在实际渲染（str.format）时才抛错导致图片生成失败。
+
+    Returns:
+        Optional[tuple]: 不合法时返回 (detail, suggestion)，合法返回 None
+    """
+    allowed = set(IMAGE_PROMPT_PLACEHOLDERS)
+    try:
+        field_names = [
+            field_name
+            for _, field_name, _, _ in string.Formatter().parse(template)
+            if field_name is not None
+        ]
+    except ValueError:
+        return (
+            "模板包含未配对的大括号",
+            "模板存在裸大括号或大括号未配对；如需输出大括号本身请写 {{ }}。",
+        )
+
+    unknown = [name for name in field_names if name not in allowed]
+    if unknown:
+        shown = "、".join(f"{{{name}}}" for name in dict.fromkeys(unknown))
+        return (
+            f"模板包含无法识别的占位符: {shown}",
+            "仅支持 {page_content}、{page_type}、{user_topic}、{full_outline} 四个占位符；"
+            "如需输出大括号本身请写 {{ }}。",
+        )
+    return None
+
+
+def _atomic_write_text(path: Path, content: str):
+    """临时文件 + os.replace 原子写入，避免进程中断留下半截文件"""
+    tmp_path = path.with_name(path.name + '.tmp')
+    tmp_path.write_text(content, encoding='utf-8')
+    os.replace(tmp_path, path)
+
+
+def _custom_image_prompt_path() -> Path:
+    """自定义图片 Prompt 模板路径（每次调用取最新数据根目录，便于测试隔离）"""
+    return get_data_root() / 'custom_prompts' / 'image_prompt.txt'
+
+
+def _read_custom_image_prompt() -> Optional[str]:
+    """读取自定义模板；不存在或为空时返回 None"""
+    custom_path = _custom_image_prompt_path()
+    if custom_path.exists():
+        content = custom_path.read_text(encoding='utf-8')
+        if content.strip():
+            return content
+    return None
+
+
+def _read_default_image_prompt() -> str:
+    """读取包内默认图片 Prompt 模板"""
+    default_path = resource_path('backend/prompts/image_prompt.txt')
+    if not default_path.exists():
+        return ""
+    return default_path.read_text(encoding='utf-8')
+
+
+def _reset_image_service_safely():
+    """重置图片服务实例，使新模板/配置在下次请求时生效"""
+    try:
+        from backend.services.image import reset_image_service
+        reset_image_service()
+    except Exception:
+        pass
+
+
 def _read_config(path: Path, default: dict) -> dict:
     """读取配置文件"""
     if path.exists():
@@ -310,9 +499,26 @@ def _read_config(path: Path, default: dict) -> dict:
 
 
 def _write_config(path: Path, config: dict):
-    """写入配置文件"""
-    with open(path, 'w', encoding='utf-8') as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+    """
+    写入配置文件（原子写：先写同目录临时文件，再 os.replace() 覆盖）
+
+    直写目标文件时若进程中途被杀或并发写入，会留下半截 YAML，
+    导致 Config.load 抛错、全部生成功能瘫痪。
+    """
+    with _CONFIG_WRITE_LOCK:
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=".tmp_", suffix=".yaml", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 def _update_provider_config(config_path: Path, new_data: dict):
@@ -323,6 +529,13 @@ def _update_provider_config(config_path: Path, new_data: dict):
         config_path: 配置文件路径
         new_data: 新的配置数据
     """
+    # 整个「读-改-写」持锁，避免并发保存时后写者基于旧配置覆盖先写者的更新
+    with _CONFIG_WRITE_LOCK:
+        _update_provider_config_locked(config_path, new_data)
+
+
+def _update_provider_config_locked(config_path: Path, new_data: dict):
+    """_update_provider_config 的持锁实现（调用方须已持有 _CONFIG_WRITE_LOCK）"""
     # 读取现有配置
     existing_config = _read_config(config_path, {'providers': {}})
 
@@ -363,10 +576,10 @@ def _update_provider_config(config_path: Path, new_data: dict):
 
 
 def _clear_config_cache():
-    """清除配置缓存"""
+    """清除配置缓存（图片 + 文本），确保下次使用时读取新配置"""
     try:
         from backend.config import Config
-        Config._image_providers_config = None
+        Config.reload_config()
     except Exception:
         pass
 
@@ -402,7 +615,18 @@ def _load_provider_config(provider_type: str, provider_name: str, config: dict) 
 
             if provider_name in providers:
                 saved = providers[provider_name]
-                config['api_key'] = saved.get('api_key')
+
+                # 仅当请求的 base_url 与已保存值一致（或未提供）时才回填已存密钥；
+                # 不一致时打标记，由调用方返回校验错误（防止密钥外发到新地址）
+                requested_base_url = config.get('base_url')
+                base_url_changed = (
+                    bool(requested_base_url)
+                    and (requested_base_url or None) != (saved.get('base_url') or None)
+                )
+                if base_url_changed:
+                    config['_api_key_withheld'] = True
+                else:
+                    config['api_key'] = saved.get('api_key')
 
                 if not config['base_url']:
                     config['base_url'] = saved.get('base_url')

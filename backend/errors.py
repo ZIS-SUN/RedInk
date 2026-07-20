@@ -42,6 +42,19 @@ class AppError:
         return f"{self.title}：{self.detail}"
 
 
+class AppErrorException(Exception):
+    """携带 AppError 的异常。
+
+    服务层需要"抛错"而非"返回错误"时使用（AppError 本身是 dataclass，
+    不能直接 raise）。路由层通过 api_error_response / ensure_app_error
+    统一解包为结构化错误响应。
+    """
+
+    def __init__(self, app_error: "AppError"):
+        super().__init__(app_error.to_message())
+        self.app_error = app_error
+
+
 def error_payload(error: Union[AppError, Exception, str], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     app_error = ensure_app_error(error, context=context)
     return {
@@ -52,6 +65,8 @@ def error_payload(error: Union[AppError, Exception, str], context: Optional[Dict
 
 
 def ensure_app_error(error: Union[AppError, Exception, str], context: Optional[Dict[str, Any]] = None) -> AppError:
+    if isinstance(error, AppErrorException):
+        error = error.app_error
     if isinstance(error, AppError):
         if context:
             diagnostics = dict(error.diagnostics)
@@ -67,6 +82,19 @@ def ensure_app_error(error: Union[AppError, Exception, str], context: Optional[D
             )
         return error
     return classify_error(error, context=context)
+
+
+# 服务层实际抛出的、应归类为 404 的"资源不存在"精确短语
+_NOT_FOUND_PHRASES = (
+    "历史记录不存在",
+    "任务不存在",
+    "任务目录不存在",
+    "记录不存在",       # 覆盖"表现记录不存在"等
+    "计划条目不存在",
+    "账号不存在",
+    "品牌档案不存在",
+    "图片不存在",
+)
 
 
 def classify_error(error: Union[Exception, str], context: Optional[Dict[str, Any]] = None) -> AppError:
@@ -234,7 +262,9 @@ def classify_error(error: Union[Exception, str], context: Optional[Dict[str, Any
             diagnostics=diagnostics,
         )
 
-    if "历史记录不存在" in raw or "任务不存在" in raw or "不存在" in raw:
+    # 仅匹配服务层真正表示"资源不存在"的精确短语，避免把配置类错误
+    # （如"配置文件不存在""服务商不存在"）误判为 404
+    if any(phrase in raw for phrase in _NOT_FOUND_PHRASES):
         return AppError(
             code="RESOURCE_NOT_FOUND",
             title="资源不存在",

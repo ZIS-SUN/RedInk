@@ -10,18 +10,20 @@
 
 import ipaddress
 import logging
-import os
 import re
 import socket
-import yaml
 from html.parser import HTMLParser
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 
 import requests
 
-from backend.utils.text_client import get_text_chat_client
+from backend.utils.llm_utils import (
+    get_text_client,
+    load_prompt_template,
+    load_text_config,
+    resolve_generation_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,69 +173,13 @@ class LinkExtractService:
     # ==================== 配置与客户端（与 OutlineService 保持一致的模式） ====================
 
     def _load_text_config(self) -> dict:
-        config_path = Path(__file__).parent.parent.parent / 'text_providers.yaml'
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    return yaml.safe_load(f) or {}
-            except yaml.YAMLError as e:
-                logger.error(f"文本配置 YAML 解析失败: {e}")
-                raise ValueError(
-                    f"文本配置文件格式错误: text_providers.yaml\n"
-                    f"YAML 解析错误: {e}\n"
-                    "解决方案：检查 YAML 缩进和语法"
-                )
-
-        logger.warning("text_providers.yaml 不存在，使用默认配置")
-        return {
-            'active_provider': 'google_gemini',
-            'providers': {
-                'google_gemini': {
-                    'type': 'google_gemini',
-                    'model': 'gemini-2.0-flash-exp',
-                    'temperature': 1.0,
-                    'max_output_tokens': 8000
-                }
-            }
-        }
+        return load_text_config()
 
     def _get_client(self):
-        active_provider = self.text_config.get('active_provider', 'google_gemini')
-        providers = self.text_config.get('providers', {})
-
-        if not providers:
-            raise ValueError(
-                "未找到任何文本生成服务商配置。\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加文本生成服务商\n"
-                "2. 或手动编辑 text_providers.yaml 文件"
-            )
-
-        if active_provider not in providers:
-            available = ', '.join(providers.keys())
-            raise ValueError(
-                f"未找到文本生成服务商配置: {active_provider}\n"
-                f"可用的服务商: {available}\n"
-                "解决方案：在系统设置中选择一个可用的服务商"
-            )
-
-        provider_config = providers.get(active_provider, {})
-        if not provider_config.get('api_key'):
-            raise ValueError(
-                f"文本服务商 {active_provider} 未配置 API Key\n"
-                "解决方案：在系统设置页面编辑该服务商，填写 API Key"
-            )
-
-        return get_text_chat_client(provider_config)
+        return get_text_client(self.text_config)
 
     def _load_prompt_template(self) -> str:
-        prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "prompts",
-            "link_prompt.txt"
-        )
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            return f.read()
+        return load_prompt_template('backend/prompts/link_prompt.txt')
 
     # ==================== 网页抓取 ====================
 
@@ -423,11 +369,9 @@ class LinkExtractService:
 
             prompt = self.prompt_template.format(article_text=article_text)
 
-            active_provider = self.text_config.get('active_provider', 'google_gemini')
-            provider_config = self.text_config.get('providers', {}).get(active_provider, {})
-            model = provider_config.get('model', 'gemini-2.0-flash-exp')
-            temperature = provider_config.get('temperature', 1.0)
-            max_output_tokens = provider_config.get('max_output_tokens', 8000)
+            model, temperature, max_output_tokens = resolve_generation_params(
+                self.text_config, default_max_output_tokens=8000
+            )
 
             logger.info(f"调用文本生成 API 提炼大纲: model={model}, 正文长度={len(article_text)}")
             response_text = self.client.generate_text(

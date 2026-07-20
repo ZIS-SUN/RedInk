@@ -2,10 +2,13 @@
 import time
 import random
 import base64
+import logging
 import requests
 from functools import wraps
 from typing import List, Optional, Union
 from .image_compressor import compress_image
+
+logger = logging.getLogger(__name__)
 
 
 class ApiRateLimitError(Exception):
@@ -35,7 +38,7 @@ def retry_on_429(max_retries=3, base_delay=2):
                     if is_rate_limited:
                         if attempt < max_retries - 1:
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
-                            print(f"[重试] 遇到限流，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
+                            logger.warning(f"[重试] 遇到限流，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                             time.sleep(wait_time)
                             continue
                     raise

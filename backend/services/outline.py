@@ -1,14 +1,30 @@
 import logging
-import os
 import re
-import base64
-import yaml
-from pathlib import Path
 from typing import Dict, List, Any, Optional
-from backend.utils.text_client import get_text_chat_client
+from backend.utils.llm_utils import (
+    get_text_client,
+    load_prompt_template,
+    load_text_config,
+    resolve_generation_params,
+)
 from backend.services.rewrite import build_brand_constraint
 
 logger = logging.getLogger(__name__)
+
+
+def clean_llm_text(text: str) -> str:
+    """清洗 LLM 返回的文本：去掉首尾空白，剥掉可能的 ``` 代码块包裹"""
+    if not text:
+        return ""
+
+    cleaned = text.strip()
+
+    # 剥掉 ```lang\n...\n``` 或 ```\n...\n``` 形式的整体包裹
+    fence_match = re.match(r'^```[^\n]*\n([\s\S]*?)\n?```$', cleaned)
+    if fence_match:
+        cleaned = fence_match.group(1).strip()
+
+    return cleaned
 
 
 class OutlineService:
@@ -21,80 +37,104 @@ class OutlineService:
 
     def _load_text_config(self) -> dict:
         """加载文本生成配置"""
-        config_path = Path(__file__).parent.parent.parent / 'text_providers.yaml'
-        logger.debug(f"加载文本配置: {config_path}")
-
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f) or {}
-                logger.debug(f"文本配置加载成功: active={config.get('active_provider')}")
-                return config
-            except yaml.YAMLError as e:
-                logger.error(f"文本配置 YAML 解析失败: {e}")
-                raise ValueError(
-                    f"文本配置文件格式错误: text_providers.yaml\n"
-                    f"YAML 解析错误: {e}\n"
-                    "解决方案：检查 YAML 缩进和语法"
-                )
-
-        logger.warning("text_providers.yaml 不存在，使用默认配置")
-        # 默认配置
-        return {
-            'active_provider': 'google_gemini',
-            'providers': {
-                'google_gemini': {
-                    'type': 'google_gemini',
-                    'model': 'gemini-2.0-flash-exp',
-                    'temperature': 1.0,
-                    'max_output_tokens': 8000
-                }
-            }
-        }
+        return load_text_config()
 
     def _get_client(self):
         """根据配置获取客户端"""
-        active_provider = self.text_config.get('active_provider', 'google_gemini')
-        providers = self.text_config.get('providers', {})
-
-        if not providers:
-            logger.error("未找到任何文本生成服务商配置")
-            raise ValueError(
-                "未找到任何文本生成服务商配置。\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加文本生成服务商\n"
-                "2. 或手动编辑 text_providers.yaml 文件"
-            )
-
-        if active_provider not in providers:
-            available = ', '.join(providers.keys())
-            logger.error(f"文本服务商 [{active_provider}] 不存在，可用: {available}")
-            raise ValueError(
-                f"未找到文本生成服务商配置: {active_provider}\n"
-                f"可用的服务商: {available}\n"
-                "解决方案：在系统设置中选择一个可用的服务商"
-            )
-
-        provider_config = providers.get(active_provider, {})
-
-        if not provider_config.get('api_key'):
-            logger.error(f"文本服务商 [{active_provider}] 未配置 API Key")
-            raise ValueError(
-                f"文本服务商 {active_provider} 未配置 API Key\n"
-                "解决方案：在系统设置页面编辑该服务商，填写 API Key"
-            )
-
-        logger.info(f"使用文本服务商: {active_provider} (type={provider_config.get('type')})")
-        return get_text_chat_client(provider_config)
+        return get_text_client(self.text_config)
 
     def _load_prompt_template(self) -> str:
-        prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "prompts",
-            "outline_prompt.txt"
-        )
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            return f.read()
+        return load_prompt_template('backend/prompts/outline_prompt.txt')
+
+    def _load_polish_prompt_template(self) -> str:
+        return load_prompt_template('backend/prompts/polish_page_prompt.txt')
+
+    def polish_page(
+        self,
+        content: str,
+        page_type: str = "content",
+        topic: str = "",
+        instruction: str = ""
+    ) -> Dict[str, Any]:
+        """
+        单页 AI 润色：对大纲中某一页的文案按指令重写
+
+        参数：
+            content: 该页原文
+            page_type: 页面类型（cover/content/summary）
+            topic: 整篇主题（可为空）
+            instruction: 润色指令（已经过路由层白名单映射的中文描述）
+
+        返回：
+            {"success": True, "content": "润色后的文案"} 或 {"success": False, "error": "..."}
+        """
+        try:
+            logger.info(f"开始单页润色: type={page_type}, 原文长度={len(content)}")
+
+            template = self._load_polish_prompt_template()
+            prompt = template.format(
+                page_content=content,
+                page_type=page_type or "content",
+                user_topic=topic.strip() if topic and topic.strip() else "未提供",
+                instruction=instruction,
+            )
+
+            # 与大纲生成使用同一 provider/model 配置
+            model, temperature, max_output_tokens = resolve_generation_params(
+                self.text_config, default_max_output_tokens=8000
+            )
+
+            logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
+            raw_text = self.client.generate_text(
+                prompt=prompt,
+                model=model,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+            )
+
+            polished = clean_llm_text(raw_text)
+            if not polished:
+                raise ValueError("AI 返回的润色结果为空")
+
+            logger.info(f"单页润色完成，结果长度={len(polished)}")
+            return {
+                "success": True,
+                "content": polished,
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"单页润色失败: {error_msg}")
+
+            if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower() or "401" in error_msg:
+                detailed_error = (
+                    f"API 认证失败。\n"
+                    f"错误详情: {error_msg}\n"
+                    "解决方案：在系统设置页面检查并更新 API Key"
+                )
+            elif "timeout" in error_msg.lower() or "连接" in error_msg:
+                detailed_error = (
+                    f"网络连接失败。\n"
+                    f"错误详情: {error_msg}\n"
+                    "解决方案：检查网络连接，稍后重试"
+                )
+            elif "rate" in error_msg.lower() or "429" in error_msg or "quota" in error_msg.lower():
+                detailed_error = (
+                    f"API 配额限制。\n"
+                    f"错误详情: {error_msg}\n"
+                    "解决方案：等待配额重置，或升级 API 套餐"
+                )
+            else:
+                detailed_error = (
+                    f"单页润色失败。\n"
+                    f"错误详情: {error_msg}\n"
+                    "建议：检查文本生成服务商配置后重试"
+                )
+
+            return {
+                "success": False,
+                "error": detailed_error
+            }
 
     def _parse_outline(self, outline_text: str) -> List[Dict[str, Any]]:
         # 按 <page> 分割页面（兼容旧的 --- 分隔符）
@@ -151,13 +191,9 @@ class OutlineService:
                 prompt += brand_constraint
 
             # 从配置中获取模型参数
-            active_provider = self.text_config.get('active_provider', 'google_gemini')
-            providers = self.text_config.get('providers', {})
-            provider_config = providers.get(active_provider, {})
-
-            model = provider_config.get('model', 'gemini-2.0-flash-exp')
-            temperature = provider_config.get('temperature', 1.0)
-            max_output_tokens = provider_config.get('max_output_tokens', 8000)
+            model, temperature, max_output_tokens = resolve_generation_params(
+                self.text_config, default_max_output_tokens=8000
+            )
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
             outline_text = self.client.generate_text(

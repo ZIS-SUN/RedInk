@@ -29,6 +29,8 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from backend.paths import get_data_root
+
 logger = logging.getLogger(__name__)
 
 # 守护实例锁的惰性创建（实例可能通过 __new__ 构造，绕过 __init__）
@@ -53,10 +55,7 @@ class BrandService:
 
         创建 brand_kits 存储目录和数据文件（项目根目录/brand_kits/brands.json）
         """
-        self.brand_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "brand_kits"
-        )
+        self.brand_dir = str(get_data_root() / "brand_kits")
         os.makedirs(self.brand_dir, exist_ok=True)
 
         self.store_file = os.path.join(self.brand_dir, "brands.json")
@@ -316,6 +315,32 @@ class BrandService:
         for brand in store.get("brands", []):
             if brand.get("id") == active_id:
                 return brand
+        return None
+
+
+def resolve_brand_for_prompt(brand_id: Optional[str] = None) -> Optional[Dict]:
+    """
+    解析用于 prompt 注入的品牌档案（软失败，绝不抛异常）：
+
+    - 提供 brand_id 时按 ID 查找对应档案
+    - 未提供 brand_id 时回退「当前启用」档案
+    - 档案不存在 / 数据读取异常时一律返回 None，调用方静默跳过注入，
+      绝不能让主功能因品牌数据问题报错
+
+    Returns:
+        Optional[Dict]: 品牌档案字典，取不到时为 None
+    """
+    try:
+        service = get_brand_service()
+        brand_id = str(brand_id or "").strip()
+        if brand_id:
+            brand = service.get_brand(brand_id)
+            if brand is None:
+                logger.warning("品牌档案不存在，忽略品牌人设: brand_id=%s", brand_id)
+            return brand
+        return service.get_active_brand()
+    except Exception as e:
+        logger.warning("读取品牌档案失败，忽略品牌人设: %s", e)
         return None
 
 

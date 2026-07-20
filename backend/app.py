@@ -2,10 +2,10 @@ import hmac
 import logging
 import os
 import sys
-from pathlib import Path
 from flask import Flask, request, send_from_directory
 from flask_cors import CORS
 from backend.config import Config
+from backend.paths import get_data_root, resource_path
 from backend.routes import register_routes
 
 
@@ -42,8 +42,8 @@ def create_app():
     logger = setup_logging()
     logger.info("🚀 正在启动 红墨 AI图文生成器...")
 
-    # 检查是否存在前端构建产物（Docker 环境）
-    frontend_dist = Path(__file__).parent.parent / 'frontend' / 'dist'
+    # 检查是否存在前端构建产物（Docker / 桌面打包环境）
+    frontend_dist = resource_path('frontend/dist')
     if frontend_dist.exists():
         logger.info("📦 检测到前端构建产物，启用静态文件托管模式")
         app = Flask(
@@ -57,6 +57,9 @@ def create_app():
 
     app.config.from_object(Config)
 
+    # 请求体大小上限（50MB），防止超大请求耗尽内存
+    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+
     CORS(app, resources={
         r"/api/*": {
             "origins": Config.CORS_ORIGINS,
@@ -69,21 +72,41 @@ def create_app():
     # 可选的部署级访问令牌鉴权（未设置 REDINK_ACCESS_TOKEN 时不启用，本地开箱即用）
     _register_access_token_auth(app, logger)
 
+    # Host 头校验（防 DNS rebinding；启用令牌鉴权或显式暴露部署时不启用）
+    _register_host_guard(app, logger)
+
     # 注册所有 API 路由
     register_routes(app)
+    from backend.routes.review_routes import create_review_blueprint; app.register_blueprint(create_review_blueprint(), url_prefix='/api')
+    from backend.routes.publish_routes import create_publish_blueprint; app.register_blueprint(create_publish_blueprint(), url_prefix='/api')
 
     # 启动时验证配置
     _validate_config_on_startup(logger)
+
+    # 404 处理：无论是否托管前端静态资源，API 路径的 404 都返回统一的
+    # 结构化 JSON（避免开发模式下前端拿到 HTML 调试页当作 API 响应解析失败）
+    @app.errorhandler(404)
+    def fallback(e):
+        if request.path.startswith('/api/'):
+            from backend.errors import AppError
+            from backend.routes.utils import api_error_response
+            return api_error_response(AppError(
+                code="NOT_FOUND",
+                title="接口不存在",
+                detail=f"未找到接口: {request.path}",
+                suggestion="请检查请求路径和方法是否正确。",
+                status=404,
+                retryable=False,
+            ))
+        # 打包模式：非 API 404 回退到前端页面（Vue Router HTML5 History 模式）
+        if frontend_dist.exists():
+            return send_from_directory(app.static_folder, 'index.html')
+        return e
 
     # 根据是否有前端构建产物决定根路由行为
     if frontend_dist.exists():
         @app.route('/')
         def serve_index():
-            return send_from_directory(app.static_folder, 'index.html')
-
-        # 处理 Vue Router 的 HTML5 History 模式
-        @app.errorhandler(404)
-        def fallback(e):
             return send_from_directory(app.static_folder, 'index.html')
     else:
         @app.route('/')
@@ -149,15 +172,74 @@ def _register_access_token_auth(app, logger):
         ))
 
 
+def _register_host_guard(app, logger):
+    """注册 Host 头校验，防御 DNS rebinding 攻击。
+
+    仅在本机默认部署形态下启用：恶意网页可让受害者浏览器把攻击者域名
+    解析到 127.0.0.1，从而绕过同源策略访问本地 API。校验 Host 头的
+    hostname 在白名单内（127.0.0.1 / localhost / ::1，可通过环境变量
+    REDINK_ALLOWED_HOSTS 逗号分隔扩展），不合法返回 403 JSON。
+
+    以下场景不启用校验，避免挡住正常部署：
+    - 已设置 REDINK_ACCESS_TOKEN（令牌鉴权本身可防 rebinding 页面调用 API）
+    - 未配置 REDINK_ALLOWED_HOSTS 且监听地址为非环回地址
+      （如 Docker 的 FLASK_HOST=0.0.0.0，访问域名无法预知）
+    """
+    if os.getenv('REDINK_ACCESS_TOKEN', '').strip():
+        return
+
+    loopback_hosts = {'127.0.0.1', 'localhost', '::1'}
+    allowed_hosts = set(loopback_hosts)
+
+    extra_hosts = os.getenv('REDINK_ALLOWED_HOSTS', '').strip()
+    if extra_hosts:
+        allowed_hosts |= {
+            host.strip().lower()
+            for host in extra_hosts.split(',')
+            if host.strip()
+        }
+    elif Config.HOST not in loopback_hosts:
+        # 显式监听非环回地址（如 Docker 0.0.0.0）且未配置白名单/令牌：
+        # 无法预知合法访问域名，跳过校验（公网部署请配置 REDINK_ACCESS_TOKEN）
+        logger.info("ℹ️  监听非环回地址且未配置 REDINK_ALLOWED_HOSTS，跳过 Host 头校验")
+        return
+
+    from urllib.parse import urlsplit
+    from backend.errors import AppError
+    from backend.routes.utils import api_error_response
+
+    logger.info(f"🛡️  已启用 Host 头校验，白名单: {sorted(allowed_hosts)}")
+
+    @app.before_request
+    def _check_host_header():
+        # 提取 hostname 部分（去掉端口，兼容 IPv6 字面量如 [::1]:12398）
+        try:
+            hostname = (urlsplit(f'//{request.host}').hostname or '').lower()
+        except ValueError:
+            hostname = ''
+
+        if hostname in allowed_hosts:
+            return None
+
+        return api_error_response(AppError(
+            code="FORBIDDEN_HOST",
+            title="Host 头校验失败",
+            detail=f"不允许的 Host: {request.host}",
+            suggestion="请通过 127.0.0.1 或 localhost 访问；如需自定义域名，"
+                       "请设置环境变量 REDINK_ALLOWED_HOSTS 或 REDINK_ACCESS_TOKEN。",
+            status=403,
+            retryable=False,
+        ))
+
+
 def _validate_config_on_startup(logger):
     """启动时验证配置"""
-    from pathlib import Path
     import yaml
 
     logger.info("📋 检查配置文件...")
 
     # 检查 text_providers.yaml
-    text_config_path = Path(__file__).parent.parent / 'text_providers.yaml'
+    text_config_path = get_data_root() / 'text_providers.yaml'
     if text_config_path.exists():
         try:
             with open(text_config_path, 'r', encoding='utf-8') as f:
@@ -179,7 +261,7 @@ def _validate_config_on_startup(logger):
         logger.warning("⚠️  text_providers.yaml 不存在，将使用默认配置")
 
     # 检查 image_providers.yaml
-    image_config_path = Path(__file__).parent.parent / 'image_providers.yaml'
+    image_config_path = get_data_root() / 'image_providers.yaml'
     if image_config_path.exists():
         try:
             with open(image_config_path, 'r', encoding='utf-8') as f:

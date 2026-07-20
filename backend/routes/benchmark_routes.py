@@ -10,6 +10,7 @@ import time
 import logging
 from flask import Blueprint, request, jsonify
 from backend.services.benchmark import get_benchmark_service
+from backend.services.link_extract import MAX_ARTICLE_CHARS, get_link_extract_service
 from .utils import (
     api_error_response,
     log_request,
@@ -19,6 +20,9 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 链接长度上限（与 link 路由保持一致）
+MAX_URL_LENGTH = 2048
 
 
 def create_benchmark_blueprint():
@@ -30,8 +34,9 @@ def create_benchmark_blueprint():
         """
         拆解对标内容，可选生成仿写草稿
 
-        请求格式（application/json）：
-        - content: 对标/爆款内容（标题+正文），必填
+        请求格式（application/json，content 与 url 至少提供一个，优先 content）：
+        - content: 对标/爆款内容（标题+正文）
+        - url: 对标内容的网页链接（无 content 时，服务端先抓取正文再分析）
         - my_topic: 用户自己的主题（可选），提供时按拆解出的套路生成原创仿写草稿
 
         返回：
@@ -42,29 +47,71 @@ def create_benchmark_blueprint():
         start_time = time.time()
 
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True) or {}
             content = data.get('content', '')
+            url = data.get('url', '')
             my_topic = data.get('my_topic', '')
 
             if not isinstance(content, str):
                 content = str(content) if content is not None else ''
+            if not isinstance(url, str):
+                url = str(url) if url is not None else ''
             if not isinstance(my_topic, str):
                 my_topic = str(my_topic) if my_topic is not None else ''
             content = content.strip()
+            url = url.strip()
             my_topic = my_topic.strip()
 
             log_request('/benchmark', {
                 'content_length': len(content),
+                'url': url[:100] if url else '',
                 'my_topic': my_topic[:50] if my_topic else ''
             })
 
-            # 验证必填参数
-            if not content:
-                logger.warning("对标拆解请求缺少 content 参数")
+            # 验证必填参数：content 与 url 至少提供一个
+            if not content and not url:
+                logger.warning("对标拆解请求 content 和 url 均为空")
                 return api_error_response(
-                    validation_error("content 不能为空", "请粘贴要拆解的对标内容。"),
+                    validation_error(
+                        "content 和 url 不能同时为空",
+                        "请粘贴要拆解的对标内容，或提供内容的网页链接。"
+                    ),
                     context={"endpoint": "/api/benchmark"},
                 )
+
+            # 无 content 时，先抓取链接正文（复用 link_extract 的 SSRF 校验与错误信息）
+            if not content:
+                if len(url) > MAX_URL_LENGTH:
+                    return api_error_response(
+                        validation_error("链接过长", "请检查链接是否正确。"),
+                        context={"endpoint": "/api/benchmark"},
+                    )
+
+                logger.info(f"🔄 对标拆解 url 模式，开始抓取正文: {url[:80]}")
+                try:
+                    content = get_link_extract_service().fetch_article_text(url).strip()
+                except ValueError as e:
+                    # 透传 link_extract 的原始错误提示（如小红书/抖音抓不到正文时引导改为粘贴）
+                    logger.warning(f"对标拆解抓取链接失败: {e}")
+                    result = normalize_error_result(
+                        {"success": False, "error": str(e)},
+                        context={"endpoint": "/api/benchmark"},
+                        fallback_status=400,
+                    )
+                    return jsonify(result), result["error"].get("status", 400)
+
+                if not content:
+                    result = normalize_error_result(
+                        {"success": False, "error": "未能从该链接提取到正文内容，请直接粘贴要拆解的对标内容"},
+                        context={"endpoint": "/api/benchmark"},
+                        fallback_status=400,
+                    )
+                    return jsonify(result), result["error"].get("status", 400)
+
+                # 与 link 路由一致：截断超长正文，避免撑爆 LLM 上下文
+                if len(content) > MAX_ARTICLE_CHARS:
+                    logger.info(f"对标正文过长（{len(content)} 字符），截断至 {MAX_ARTICLE_CHARS}")
+                    content = content[:MAX_ARTICLE_CHARS]
 
             # 调用对标拆解服务
             logger.info(f"🔄 开始对标拆解，内容长度: {len(content)}")

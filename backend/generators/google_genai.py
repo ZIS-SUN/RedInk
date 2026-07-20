@@ -295,6 +295,9 @@ class GoogleGenAIGenerator(ImageGeneratorBase):
         logger.debug("初始化 Google GenAI 客户端...")
         client_kwargs = {
             "api_key": self.api_key,
+            # 统一 300 秒超时（genai SDK 的 timeout 单位为毫秒），
+            # 与 image_api_client / text_client 的 300 秒对齐，避免请求无限期挂起
+            "http_options": {"timeout": 300_000},
         }
 
         # 默认使用 Gemini API (vertexai=False)，因为大多数用户使用 Google AI Studio 的 API Key
@@ -304,10 +307,10 @@ class GoogleGenAIGenerator(ImageGeneratorBase):
         # 如果有 base_url，则配置 http_options
         if self.config.get('base_url'):
             logger.debug(f"  使用自定义 base_url: {self.config['base_url']}")
-            client_kwargs["http_options"] = {
+            client_kwargs["http_options"].update({
                 "base_url": self.config['base_url'],
                 "api_version": "v1beta"
-            }
+            })
 
         client_kwargs["vertexai"] = False
 

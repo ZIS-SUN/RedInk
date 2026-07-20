@@ -1,14 +1,16 @@
 """图片生成服务"""
 import logging
 import os
+import tempfile
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Generator, List, Optional, Tuple
 from backend.config import Config
+from backend.paths import get_data_root, resource_path
 from backend.generators.factory import ImageGeneratorFactory
 from backend.generators.image_provider_policy import ImageProviderPolicy
-from backend.services.history import get_history_service
+from backend.services.history import get_history_service, validate_safe_id
 from backend.services.history_image_merger import HistoryImageMerger
 from backend.services.image_rate_limiter import ImageRateLimiter
 from backend.utils.image_compressor import compress_image
@@ -64,11 +66,8 @@ class ImageService:
         self.prompt_template = self._load_prompt_template()
         self.prompt_template_short = self._load_prompt_template(short=True)
 
-        # 历史记录根目录
-        self.history_root_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "history"
-        )
+        # 历史记录根目录（可写数据目录下）
+        self.history_root_dir = str(get_data_root() / "history")
         os.makedirs(self.history_root_dir, exist_ok=True)
 
         # 兼容保留：旧代码/测试可能设置此属性作为任务目录回退。
@@ -180,14 +179,47 @@ class ImageService:
             return prompt
         return f"{prompt}\n\n整体视觉风格要求（所有页面必须统一遵守，优先级最高）：\n{style}"
 
+    @staticmethod
+    def _apply_brand_visual_prompt(prompt: str) -> str:
+        """
+        在已构建好的 prompt 末尾追加当前启用品牌的视觉约束段落
+        （与 _apply_style_prompt 相同的运行时字符串拼接模式）。
+
+        软失败：无启用品牌 / 品牌未设置视觉字段（如主色调）/ 读取异常时
+        一律原样返回 prompt，绝不因品牌数据问题中断图片生成。
+        """
+        try:
+            # 惰性导入：避免图片服务在 brand 环境异常时初始化失败
+            from backend.services.brand import resolve_brand_for_prompt
+            from backend.services.rewrite import build_brand_visual_constraint
+            visual = build_brand_visual_constraint(resolve_brand_for_prompt())
+        except Exception as e:
+            logger.warning(f"读取品牌视觉约束失败，忽略: {e}")
+            return prompt
+        if not visual:
+            return prompt
+        return prompt + visual
+
     def _load_prompt_template(self, short: bool = False) -> str:
-        """加载 Prompt 模板"""
+        """
+        加载 Prompt 模板
+
+        优先读取可写数据目录下的自定义模板（custom_prompts/<filename>），
+        存在且非空时生效；否则回退包内默认模板。
+        """
         filename = "image_prompt_short.txt" if short else "image_prompt.txt"
-        prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "prompts",
-            filename
-        )
+
+        try:
+            custom_path = get_data_root() / "custom_prompts" / filename
+            if custom_path.exists():
+                content = custom_path.read_text(encoding="utf-8")
+                if content.strip():
+                    logger.debug(f"使用自定义 Prompt 模板: {custom_path}")
+                    return content
+        except OSError as e:
+            logger.warning(f"读取自定义 Prompt 模板失败（{filename}），回退默认模板: {e}")
+
+        prompt_path = resource_path(f'backend/prompts/{filename}')
         if not os.path.exists(prompt_path):
             # 如果短模板不存在，返回空字符串
             return ""
@@ -213,19 +245,36 @@ class ImageService:
         if task_dir is None:
             raise ValueError("任务目录未设置")
 
-        # 保存原图
+        # 保存原图（原子写入，避免进程中断/并发重试留下半截图片）
         filepath = os.path.join(task_dir, filename)
-        with open(filepath, "wb") as f:
-            f.write(image_data)
+        self._atomic_write_bytes(filepath, image_data)
 
         # 生成缩略图（50KB左右）
         thumbnail_data = compress_image(image_data, max_size_kb=50)
         thumbnail_filename = f"thumb_{filename}"
         thumbnail_path = os.path.join(task_dir, thumbnail_filename)
-        with open(thumbnail_path, "wb") as f:
-            f.write(thumbnail_data)
+        self._atomic_write_bytes(thumbnail_path, thumbnail_data)
 
         return filepath
+
+    @staticmethod
+    def _atomic_write_bytes(filepath: str, data: bytes) -> None:
+        """
+        原子写二进制文件：先写同目录临时文件，再 os.replace() 覆盖，
+        避免其他读者读到半截文件（与各服务的 _atomic_write_json 模式一致）。
+        """
+        dir_name = os.path.dirname(filepath) or "."
+        fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", dir=dir_name)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp_path, filepath)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _generate_single_image(
         self,
@@ -289,6 +338,9 @@ class ImageService:
 
             # 追加风格模板的风格描述（为空时不改变 prompt）
             prompt = self._apply_style_prompt(prompt, style_prompt)
+
+            # 追加当前启用品牌的视觉约束（无品牌/无视觉字段时不改变 prompt）
+            prompt = self._apply_brand_visual_prompt(prompt)
 
             # 调用生成器生成图片。所有路径共用 limiter，避免批量和重试打爆上游。
             with self.rate_limiter.acquire():
@@ -363,6 +415,9 @@ class ImageService:
         生成图片（生成器，支持 SSE 流式返回）
         优化版本：先生成封面，然后并发生成其他页面
 
+        先做参数校验再返回内部生成器，保证非法 task_id 在进入 SSE 流
+        之前就抛错（路由层可正常返回 400，而不是流中断）。
+
         Args:
             pages: 页面列表
             task_id: 任务 ID（可选）
@@ -374,6 +429,35 @@ class ImageService:
         Yields:
             进度事件字典
         """
+        # 防止 task_id / record_id 路径遍历写入（如 "../../x"）
+        if task_id is not None:
+            validate_safe_id(task_id, "task_id")
+        if record_id:
+            validate_safe_id(record_id, "record_id")
+
+        return self._generate_images_stream(
+            pages,
+            task_id=task_id,
+            full_outline=full_outline,
+            user_images=user_images,
+            user_topic=user_topic,
+            record_id=record_id,
+            force=force,
+            style_prompt=style_prompt,
+        )
+
+    def _generate_images_stream(
+        self,
+        pages: list,
+        task_id: str = None,
+        full_outline: str = "",
+        user_images: Optional[List[bytes]] = None,
+        user_topic: str = "",
+        record_id: Optional[str] = None,
+        force: bool = False,
+        style_prompt: str = ""
+    ) -> Generator[Dict[str, Any], None, None]:
+        """generate_images 的内部生成器实现（参数校验已在外层完成）。"""
         if record_id and not force:
             cached_events = self.get_cached_generation_events(record_id, pages)
             if cached_events:
@@ -539,87 +623,93 @@ class ImageService:
 
                     # 使用线程池并发生成
                     with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
-                        # 提交所有任务
-                        future_to_page = {
-                            executor.submit(
-                                self._generate_single_image,
-                                page,
-                                task_id,
-                                cover_image_data,  # 使用封面作为参考
-                                0,  # retry_count
-                                full_outline,  # 传入完整大纲
-                                compressed_user_images,  # 用户上传的参考图片（已压缩）
-                                user_topic,  # 用户原始输入
-                                record_id,
-                                total,
-                                style_prompt=style_prompt  # 风格模板描述，保持整套图一致
-                            ): page
-                            for page in other_pages
-                        }
-
-                        # 发送每个页面的进度
-                        for page in other_pages:
-                            yield {
-                                "event": "progress",
-                                "data": {
-                                    "index": page.get("index"),
-                                    "status": "generating",
-                                    "current": self._count_generated(generated_images) + 1,
-                                    "total": total,
-                                    "phase": "content"
-                                }
+                        try:
+                            # 提交所有任务
+                            future_to_page = {
+                                executor.submit(
+                                    self._generate_single_image,
+                                    page,
+                                    task_id,
+                                    cover_image_data,  # 使用封面作为参考
+                                    0,  # retry_count
+                                    full_outline,  # 传入完整大纲
+                                    compressed_user_images,  # 用户上传的参考图片（已压缩）
+                                    user_topic,  # 用户原始输入
+                                    record_id,
+                                    total,
+                                    style_prompt=style_prompt  # 风格模板描述，保持整套图一致
+                                ): page
+                                for page in other_pages
                             }
 
-                        # 收集结果
-                        for future in as_completed(future_to_page):
-                            page = future_to_page[future]
-                            try:
-                                index, success, filename, error = future.result()
-
-                                if success:
-                                    self._remember_generated(generated_images, index, filename, total)
-                                    task_state["generated"][index] = filename
-
-                                    yield {
-                                        "event": "complete",
-                                        "data": {
-                                            "index": index,
-                                            "status": "done",
-                                            "image_url": f"/api/images/{task_id}/{filename}",
-                                            "phase": "content"
-                                        }
+                            # 发送每个页面的进度
+                            for page in other_pages:
+                                yield {
+                                    "event": "progress",
+                                    "data": {
+                                        "index": page.get("index"),
+                                        "status": "generating",
+                                        "current": self._count_generated(generated_images) + 1,
+                                        "total": total,
+                                        "phase": "content"
                                     }
-                                else:
+                                }
+
+                            # 收集结果
+                            for future in as_completed(future_to_page):
+                                page = future_to_page[future]
+                                try:
+                                    index, success, filename, error = future.result()
+
+                                    if success:
+                                        self._remember_generated(generated_images, index, filename, total)
+                                        task_state["generated"][index] = filename
+
+                                        yield {
+                                            "event": "complete",
+                                            "data": {
+                                                "index": index,
+                                                "status": "done",
+                                                "image_url": f"/api/images/{task_id}/{filename}",
+                                                "phase": "content"
+                                            }
+                                        }
+                                    else:
+                                        failed_pages.append(page)
+                                        task_state["failed"][index] = error
+
+                                        yield {
+                                            "event": "error",
+                                            "data": {
+                                                "index": index,
+                                                "status": "error",
+                                                "message": error,
+                                                "retryable": True,
+                                                "phase": "content"
+                                            }
+                                        }
+
+                                except Exception as e:
                                     failed_pages.append(page)
-                                    task_state["failed"][index] = error
+                                    error_msg = str(e)
+                                    bad_index = self._page_index(page)
+                                    task_state["failed"][bad_index] = error_msg
 
                                     yield {
                                         "event": "error",
                                         "data": {
-                                            "index": index,
+                                            "index": bad_index,
                                             "status": "error",
-                                            "message": error,
+                                            "message": error_msg,
                                             "retryable": True,
                                             "phase": "content"
                                         }
                                     }
-
-                            except Exception as e:
-                                failed_pages.append(page)
-                                error_msg = str(e)
-                                bad_index = self._page_index(page)
-                                task_state["failed"][bad_index] = error_msg
-
-                                yield {
-                                    "event": "error",
-                                    "data": {
-                                        "index": bad_index,
-                                        "status": "error",
-                                        "message": error_msg,
-                                        "retryable": True,
-                                        "phase": "content"
-                                    }
-                                }
+                        except GeneratorExit:
+                            # 客户端断开（SSE 断连）：取消尚未开始的任务，
+                            # 避免线程池退出时把剩余生成任务全部跑完（白耗上游配额）
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            raise
                 else:
                     # 顺序模式：逐个生成
                     yield {
@@ -766,6 +856,33 @@ class ImageService:
         })
         return events
 
+    def _resolve_cover_filename(self, pages: Optional[List[Dict]], record_id: Optional[str] = None) -> str:
+        """
+        推导封面图文件名（用于任务状态被淘汰后从磁盘回退加载封面参考图）。
+
+        与生成流程选封面的逻辑一致：优先取 type=="cover" 的页，
+        没有封面页时回退第一页；pages 不可用且提供了 record_id 时
+        从历史记录读取页面；页面信息完全不可用时回退 "0.png"。
+        """
+        if not pages and record_id:
+            try:
+                record = self.history_service.get_record(record_id)
+                if record:
+                    pages = record.get("outline", {}).get("pages", [])
+            except Exception as e:
+                logger.warning(f"读取历史记录推导封面文件名失败，回退默认: {e}")
+        if pages:
+            cover_page = next(
+                (p for p in pages if isinstance(p, dict) and p.get("type") == "cover"),
+                None,
+            )
+            if cover_page is None:
+                cover_page = pages[0]
+            index = self._page_index(cover_page)
+            if index >= 0:
+                return f"{index}.png"
+        return "0.png"
+
     def retry_single_image(
         self,
         task_id: str,
@@ -790,38 +907,46 @@ class ImageService:
         Returns:
             生成结果
         """
+        # 防止 task_id 路径遍历写入
+        validate_safe_id(task_id, "task_id")
+
         task_dir = os.path.join(self.history_root_dir, task_id)
         os.makedirs(task_dir, exist_ok=True)
 
         reference_image = None
         user_images = None
+        state_pages = None
+        total_count = None
 
-        # 首先尝试从任务状态中获取上下文
-        if task_id in self._task_states:
-            task_state = self._task_states[task_id]
-            if use_reference:
-                reference_image = task_state.get("cover_image")
-            # 如果没有传入上下文，则使用任务状态中的
-            if not full_outline:
-                full_outline = task_state.get("full_outline", "")
-            if not user_topic:
-                user_topic = task_state.get("user_topic", "")
-            if not style_prompt:
-                style_prompt = task_state.get("style_prompt", "")
-            user_images = task_state.get("user_images")
+        # 首先尝试从任务状态中获取上下文。统一在锁内用 get 取引用，
+        # 避免与容量淘汰/清理并发时 check-then-use 竞态导致 KeyError
+        with self._task_states_lock:
+            task_state = self._task_states.get(task_id)
+            if task_state:
+                if use_reference:
+                    reference_image = task_state.get("cover_image")
+                # 如果没有传入上下文，则使用任务状态中的
+                if not full_outline:
+                    full_outline = task_state.get("full_outline", "")
+                if not user_topic:
+                    user_topic = task_state.get("user_topic", "")
+                if not style_prompt:
+                    style_prompt = task_state.get("style_prompt", "")
+                user_images = task_state.get("user_images")
+                state_pages = task_state.get("pages")
+                total_count = len(state_pages or [])
 
         # 如果任务状态中没有封面图，尝试从文件系统加载
+        # （封面文件名按 type=="cover" 的页 index 推导，不硬编码 0.png）
         if use_reference and reference_image is None:
-            cover_path = os.path.join(task_dir, "0.png")
+            cover_path = os.path.join(
+                task_dir, self._resolve_cover_filename(state_pages, record_id)
+            )
             if os.path.exists(cover_path):
                 with open(cover_path, "rb") as f:
                     cover_data = f.read()
                 # 压缩封面图到 200KB
                 reference_image = compress_image(cover_data, max_size_kb=200)
-
-        total_count = None
-        if task_id in self._task_states:
-            total_count = len(self._task_states[task_id].get("pages", []))
 
         index, success, filename, error = self._generate_single_image(
             page,
@@ -837,10 +962,12 @@ class ImageService:
         )
 
         if success:
-            if task_id in self._task_states:
-                self._task_states[task_id]["generated"][index] = filename
-                if index in self._task_states[task_id]["failed"]:
-                    del self._task_states[task_id]["failed"][index]
+            # 锁内用 get 取引用后再更新，避免状态被淘汰时 KeyError
+            with self._task_states_lock:
+                task_state = self._task_states.get(task_id)
+                if task_state:
+                    task_state["generated"][index] = filename
+                    task_state["failed"].pop(index, None)
 
             return {
                 "success": True,
@@ -865,6 +992,9 @@ class ImageService:
         """
         批量重试失败的图片
 
+        先做参数校验再返回内部生成器，保证非法 task_id 在进入 SSE 流
+        之前就抛错（路由层可正常返回 400，而不是流中断）。
+
         Args:
             task_id: 任务ID
             pages: 需要重试的页面列表
@@ -873,23 +1003,52 @@ class ImageService:
         Yields:
             进度事件
         """
+        # 防止 task_id / record_id 路径遍历写入
+        validate_safe_id(task_id, "task_id")
+        if record_id:
+            validate_safe_id(record_id, "record_id")
+
+        return self._retry_failed_images_stream(
+            task_id, pages, record_id=record_id, style_prompt=style_prompt
+        )
+
+    def _retry_failed_images_stream(
+        self,
+        task_id: str,
+        pages: List[Dict],
+        record_id: Optional[str] = None,
+        style_prompt: str = ""
+    ) -> Generator[Dict[str, Any], None, None]:
+        """retry_failed_images 的内部生成器实现（参数校验已在外层完成）。"""
         task_dir = os.path.join(self.history_root_dir, task_id)
         os.makedirs(task_dir, exist_ok=True)
 
-        # 获取参考图和上下文
+        # 获取参考图和上下文。统一在锁内用 get 取引用，
+        # 避免与容量淘汰/清理并发时 check-then-use 竞态导致 KeyError
         reference_image = None
         user_images = None
         user_topic = ""
-        if task_id in self._task_states:
-            task_state = self._task_states[task_id]
-            reference_image = task_state.get("cover_image")
-            user_images = task_state.get("user_images")
-            user_topic = task_state.get("user_topic", "")
-            if not style_prompt:
-                style_prompt = task_state.get("style_prompt", "")
+        full_outline = ""
+        state_pages = None
+        total_count = None
+        with self._task_states_lock:
+            task_state = self._task_states.get(task_id)
+            if task_state:
+                reference_image = task_state.get("cover_image")
+                user_images = task_state.get("user_images")
+                user_topic = task_state.get("user_topic", "")
+                full_outline = task_state.get("full_outline", "")
+                if not style_prompt:
+                    style_prompt = task_state.get("style_prompt", "")
+                state_pages = task_state.get("pages")
+                total_count = len(state_pages or [])
 
+        # 任务状态中没有封面图时从磁盘回退加载
+        # （封面文件名按 type=="cover" 的页 index 推导，不硬编码 0.png）
         if reference_image is None:
-            cover_path = os.path.join(self.history_root_dir, task_id, "0.png")
+            cover_path = os.path.join(
+                task_dir, self._resolve_cover_filename(state_pages, record_id)
+            )
             if os.path.exists(cover_path):
                 with open(cover_path, "rb") as f:
                     reference_image = compress_image(f.read(), max_size_kb=200)
@@ -906,13 +1065,6 @@ class ImageService:
             }
         }
 
-        # 从任务状态中获取完整大纲
-        full_outline = ""
-        if task_id in self._task_states:
-            full_outline = self._task_states[task_id].get("full_outline", "")
-        total_count = None
-        if task_id in self._task_states:
-            total_count = len(self._task_states[task_id].get("pages", []))
         if record_id:
             record = self.history_service.get_record(record_id)
             if record:
@@ -923,10 +1075,12 @@ class ImageService:
             index, success, filename, error = result
             if success:
                 success_count += 1
-                if task_id in self._task_states:
-                    self._task_states[task_id]["generated"][index] = filename
-                    if index in self._task_states[task_id]["failed"]:
-                        del self._task_states[task_id]["failed"][index]
+                # 锁内用 get 取引用后再更新，避免状态被淘汰时 KeyError
+                with self._task_states_lock:
+                    state = self._task_states.get(task_id)
+                    if state:
+                        state["generated"][index] = filename
+                        state["failed"].pop(index, None)
                 return {
                     "event": "complete",
                     "data": {
@@ -949,38 +1103,44 @@ class ImageService:
 
         if self.worker_count > 1:
             with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
-                future_to_page = {
-                    executor.submit(
-                        self._generate_single_image,
-                        page,
-                        task_id,
-                        reference_image,
-                        0,
-                        full_outline,
-                        user_images,
-                        user_topic,
-                        record_id,
-                        total_count,
-                        style_prompt=style_prompt
-                    ): page
-                    for page in pages
-                }
+                try:
+                    future_to_page = {
+                        executor.submit(
+                            self._generate_single_image,
+                            page,
+                            task_id,
+                            reference_image,
+                            0,
+                            full_outline,
+                            user_images,
+                            user_topic,
+                            record_id,
+                            total_count,
+                            style_prompt=style_prompt
+                        ): page
+                        for page in pages
+                    }
 
-                for future in as_completed(future_to_page):
-                    page = future_to_page[future]
-                    try:
-                        yield handle_result(page, future.result())
-                    except Exception as e:
-                        failed_count += 1
-                        yield {
-                            "event": "error",
-                            "data": {
-                                "index": self._page_index(page),
-                                "status": "error",
-                                "message": str(e),
-                                "retryable": True
+                    for future in as_completed(future_to_page):
+                        page = future_to_page[future]
+                        try:
+                            yield handle_result(page, future.result())
+                        except Exception as e:
+                            failed_count += 1
+                            yield {
+                                "event": "error",
+                                "data": {
+                                    "index": self._page_index(page),
+                                    "status": "error",
+                                    "message": str(e),
+                                    "retryable": True
+                                }
                             }
-                        }
+                except GeneratorExit:
+                    # 客户端断开（SSE 断连）：取消尚未开始的任务，
+                    # 避免线程池退出时把剩余重试任务全部跑完（白耗上游配额）
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    raise
         else:
             for page in pages:
                 result = self._generate_single_image(
@@ -1050,6 +1210,8 @@ class ImageService:
         Returns:
             完整路径
         """
+        # 防止 task_id 路径遍历
+        validate_safe_id(task_id, "task_id")
         task_dir = os.path.join(self.history_root_dir, task_id)
         return os.path.join(task_dir, filename)
 
@@ -1063,14 +1225,17 @@ class ImageService:
             self._task_states.pop(task_id, None)
 
 
-# 全局服务实例
+# 全局服务实例（惰性初始化，配模块级锁防止首次并发请求构造出两个实例）
 _service_instance = None
+_service_instance_lock = threading.Lock()
 
 def get_image_service() -> ImageService:
-    """获取全局图片生成服务实例"""
+    """获取全局图片生成服务实例（双检查锁定的惰性单例）"""
     global _service_instance
     if _service_instance is None:
-        _service_instance = ImageService()
+        with _service_instance_lock:
+            if _service_instance is None:
+                _service_instance = ImageService()
     return _service_instance
 
 def reset_image_service():

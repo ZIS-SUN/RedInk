@@ -38,6 +38,7 @@ def create_api_blueprint():
     from .analytics_routes import create_analytics_blueprint
     from .benchmark_routes import create_benchmark_blueprint
     from .reply_routes import create_reply_blueprint
+    from .checklist_routes import create_checklist_blueprint
 
     # 创建主 API 蓝图
     api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -59,6 +60,7 @@ def create_api_blueprint():
     api_bp.register_blueprint(create_analytics_blueprint())
     api_bp.register_blueprint(create_benchmark_blueprint())
     api_bp.register_blueprint(create_reply_blueprint())
+    api_bp.register_blueprint(create_checklist_blueprint())
 
     return api_bp
 

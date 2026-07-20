@@ -9,6 +9,7 @@ import time
 import logging
 from flask import Blueprint, request, jsonify
 from backend.services.reply import get_reply_service
+from backend.services.brand import resolve_brand_for_prompt
 from .utils import (
     api_error_response,
     log_request,
@@ -33,6 +34,8 @@ def create_reply_blueprint():
         - comments: 粉丝评论，字符串列表；也兼容传入多行字符串（按行拆分）
         - tone: 回复语气（热情/专业/幽默/温暖），默认"热情"
         - include_pinned: 是否同时生成一条置顶引导评论，默认 false
+        - brand_id: 品牌档案 ID（可选）；未提供时自动使用「当前启用」档案，
+          有品牌时以博主人设口吻回复（口头禅/签名自然融入），取不到时静默跳过
 
         返回：
         - success: 是否成功
@@ -46,6 +49,7 @@ def create_reply_blueprint():
             raw_comments = data.get('comments', [])
             tone = data.get('tone', '热情')
             include_pinned = bool(data.get('include_pinned', False))
+            brand_id = data.get('brand_id')
 
             # 兼容多行字符串输入：按行拆分为多条评论
             if isinstance(raw_comments, str):
@@ -69,6 +73,9 @@ def create_reply_blueprint():
                     context={"endpoint": "/api/reply"},
                 )
 
+            # 解析品牌档案（未传 brand_id 时回退当前启用档案，取不到时静默忽略）
+            brand = resolve_brand_for_prompt(brand_id)
+
             # 调用评论回复生成服务
             logger.info(f"🔄 开始生成评论回复，共 {len(comments)} 条评论，语气: {tone}")
             reply_service = get_reply_service()
@@ -76,6 +83,7 @@ def create_reply_blueprint():
                 comments,
                 tone=tone,
                 include_pinned=include_pinned,
+                brand=brand,
             )
 
             # 记录结果

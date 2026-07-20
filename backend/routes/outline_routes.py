@@ -3,6 +3,7 @@
 
 包含功能：
 - 生成大纲（支持图片上传）
+- 单页 AI 润色
 """
 
 import time
@@ -20,6 +21,14 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 单页润色指令白名单：前端只传 key，后端映射为完整中文指令，防止 prompt 注入
+POLISH_INSTRUCTIONS = {
+    'polish': "在保持原意和结构的前提下润色，让表达更生动吸引人",
+    'shorten': "精简压缩，保留核心信息，字数减少约三分之一",
+    'punchier': "改写得更有网感、更抓眼球，多用小红书风格的表达",
+}
+DEFAULT_POLISH_INSTRUCTION = 'polish'
 
 
 def create_outline_blueprint():
@@ -91,6 +100,83 @@ def create_outline_blueprint():
         except Exception as e:
             log_error('/outline', e)
             return api_error_response(e, context={"endpoint": "/api/outline"})
+
+    @outline_bp.route('/outline/polish', methods=['POST'])
+    def polish_page():
+        """
+        单页 AI 润色：对大纲中某一页的文案按指令重写
+
+        请求体（application/json）：
+        - content: 该页原文（必填，非空）
+        - page_type: 页面类型 cover/content/summary（默认 "content"）
+        - topic: 整篇主题（默认 ""）
+        - instruction: 润色指令 key：polish/shorten/punchier（其他值按 polish 处理）
+
+        返回：
+        - success: 是否成功
+        - content: 润色后的该页文案
+        """
+        start_time = time.time()
+
+        try:
+            data = request.get_json(silent=True) or {}
+
+            # 参数类型收敛：传入非字符串（数字/对象等）时统一转 str，防止后续处理 500
+            content = data.get('content')
+            if not isinstance(content, str):
+                content = str(content) if content is not None else ''
+            content = content.strip()
+            page_type = data.get('page_type') or 'content'
+            if not isinstance(page_type, str):
+                page_type = str(page_type)
+            topic = data.get('topic') or ''
+            if not isinstance(topic, str):
+                topic = str(topic)
+            instruction_key = data.get('instruction') or DEFAULT_POLISH_INSTRUCTION
+
+            log_request('/outline/polish', {
+                'content_length': len(content),
+                'page_type': page_type,
+                'instruction': instruction_key,
+            })
+
+            if not content:
+                logger.warning("单页润色请求缺少 content 参数")
+                return api_error_response(
+                    validation_error("content 不能为空", "请提供要润色的页面文案。"),
+                    context={"endpoint": "/api/outline/polish"},
+                )
+
+            # 白名单映射：未知指令一律按 polish 处理，防止注入
+            instruction = POLISH_INSTRUCTIONS.get(
+                instruction_key, POLISH_INSTRUCTIONS[DEFAULT_POLISH_INSTRUCTION]
+            )
+
+            logger.info(f"🔄 开始单页润色，指令: {instruction_key}")
+            outline_service = get_outline_service()
+            result = outline_service.polish_page(
+                content=content,
+                page_type=page_type,
+                topic=topic,
+                instruction=instruction,
+            )
+
+            elapsed = time.time() - start_time
+            if result["success"]:
+                logger.info(f"✅ 单页润色成功，耗时 {elapsed:.2f}s")
+                return jsonify(result), 200
+            else:
+                logger.error(f"❌ 单页润色失败: {result.get('error', '未知错误')}")
+                result = normalize_error_result(
+                    result,
+                    context={"endpoint": "/api/outline/polish"},
+                    fallback_status=500,
+                )
+                return jsonify(result), result["error"].get("status", 500)
+
+        except Exception as e:
+            log_error('/outline/polish', e)
+            return api_error_response(e, context={"endpoint": "/api/outline/polish"})
 
     return outline_bp
 

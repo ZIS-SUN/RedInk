@@ -7,6 +7,7 @@
 
 import os
 import json
+import re
 import tempfile
 import threading
 import uuid
@@ -16,12 +17,44 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 from enum import Enum
 
+from backend.errors import AppError, AppErrorException
+from backend.paths import get_data_root
 from backend.services.history_image_merger import HistoryImageMerger
 
 logger = logging.getLogger(__name__)
 
 # 守护实例锁的惰性创建（HistoryService 可能通过 __new__ 构造，绕过 __init__）
 _LOCK_INIT_GUARD = threading.Lock()
+
+# record_id / task_id 的合法格式：仅允许安全字符集（兼容存量数据：
+# record_id 为 uuid4（含连字符），task_id 为 "task_" 前缀 + 短 hex）
+_SAFE_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+
+
+def validate_safe_id(value: Any, field_name: str = "ID") -> str:
+    """
+    校验 record_id / task_id 只包含安全字符，防止路径遍历（如 "../"）。
+
+    Args:
+        value: 待校验的 ID
+        field_name: 字段名（用于错误消息）
+
+    Returns:
+        str: 校验通过的原值
+
+    Raises:
+        AppErrorException: ID 非法时抛出（路由层统一转为 400 响应）
+    """
+    if not isinstance(value, str) or not _SAFE_ID_PATTERN.match(value):
+        raise AppErrorException(AppError(
+            code="INVALID_REQUEST",
+            title="请求参数不合法",
+            detail=f"{field_name} 格式不合法",
+            suggestion=f"{field_name} 只能包含字母、数字、下划线和连字符（1-64 位）。",
+            status=400,
+            retryable=False,
+        ))
+    return value
 
 
 class IndexCorruptedError(RuntimeError):
@@ -44,11 +77,8 @@ class HistoryService:
 
         创建历史记录存储目录和索引文件
         """
-        # 历史记录存储目录（项目根目录/history）
-        self.history_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "history"
-        )
+        # 历史记录存储目录（可写数据根目录/history）
+        self.history_dir = str(get_data_root() / "history")
         os.makedirs(self.history_dir, exist_ok=True)
 
         # 索引文件路径
@@ -155,13 +185,45 @@ class HistoryService:
         Returns:
             str: 记录文件的完整路径
         """
+        # 统一入口校验，防止 record_id 路径遍历写入/读取任意文件
+        validate_safe_id(record_id, "record_id")
         return os.path.join(self.history_dir, f"{record_id}.json")
+
+    @staticmethod
+    def sanitize_content(content: Any) -> Optional[Dict]:
+        """
+        宽松校验发布内容结构（标题/文案/标签）。
+
+        合法结构：{ titles: [str], copywriting: str, tags: [str] }。
+        结构不合法时返回 None（调用方直接忽略，不报错），
+        避免坏数据写入历史记录文件。
+        """
+        if not isinstance(content, dict):
+            return None
+
+        titles = content.get("titles")
+        copywriting = content.get("copywriting")
+        tags = content.get("tags")
+
+        if not isinstance(titles, list) or not all(isinstance(t, str) for t in titles):
+            return None
+        if not isinstance(copywriting, str):
+            return None
+        if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+            return None
+
+        return {
+            "titles": titles,
+            "copywriting": copywriting,
+            "tags": tags,
+        }
 
     def create_record(
         self,
         topic: str,
         outline: Dict,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        content: Optional[Dict] = None
     ) -> str:
         """
         创建新的历史记录
@@ -172,6 +234,8 @@ class HistoryService:
             topic: 绘本主题/标题
             outline: 大纲内容，包含 pages 数组等信息
             task_id: 关联的生成任务 ID（可选）
+            content: 发布内容（可选），{ titles: [str], copywriting: str, tags: [str] }，
+                结构不合法时静默忽略
 
         Returns:
             str: 新创建的记录 ID（UUID 格式）
@@ -197,6 +261,11 @@ class HistoryService:
             "status": RecordStatus.DRAFT,  # 初始状态：草稿
             "thumbnail": None  # 初始无缩略图
         }
+
+        # 发布内容（标题/文案/标签）：坏结构直接忽略，保持向后兼容
+        safe_content = self.sanitize_content(content)
+        if safe_content is not None:
+            record["content"] = safe_content
 
         with self._lock:
             # 保存完整记录到独立文件（原子写）
@@ -276,7 +345,8 @@ class HistoryService:
         outline: Optional[Dict] = None,
         images: Optional[Dict] = None,
         status: Optional[str] = None,
-        thumbnail: Optional[str] = None
+        thumbnail: Optional[str] = None,
+        content: Optional[Dict] = None
     ) -> bool:
         """
         更新历史记录
@@ -290,6 +360,8 @@ class HistoryService:
             images: 图片信息（可选，包含 task_id 和 generated 列表）
             status: 状态（可选）
             thumbnail: 缩略图文件名（可选）
+            content: 发布内容（可选），{ titles: [str], copywriting: str, tags: [str] }，
+                结构不合法时静默忽略（不报错、不覆盖已有值）
 
         Returns:
             bool: 更新是否成功，记录不存在时返回 False
@@ -327,6 +399,12 @@ class HistoryService:
             # 更新缩略图
             if thumbnail is not None:
                 record["thumbnail"] = thumbnail
+
+            # 更新发布内容（标题/文案/标签）：坏结构静默忽略
+            if content is not None:
+                safe_content = self.sanitize_content(content)
+                if safe_content is not None:
+                    record["content"] = safe_content
 
             # 保存完整记录（原子写）
             record_path = self._get_record_path(record_id)
@@ -508,9 +586,9 @@ class HistoryService:
                     try:
                         import shutil
                         shutil.rmtree(task_dir)
-                        print(f"已删除任务目录: {task_dir}")
+                        logger.info(f"已删除任务目录: {task_dir}")
                     except Exception as e:
-                        print(f"删除任务目录失败: {task_dir}, {e}")
+                        logger.warning(f"删除任务目录失败: {task_dir}, {e}")
 
             # 删除记录 JSON 文件
             record_path = self._get_record_path(record_id)
@@ -643,6 +721,8 @@ class HistoryService:
                 - status: 更新后的状态
                 - error: 错误信息（失败时）
         """
+        # 统一入口校验，防止 task_id 路径遍历
+        validate_safe_id(task_id, "task_id")
         task_dir = os.path.join(self.history_dir, task_id)
 
         if not os.path.exists(task_dir) or not os.path.isdir(task_dir):
@@ -751,6 +831,10 @@ class HistoryService:
                 if not os.path.isdir(item_path):
                     continue
 
+                # 跳过名字不符合安全 ID 格式的目录（非本应用生成的任务目录）
+                if not _SAFE_ID_PATTERN.match(item):
+                    continue
+
                 # 假设任务文件夹名就是 task_id
                 task_id = item
 
@@ -783,16 +867,20 @@ class HistoryService:
 
 
 _service_instance = None
+# 单例初始化锁：防止首次并发请求构造出两个实例
+_service_instance_lock = threading.Lock()
 
 
 def get_history_service() -> HistoryService:
     """
-    获取历史记录服务实例（单例模式）
+    获取历史记录服务实例（单例模式，双检查锁定的惰性初始化）
 
     Returns:
         HistoryService: 历史记录服务实例
     """
     global _service_instance
     if _service_instance is None:
-        _service_instance = HistoryService()
+        with _service_instance_lock:
+            if _service_instance is None:
+                _service_instance = HistoryService()
     return _service_instance

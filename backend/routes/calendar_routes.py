@@ -5,6 +5,7 @@
 - 计划条目的增删改查 (CRUD)
 - 按月 / 平台 / 状态过滤列表
 - 按月统计（本月计划数、各状态数量、各平台数量）
+- AI 一周排期预览（只生成，不落盘；落盘由前端逐条调创建接口）
 
 所有响应遵循 { success: true, ... } / 统一错误对象 的对外契约。
 """
@@ -12,8 +13,8 @@
 import logging
 from flask import Blueprint, request, jsonify
 
-from backend.services.calendar_plan import get_calendar_service
-from .utils import api_error_response, validation_error
+from backend.services.calendar_plan import generate_week_plan, get_calendar_service
+from .utils import api_error_response, normalize_error_result, validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +99,11 @@ def create_calendar_blueprint():
         请求体：
         - title: 计划标题（必填）
         - publish_date: 计划发布日期，格式 YYYY-MM-DD（必填）
+        - publish_time: 计划发布时间，格式 HH:MM（可选，默认空）
         - platform: 发布平台（可选，默认 xiaohongshu）
         - status: 状态（可选，默认 idea）
         - notes: 备注（可选）
+        - record_id: 关联的历史记录 ID（可选，默认空）
 
         返回：
         - success: 是否成功
@@ -135,6 +138,59 @@ def create_calendar_blueprint():
             )
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/plans"})
+
+    @calendar_bp.route('/plans/generate-week', methods=['POST'])
+    def generate_week():
+        """
+        AI 生成一周排期预览（不落盘）
+
+        请求体：
+        - niche: 领域/赛道（必填，如"健身减脂"）
+        - platform: 发布平台（可选，默认 xiaohongshu）
+        - start_date: 周一日期，格式 YYYY-MM-DD（可选，默认下周一）
+        - frequency: 每周条数 1-7（可选，默认 3，越界自动钳制）
+        - use_account_data: 是否结合账号数据（可选，默认 false）
+
+        返回：
+        - success: 是否成功
+        - plans: 排期预览列表，每条含 title/platform/publish_date/publish_time/notes/status
+        - account_context_used: 本次是否实际结合了账号数据
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            niche = str(data.get('niche') or '').strip()
+
+            if not niche:
+                return api_error_response(
+                    validation_error("niche 不能为空", "请输入你的领域或赛道，例如：健身减脂。"),
+                    context={"endpoint": "/api/plans/generate-week"},
+                )
+
+            result = generate_week_plan(
+                niche=niche,
+                platform=str(data.get('platform') or '').strip() or 'xiaohongshu',
+                start_date=str(data.get('start_date') or '').strip() or None,
+                frequency=data.get('frequency', 3),
+                use_account_data=bool(data.get('use_account_data', False)),
+            )
+
+            if result.get("success"):
+                return jsonify(result), 200
+
+            result = normalize_error_result(
+                result,
+                context={"endpoint": "/api/plans/generate-week"},
+                fallback_status=500,
+            )
+            return jsonify(result), result["error"].get("status", 500)
+
+        except ValueError as e:
+            return api_error_response(
+                validation_error(str(e)),
+                context={"endpoint": "/api/plans/generate-week"},
+            )
+        except Exception as e:
+            return api_error_response(e, context={"endpoint": "/api/plans/generate-week"})
 
     @calendar_bp.route('/plans/<plan_id>', methods=['PUT'])
     def update_plan(plan_id):
@@ -175,6 +231,56 @@ def create_calendar_blueprint():
             )
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/plans/<id>", "plan_id": plan_id})
+
+    @calendar_bp.route('/plans/<plan_id>/log-performance', methods=['POST'])
+    def log_performance(plan_id):
+        """
+        把日历条目一键转录到数据复盘（表现记录）
+
+        路径参数：
+        - plan_id: 条目 ID
+
+        请求体（均可选，未提供的 title/platform/publish_date/publish_time/record_id
+        由日历条目预填；platform 会转成中文名写入复盘）：
+        - title / platform / publish_date / publish_time / content_type / notes
+        - views / likes / collects / comments / shares / followers_gained: 数值指标
+
+        防重复：同一条目重复转录时更新已有关联记录而非新建。
+
+        返回：
+        - success: 是否成功
+        - record: 写入数据复盘的完整记录（带 calendar_plan_id / record_id 关联）
+        - created: 是否为新建记录（false 表示更新了已有关联记录）
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+
+            calendar_service = get_calendar_service()
+            result = calendar_service.log_performance(plan_id, data)
+
+            if result is None:
+                return api_error_response(
+                    f"计划条目不存在：{plan_id}",
+                    status=404,
+                    context={"endpoint": "/api/plans/<id>/log-performance", "plan_id": plan_id},
+                )
+
+            return jsonify({
+                "success": True,
+                "record": result["record"],
+                "created": result["created"],
+            }), 200
+
+        except ValueError as e:
+            return api_error_response(
+                validation_error(str(e)),
+                context={"endpoint": "/api/plans/<id>/log-performance", "plan_id": plan_id},
+            )
+        except Exception as e:
+            return api_error_response(
+                e,
+                context={"endpoint": "/api/plans/<id>/log-performance", "plan_id": plan_id},
+            )
 
     @calendar_bp.route('/plans/<plan_id>', methods=['DELETE'])
     def delete_plan(plan_id):

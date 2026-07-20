@@ -11,6 +11,7 @@
 - title: 内容标题（必填）
 - platform: 发布平台（必填，如"小红书"/"抖音"）
 - publish_date: 发布日期（YYYY-MM-DD 字符串）
+- publish_time: 发布时间（"HH:MM" 字符串或空串，可选）
 - content_type: 内容类型/标签（如"干货教程"/"好物种草"）
 - views: 曝光/播放数
 - likes: 点赞数
@@ -19,6 +20,8 @@
 - shares: 转发数
 - followers_gained: 涨粉数
 - notes: 备注
+- record_id: 关联的历史作品 ID（可选，空串表示未关联；旧记录可能缺失该字段）
+- calendar_plan_id: 关联的内容日历条目 ID（可选，空串表示未关联；旧记录可能缺失该字段）
 - created_at / updated_at: ISO 时间戳
 """
 
@@ -32,8 +35,15 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import yaml
-from pathlib import Path
+from backend.paths import get_data_root
+from backend.utils.llm_utils import (
+    classify_llm_error,
+    get_text_client,
+    load_prompt_template,
+    load_text_config,
+    parse_llm_json,
+    resolve_generation_params,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +51,27 @@ logger = logging.getLogger(__name__)
 _LOCK_INIT_GUARD = threading.Lock()
 
 # 记录中允许由调用方写入的字段
-_EDITABLE_STR_FIELDS = ("title", "platform", "publish_date", "content_type", "notes")
+_EDITABLE_STR_FIELDS = (
+    "title", "platform", "publish_date", "publish_time", "content_type", "notes",
+    "record_id", "calendar_plan_id",
+)
 _EDITABLE_INT_FIELDS = ("views", "likes", "collects", "comments", "shares", "followers_gained")
+
+# 批量导入单次上限
+_BATCH_MAX_RECORDS = 200
+
+# 发布时段划分：(名称, 起始小时含, 结束小时不含)；深夜跨零点单独处理
+_TIME_SLOTS = (
+    ("早晨 6-9", 6, 9),
+    ("上午 9-12", 9, 12),
+    ("午间 12-14", 12, 14),
+    ("下午 14-18", 14, 18),
+    ("晚间 18-22", 18, 22),
+    ("深夜 22-6", 22, 6),
+)
+
+# 宽松的时间格式：H:MM / HH:MM，允许全角冒号和秒数
+_TIME_PATTERN = re.compile(r"^(\d{1,2})[:：](\d{1,2})(?:[:：]\d{1,2})?$")
 
 
 class AnalyticsStoreCorruptedError(RuntimeError):
@@ -56,10 +85,7 @@ class AnalyticsService:
 
         创建 analytics_data 存储目录和数据文件（项目根目录/analytics_data/records.json）
         """
-        self.analytics_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "analytics_data"
-        )
+        self.analytics_dir = str(get_data_root() / "analytics_data")
         os.makedirs(self.analytics_dir, exist_ok=True)
 
         self.store_file = os.path.join(self.analytics_dir, "records.json")
@@ -158,6 +184,27 @@ class AnalyticsService:
             return 0
         return max(number, 0)
 
+    @classmethod
+    def _normalize_time(cls, value) -> str:
+        """
+        发布时间归一化（宽松校验）：
+        - None / 空串 -> ""（表示未填写）
+        - "H:MM" / "HH:MM" / "HH:MM:SS"（含全角冒号）-> "HH:MM"
+
+        Raises:
+            ValueError: 无法解析或时/分越界时抛出
+        """
+        text = cls._normalize_str(value)
+        if not text:
+            return ""
+        match = _TIME_PATTERN.match(text)
+        if not match:
+            raise ValueError(f"发布时间格式应为 HH:MM（如 21:30），收到：{text}")
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if hour > 23 or minute > 59:
+            raise ValueError(f"发布时间超出范围（时 0-23、分 0-59），收到：{text}")
+        return f"{hour:02d}:{minute:02d}"
+
     # ==================== CRUD ====================
 
     def list_records(self) -> Dict:
@@ -183,6 +230,41 @@ class AnalyticsService:
                 return record
         return None
 
+    def _build_record(self, data: Dict) -> Dict:
+        """
+        由入参构建一条完整记录（含校验与归一化，不落盘）。
+
+        Raises:
+            ValueError: title / platform 为空，或 publish_time 格式非法时抛出
+        """
+        title = self._normalize_str(data.get("title"))
+        platform = self._normalize_str(data.get("platform"))
+        if not title:
+            raise ValueError("内容标题不能为空")
+        if not platform:
+            raise ValueError("发布平台不能为空")
+
+        now = datetime.now().isoformat()
+        return {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "platform": platform,
+            "publish_date": self._normalize_str(data.get("publish_date")),
+            "publish_time": self._normalize_time(data.get("publish_time")),
+            "content_type": self._normalize_str(data.get("content_type")),
+            "views": self._normalize_int(data.get("views")),
+            "likes": self._normalize_int(data.get("likes")),
+            "collects": self._normalize_int(data.get("collects")),
+            "comments": self._normalize_int(data.get("comments")),
+            "shares": self._normalize_int(data.get("shares")),
+            "followers_gained": self._normalize_int(data.get("followers_gained")),
+            "notes": self._normalize_str(data.get("notes")),
+            "record_id": self._normalize_str(data.get("record_id")),
+            "calendar_plan_id": self._normalize_str(data.get("calendar_plan_id")),
+            "created_at": now,
+            "updated_at": now,
+        }
+
     def create_record(self, data: Dict) -> Dict:
         """
         创建表现记录
@@ -196,30 +278,7 @@ class AnalyticsService:
         Raises:
             ValueError: title 或 platform 为空时抛出
         """
-        title = self._normalize_str(data.get("title"))
-        platform = self._normalize_str(data.get("platform"))
-        if not title:
-            raise ValueError("内容标题不能为空")
-        if not platform:
-            raise ValueError("发布平台不能为空")
-
-        now = datetime.now().isoformat()
-        record = {
-            "id": str(uuid.uuid4()),
-            "title": title,
-            "platform": platform,
-            "publish_date": self._normalize_str(data.get("publish_date")),
-            "content_type": self._normalize_str(data.get("content_type")),
-            "views": self._normalize_int(data.get("views")),
-            "likes": self._normalize_int(data.get("likes")),
-            "collects": self._normalize_int(data.get("collects")),
-            "comments": self._normalize_int(data.get("comments")),
-            "shares": self._normalize_int(data.get("shares")),
-            "followers_gained": self._normalize_int(data.get("followers_gained")),
-            "notes": self._normalize_str(data.get("notes")),
-            "created_at": now,
-            "updated_at": now,
-        }
+        record = self._build_record(data)
 
         with self._lock:
             store = self._load_store()
@@ -227,6 +286,43 @@ class AnalyticsService:
             self._save_store(store)
 
         return record
+
+    def create_records_batch(self, items: List) -> Dict:
+        """
+        批量创建表现记录（逐条走与单条创建相同的校验，一次原子落盘）
+
+        Args:
+            items: 记录字段字典列表，每条结构同 create_record 的入参
+
+        Returns:
+            Dict: { created: 成功条数, failed: [{index, error}] }
+
+        Raises:
+            ValueError: items 不是非空列表，或超出单次上限（200 条）时抛出
+        """
+        if not isinstance(items, list) or not items:
+            raise ValueError("records 必须是非空数组")
+        if len(items) > _BATCH_MAX_RECORDS:
+            raise ValueError(f"一次最多导入 {_BATCH_MAX_RECORDS} 条记录，当前 {len(items)} 条")
+
+        created: List[Dict] = []
+        failed: List[Dict] = []
+        for index, item in enumerate(items):
+            try:
+                if not isinstance(item, dict):
+                    raise ValueError("记录格式错误，应为对象")
+                created.append(self._build_record(item))
+            except ValueError as e:
+                failed.append({"index": index, "error": str(e)})
+
+        if created:
+            with self._lock:
+                store = self._load_store()
+                # 整批插到最前，保持导入时的相对顺序
+                store["records"][:0] = created
+                self._save_store(store)
+
+        return {"created": len(created), "failed": failed}
 
     def update_record(self, record_id: str, data: Dict) -> Optional[Dict]:
         """
@@ -259,7 +355,10 @@ class AnalyticsService:
 
             for field in _EDITABLE_STR_FIELDS:
                 if field in data:
-                    target[field] = self._normalize_str(data.get(field))
+                    if field == "publish_time":
+                        target[field] = self._normalize_time(data.get(field))
+                    else:
+                        target[field] = self._normalize_str(data.get(field))
             for field in _EDITABLE_INT_FIELDS:
                 if field in data:
                     target[field] = self._normalize_int(data.get(field))
@@ -267,6 +366,46 @@ class AnalyticsService:
             target["updated_at"] = datetime.now().isoformat()
             self._save_store(store)
             return target
+
+    def upsert_record_for_plan(self, calendar_plan_id: str, data: Dict) -> Dict:
+        """
+        按内容日历条目 ID 幂等写入表现记录（日历「一键转录到复盘」使用）
+
+        同一日历条目重复转录时更新已有关联记录（按 calendar_plan_id 匹配，
+        取最早创建的一条），而不是重复新建。
+
+        Args:
+            calendar_plan_id: 内容日历条目 ID（必填）
+            data: 记录字段字典（结构同 create_record / update_record 的入参）
+
+        Returns:
+            Dict: { record: 完整记录, created: 是否为新建（False 表示更新了已有记录） }
+
+        Raises:
+            ValueError: calendar_plan_id 为空，或字段校验失败时抛出
+        """
+        calendar_plan_id = self._normalize_str(calendar_plan_id)
+        if not calendar_plan_id:
+            raise ValueError("calendar_plan_id 不能为空")
+
+        payload = dict(data or {})
+        payload["calendar_plan_id"] = calendar_plan_id
+
+        # RLock 可重入：持锁期间「查找已有关联 -> 创建或更新」整体原子
+        with self._lock:
+            store = self._load_store()
+            existing = [
+                r for r in store.get("records", [])
+                if r.get("calendar_plan_id") == calendar_plan_id
+            ]
+            if existing:
+                # 极端情况下（老数据）可能有多条关联，稳定取最早创建的一条更新
+                target = min(existing, key=lambda r: str(r.get("created_at") or ""))
+                record = self.update_record(target.get("id"), payload)
+                return {"record": record, "created": False}
+
+            record = self.create_record(payload)
+            return {"record": record, "created": True}
 
     def delete_record(self, record_id: str) -> bool:
         """
@@ -319,7 +458,11 @@ class AnalyticsService:
                 platforms: 各平台汇总列表（按曝光倒序）,
                 content_types: 各内容类型汇总列表（按曝光倒序）,
                 trend: 按月趋势（升序，[{month, count, views, engagements}]）,
+                time_slots: 发布时段汇总（仅含有 publish_time 的记录，
+                    [{name, count, avg_engagement}]，按时段固定顺序）,
             }
+
+        注意：已有字段的结构/名字保持向后兼容，只允许新增字段。
         """
         records = self._load_store().get("records", [])
 
@@ -337,6 +480,7 @@ class AnalyticsService:
         stats["platforms"] = self._group_summary(records, "platform")
         stats["content_types"] = self._group_summary(records, "content_type")
         stats["trend"] = self._monthly_trend(records)
+        stats["time_slots"] = self._time_slot_summary(records)
         return stats
 
     @classmethod
@@ -361,6 +505,45 @@ class AnalyticsService:
                 "engagement_rate": cls._engagement_rate(group),
             })
         summary.sort(key=lambda item: item["views"], reverse=True)
+        return summary
+
+    @staticmethod
+    def _slot_name_for_hour(hour: int) -> str:
+        """把小时（0-23）映射到发布时段名称，深夜 22-6 跨零点。"""
+        for name, start, end in _TIME_SLOTS:
+            if start < end and start <= hour < end:
+                return name
+        return _TIME_SLOTS[-1][0]  # 深夜 22-6（22-24 与 0-6）
+
+    @classmethod
+    def _time_slot_summary(cls, records: List[Dict]) -> List[Dict]:
+        """
+        按发布时段汇总（早晨/上午/午间/下午/晚间/深夜）。
+
+        没有 publish_time（或格式无法解析）的记录不计入；
+        只输出 count > 0 的时段，按 _TIME_SLOTS 固定顺序排列。
+        """
+        buckets: Dict[str, List[Dict]] = {}
+        for record in records:
+            time_str = str(record.get("publish_time") or "").strip()
+            match = _TIME_PATTERN.match(time_str)
+            if not match:
+                continue
+            hour = int(match.group(1))
+            if hour > 23:
+                continue
+            buckets.setdefault(cls._slot_name_for_hour(hour), []).append(record)
+
+        summary = []
+        for name, _, _ in _TIME_SLOTS:
+            group = buckets.get(name)
+            if not group:
+                continue
+            summary.append({
+                "name": name,
+                "count": len(group),
+                "avg_engagement": cls._engagement_rate(group),
+            })
         return summary
 
     @classmethod
@@ -423,6 +606,14 @@ class AnalyticsService:
                     f"互动 {t['engagements']}，涨粉 {t['followers_gained']}"
                 )
 
+        time_slots = stats.get("time_slots") or []
+        if time_slots:
+            lines.append("\n发布时段表现（仅统计填写了发布时间的记录）：")
+            for slot in time_slots:
+                lines.append(
+                    f"- {slot['name']}：{slot['count']} 条，平均互动率 {slot['avg_engagement']}%"
+                )
+
         # 按互动率排序列出明细（最多 30 条，避免 prompt 过长）
         def rate(r: Dict) -> float:
             views = int(r.get("views") or 0)
@@ -447,97 +638,22 @@ class AnalyticsService:
     @staticmethod
     def _load_text_config() -> dict:
         """加载文本生成配置（text_providers.yaml，与 content 服务保持一致）。"""
-        config_path = Path(__file__).parent.parent.parent / "text_providers.yaml"
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    return yaml.safe_load(f) or {}
-            except yaml.YAMLError as e:
-                logger.error("文本配置 YAML 解析失败: %s", e)
-                raise ValueError(
-                    f"文本配置文件格式错误: text_providers.yaml\n"
-                    f"YAML 解析错误: {e}\n"
-                    "解决方案：检查 YAML 缩进和语法"
-                )
-        logger.warning("text_providers.yaml 不存在，使用默认配置")
-        return {
-            "active_provider": "google_gemini",
-            "providers": {},
-        }
+        return load_text_config(default_providers=False)
 
     @staticmethod
     def _get_client(text_config: dict):
         """根据配置获取文本生成客户端（惰性导入，避免 CRUD 路径依赖 LLM 环境）。"""
-        from backend.utils.text_client import get_text_chat_client
-
-        active_provider = text_config.get("active_provider", "google_gemini")
-        providers = text_config.get("providers", {})
-
-        if not providers:
-            raise ValueError(
-                "未找到任何文本生成服务商配置。\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加文本生成服务商\n"
-                "2. 或手动编辑 text_providers.yaml 文件"
-            )
-
-        if active_provider not in providers:
-            available = ", ".join(providers.keys())
-            raise ValueError(
-                f"未找到文本生成服务商配置: {active_provider}\n"
-                f"可用的服务商: {available}\n"
-                "解决方案：在系统设置中选择一个可用的服务商"
-            )
-
-        provider_config = providers.get(active_provider, {})
-        if not provider_config.get("api_key"):
-            raise ValueError(
-                f"文本服务商 {active_provider} 未配置 API Key\n"
-                "解决方案：在系统设置页面编辑该服务商，填写 API Key"
-            )
-
-        logger.info(
-            "AI 复盘使用文本服务商: %s (type=%s)",
-            active_provider, provider_config.get("type"),
-        )
-        return get_text_chat_client(provider_config)
+        return get_text_client(text_config)
 
     @staticmethod
     def _load_prompt_template() -> str:
         """加载 AI 复盘洞察提示词模板。"""
-        prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "prompts",
-            "analytics_prompt.txt"
-        )
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            return f.read()
+        return load_prompt_template('backend/prompts/analytics_prompt.txt')
 
     @staticmethod
     def _parse_json_response(response_text: str) -> Dict[str, Any]:
         """解析 AI 返回的 JSON 响应（与 content 服务相同的多级降级策略）。"""
-        try:
-            return json.loads(response_text)
-        except json.JSONDecodeError:
-            pass
-
-        json_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', response_text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-
-        start_idx = response_text.find('{')
-        end_idx = response_text.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            try:
-                return json.loads(response_text[start_idx:end_idx + 1])
-            except json.JSONDecodeError:
-                pass
-
-        logger.error("无法解析 JSON 响应: %s...", response_text[:200])
-        raise ValueError("AI 返回的内容格式不正确，无法解析")
+        return parse_llm_json(response_text)
 
     @staticmethod
     def _normalize_str_list(value) -> List[str]:
@@ -574,11 +690,9 @@ class AnalyticsService:
             client = self._get_client(text_config)
             prompt = self._load_prompt_template().format(data_summary=data_summary)
 
-            active_provider = text_config.get("active_provider", "google_gemini")
-            provider_config = text_config.get("providers", {}).get(active_provider, {})
-            model = provider_config.get("model", "gemini-2.0-flash-exp")
-            temperature = provider_config.get("temperature", 1.0)
-            max_output_tokens = provider_config.get("max_output_tokens", 4000)
+            model, temperature, max_output_tokens = resolve_generation_params(
+                text_config, default_max_output_tokens=4000
+            )
 
             logger.info("调用 AI 复盘洞察: model=%s, records=%d", model, len(records))
             response_text = client.generate_text(
@@ -609,44 +723,10 @@ class AnalyticsService:
             }
 
         except Exception as e:
-            error_msg = str(e)
-            logger.error("AI 复盘洞察失败: %s", error_msg)
-
-            if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower() or "401" in error_msg:
-                detailed_error = (
-                    f"API 认证失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "可能原因：API Key 无效或已过期\n"
-                    "解决方案：在系统设置页面检查并更新 API Key"
-                )
-            elif "model" in error_msg.lower() or "404" in error_msg:
-                detailed_error = (
-                    f"模型访问失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "解决方案：在系统设置页面检查模型名称配置"
-                )
-            elif "timeout" in error_msg.lower() or "连接" in error_msg:
-                detailed_error = (
-                    f"网络连接失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "解决方案：检查网络连接，稍后重试"
-                )
-            elif "rate" in error_msg.lower() or "429" in error_msg or "quota" in error_msg.lower():
-                detailed_error = (
-                    f"API 配额限制。\n"
-                    f"错误详情: {error_msg}\n"
-                    "解决方案：等待配额重置，或升级 API 套餐"
-                )
-            else:
-                detailed_error = (
-                    f"AI 复盘洞察失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "建议：检查配置文件 text_providers.yaml"
-                )
-
+            logger.error("AI 复盘洞察失败: %s", e)
             return {
                 "success": False,
-                "error": detailed_error,
+                "error": classify_llm_error(e, task_label="AI 复盘洞察失败"),
             }
 
 

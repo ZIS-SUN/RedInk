@@ -9,6 +9,7 @@ import time
 import logging
 from flask import Blueprint, request, jsonify
 from backend.services.cover import get_cover_service
+from backend.services.brand import resolve_brand_for_prompt
 from .utils import (
     api_error_response,
     log_request,
@@ -32,6 +33,8 @@ def create_cover_blueprint():
         请求格式（application/json）：
         - topic: 主题文本（必填）
         - content: 补充内容/背景（可选）
+        - brand_id: 品牌档案 ID（可选）；未提供时自动使用「当前启用」档案，
+          有品牌时注入人设约束与品牌视觉约束（主色调），取不到时静默跳过
 
         返回：
         - success: 是否成功
@@ -44,6 +47,7 @@ def create_cover_blueprint():
             data = request.get_json()
             topic = data.get('topic', '')
             content = data.get('content', '')
+            brand_id = data.get('brand_id')
 
             log_request('/cover', {
                 'topic': topic[:50] if topic else '',
@@ -58,10 +62,13 @@ def create_cover_blueprint():
                     context={"endpoint": "/api/cover"},
                 )
 
+            # 解析品牌档案（未传 brand_id 时回退当前启用档案，取不到时静默忽略）
+            brand = resolve_brand_for_prompt(brand_id)
+
             # 调用封面方向生成服务
             logger.info(f"🔄 开始生成封面方向，主题: {topic[:50]}...")
             cover_service = get_cover_service()
-            result = cover_service.generate_cover_directions(topic, content)
+            result = cover_service.generate_cover_directions(topic, content, brand=brand)
 
             # 记录结果
             elapsed = time.time() - start_time

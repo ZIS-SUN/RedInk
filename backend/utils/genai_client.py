@@ -1,12 +1,15 @@
 """Google GenAI 客户端封装"""
 import time
 import random
+import logging
 from functools import wraps
 from google import genai
 from google.genai import types
 
 # 导入统一的错误解析函数
 from ..generators.google_genai import parse_genai_error
+
+logger = logging.getLogger(__name__)
 
 
 def retry_on_429(max_retries=3, base_delay=2):
@@ -45,10 +48,10 @@ def retry_on_429(max_retries=3, base_delay=2):
                     if attempt < max_retries - 1:
                         if "429" in error_str or "resource_exhausted" in error_str:
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
-                            print(f"[重试] 遇到资源限制，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
+                            logger.warning(f"[重试] 遇到资源限制，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                         else:
                             wait_time = min(2 ** attempt, 10) + random.uniform(0, 1)
-                            print(f"[重试] 请求失败，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
+                            logger.warning(f"[重试] 请求失败，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                         time.sleep(wait_time)
                         continue
 
@@ -73,14 +76,19 @@ class GenAIClient:
             )
 
         # 构建客户端参数
-        client_kwargs = {"api_key": self.api_key}
+        # 统一 300 秒超时（genai SDK 的 timeout 单位为毫秒），
+        # 与 image_api_client / text_client 的 300 秒对齐，避免请求无限期挂起
+        client_kwargs = {
+            "api_key": self.api_key,
+            "http_options": {"timeout": 300_000},
+        }
 
         # 如果有 base_url，使用 http_options
         if base_url:
-            client_kwargs["http_options"] = {
+            client_kwargs["http_options"].update({
                 "base_url": base_url,
                 "api_version": "v1beta"
-            }
+            })
 
         # 默认使用 Gemini API (vertexai=False)，因为大多数用户使用 Google AI Studio 的 API Key
         # Vertex AI 需要 OAuth2 认证，不支持 API Key

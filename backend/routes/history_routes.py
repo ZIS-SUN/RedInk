@@ -191,6 +191,7 @@ def create_history_blueprint():
         - images: 图片信息 { task_id, generated: [] }
         - status: 状态（draft/generating/partial/completed/error）
         - thumbnail: 缩略图文件名
+        - content: 发布内容 { titles: [], copywriting: "", tags: [] }（坏结构静默忽略）
 
         返回：
         - success: 是否成功
@@ -224,6 +225,7 @@ def create_history_blueprint():
             images = data.get('images')
             status = data.get('status')
             thumbnail = data.get('thumbnail')
+            content = data.get('content')
 
             history_service = get_history_service()
             success = history_service.update_record(
@@ -231,7 +233,8 @@ def create_history_blueprint():
                 outline=outline,
                 images=images,
                 status=status,
-                thumbnail=thumbnail
+                thumbnail=thumbnail,
+                content=content
             )
 
             if not success:
@@ -435,8 +438,8 @@ def create_history_blueprint():
                     context={"endpoint": "/api/history/<id>/download", "record_id": record_id, "task_id": task_id},
                 )
 
-            # 创建内存中的 ZIP 文件
-            zip_buffer = _create_images_zip(task_dir)
+            # 创建内存中的 ZIP 文件（附带发布文案文本）
+            zip_buffer = _create_images_zip(task_dir, record)
 
             # 生成安全的下载文件名
             title = record.get('title', 'images')
@@ -481,12 +484,16 @@ def _parse_positive_int(value, default: int, minimum: int, maximum: int = None) 
     return result
 
 
-def _create_images_zip(task_dir: str) -> io.BytesIO:
+def _create_images_zip(task_dir: str, record: dict = None) -> io.BytesIO:
     """
-    创建包含所有图片的 ZIP 文件
+    创建包含所有图片的 ZIP 文件（发布包）
+
+    record 中存在发布内容（content）或大纲原文时，额外打包一份
+    「发布文案.txt」，方便一键发布时直接复制粘贴。
 
     Args:
         task_dir: 任务目录路径
+        record: 历史记录（可选，用于生成发布文案文本）
 
     Returns:
         io.BytesIO: 内存中的 ZIP 文件
@@ -512,9 +519,64 @@ def _create_images_zip(task_dir: str) -> io.BytesIO:
 
                 zf.write(file_path, archive_name)
 
+        # 追加发布文案文本（无可用内容时保持旧行为，不加文件）
+        publish_text = _build_publish_text(record)
+        if publish_text:
+            zf.writestr("发布文案.txt", publish_text.encode("utf-8"))
+
     # 将指针移到开始位置
     memory_file.seek(0)
     return memory_file
+
+
+def _build_publish_text(record: dict = None) -> str:
+    """
+    从历史记录拼装「发布文案.txt」的文本内容
+
+    小节顺序：标题候选（每行一个）、正文文案、标签（#tag 空格连接）、
+    ——分隔线——、大纲原文。任何字段缺失则跳过对应小节；
+    全部缺失时返回空字符串（调用方不加文件）。
+
+    Args:
+        record: 历史记录（可为 None）
+
+    Returns:
+        str: 发布文案文本，无可用内容时为空字符串
+    """
+    if not isinstance(record, dict):
+        return ""
+
+    content = record.get("content")
+    if not isinstance(content, dict):
+        content = {}
+
+    sections = []
+
+    titles = content.get("titles")
+    if isinstance(titles, list):
+        title_lines = [t for t in titles if isinstance(t, str) and t.strip()]
+        if title_lines:
+            sections.append("【标题候选】\n" + "\n".join(title_lines))
+
+    copywriting = content.get("copywriting")
+    if isinstance(copywriting, str) and copywriting.strip():
+        sections.append("【正文文案】\n" + copywriting.strip())
+
+    tags = content.get("tags")
+    if isinstance(tags, list):
+        tag_items = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+        if tag_items:
+            sections.append("【标签】\n" + " ".join(f"#{t}" for t in tag_items))
+
+    outline_raw = (record.get("outline") or {}).get("raw") \
+        if isinstance(record.get("outline"), dict) else None
+    if isinstance(outline_raw, str) and outline_raw.strip():
+        sections.append("——分隔线——\n\n【大纲原文】\n" + outline_raw.strip())
+
+    if not sections:
+        return ""
+
+    return "\n\n".join(sections) + "\n"
 
 
 def _sanitize_filename(title: str) -> str:

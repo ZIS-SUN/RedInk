@@ -6,15 +6,18 @@ AI 为每条评论生成 2-3 个高互动的神回复建议（引导二次互动
 并可选生成一条置顶引导评论（引导点赞/关注/看主页）。
 """
 
-import json
 import logging
-import os
-import re
-import yaml
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from backend.utils.text_client import get_text_chat_client
+from backend.utils.llm_utils import (
+    classify_llm_error,
+    get_text_client,
+    load_prompt_template,
+    load_text_config,
+    parse_llm_json,
+    resolve_generation_params,
+)
+from backend.services.rewrite import build_brand_constraint
 
 logger = logging.getLogger(__name__)
 
@@ -48,108 +51,19 @@ class ReplyService:
 
     def _load_text_config(self) -> dict:
         """加载文本生成配置"""
-        config_path = Path(__file__).parent.parent.parent / 'text_providers.yaml'
-        logger.debug(f"加载文本配置: {config_path}")
-
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f) or {}
-                logger.debug(f"文本配置加载成功: active={config.get('active_provider')}")
-                return config
-            except yaml.YAMLError as e:
-                logger.error(f"文本配置 YAML 解析失败: {e}")
-                raise ValueError(
-                    f"文本配置文件格式错误: text_providers.yaml\n"
-                    f"YAML 解析错误: {e}\n"
-                    "解决方案：检查 YAML 缩进和语法"
-                )
-
-        logger.warning("text_providers.yaml 不存在，使用默认配置")
-        return {
-            'active_provider': 'google_gemini',
-            'providers': {
-                'google_gemini': {
-                    'type': 'google_gemini',
-                    'model': 'gemini-2.0-flash-exp',
-                    'temperature': 1.0,
-                    'max_output_tokens': 8000
-                }
-            }
-        }
+        return load_text_config()
 
     def _get_client(self):
         """根据配置获取客户端"""
-        active_provider = self.text_config.get('active_provider', 'google_gemini')
-        providers = self.text_config.get('providers', {})
-
-        if not providers:
-            logger.error("未找到任何文本生成服务商配置")
-            raise ValueError(
-                "未找到任何文本生成服务商配置。\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加文本生成服务商\n"
-                "2. 或手动编辑 text_providers.yaml 文件"
-            )
-
-        if active_provider not in providers:
-            available = ', '.join(providers.keys())
-            logger.error(f"文本服务商 [{active_provider}] 不存在，可用: {available}")
-            raise ValueError(
-                f"未找到文本生成服务商配置: {active_provider}\n"
-                f"可用的服务商: {available}\n"
-                "解决方案：在系统设置中选择一个可用的服务商"
-            )
-
-        provider_config = providers.get(active_provider, {})
-
-        if not provider_config.get('api_key'):
-            logger.error(f"文本服务商 [{active_provider}] 未配置 API Key")
-            raise ValueError(
-                f"文本服务商 {active_provider} 未配置 API Key\n"
-                "解决方案：在系统设置页面编辑该服务商，填写 API Key"
-            )
-
-        logger.info(f"使用文本服务商: {active_provider} (type={provider_config.get('type')})")
-        return get_text_chat_client(provider_config)
+        return get_text_client(self.text_config)
 
     def _load_prompt_template(self) -> str:
         """加载提示词模板"""
-        prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "prompts",
-            "reply_prompt.txt"
-        )
-        with open(prompt_path, "r", encoding="utf-8") as f:
-            return f.read()
+        return load_prompt_template('backend/prompts/reply_prompt.txt')
 
     def _parse_json_response(self, response_text: str) -> Dict[str, Any]:
         """解析 AI 返回的 JSON 响应"""
-        # 尝试直接解析
-        try:
-            return json.loads(response_text)
-        except json.JSONDecodeError:
-            pass
-
-        # 尝试从 markdown 代码块中提取
-        json_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', response_text)
-        if json_match:
-            try:
-                return json.loads(json_match.group(1).strip())
-            except json.JSONDecodeError:
-                pass
-
-        # 尝试找到 JSON 对象的开始和结束
-        start_idx = response_text.find('{')
-        end_idx = response_text.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            try:
-                return json.loads(response_text[start_idx:end_idx + 1])
-            except json.JSONDecodeError:
-                pass
-
-        logger.error(f"无法解析 JSON 响应: {response_text[:200]}...")
-        raise ValueError("AI 返回的内容格式不正确，无法解析")
+        return parse_llm_json(response_text)
 
     def _normalize_replies(self, raw_replies: Any, comments: List[str]) -> List[Dict[str, Any]]:
         """
@@ -182,11 +96,50 @@ class ReplyService:
 
         return replies
 
+    @staticmethod
+    def _build_brand_reply_context(brand: Optional[Dict]) -> str:
+        """
+        构建评论回复专用的品牌人设注入文本：
+
+        在通用品牌人设约束之外，明确要求把口头禅 / 签名自然用进回复建议
+        （口头禅/签名恰恰最该出现在评论区回复里）。brand 为空或无有效字段
+        时返回空字符串。
+        """
+        constraint = build_brand_constraint(brand)
+        if not constraint:
+            return ""
+
+        extra_lines: List[str] = []
+        catchphrases = [
+            str(c).strip() for c in (brand.get("catchphrases") or [])
+            if c and str(c).strip()
+        ] if isinstance(brand.get("catchphrases"), list) else []
+        if catchphrases:
+            extra_lines.append(
+                f"- 请在部分回复建议中自然融入博主口头禅（{'、'.join(catchphrases)}），"
+                "让粉丝一眼认出是博主本人在回复，但不要每条都用、不要生硬堆砌"
+            )
+        signature = str(brand.get("signature") or "").strip()
+        if signature:
+            extra_lines.append(
+                f"- 签名/结尾话术「{signature}」可在少量回复或置顶引导评论的结尾自然带上"
+            )
+
+        section = constraint + (
+            "\n\n### 回复身份要求：\n"
+            "- 所有回复建议都要以该博主本人的身份和口吻发出，语气必须贴合上述人设\n"
+        )
+        if extra_lines:
+            section += "\n".join(extra_lines) + "\n"
+        section += "- 任何回复中都绝对不得出现上述禁用词" if brand.get("banned_words") else ""
+        return section
+
     def generate_replies(
         self,
         comments: List[str],
         tone: str = DEFAULT_TONE,
-        include_pinned: bool = False
+        include_pinned: bool = False,
+        brand: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         为粉丝评论生成神回复建议
@@ -195,6 +148,8 @@ class ReplyService:
             comments: 粉丝评论列表（已去空行）
             tone: 回复语气（热情/专业/幽默/温暖）
             include_pinned: 是否同时生成一条置顶引导评论
+            brand: 品牌档案字典（可选），提供时以博主人设口吻生成回复，
+                并把口头禅/签名自然融入回复建议
 
         返回：
             {
@@ -231,14 +186,16 @@ class ReplyService:
                 pinned_requirement=pinned_requirement
             )
 
-            # 从配置中获取模型参数
-            active_provider = self.text_config.get('active_provider', 'google_gemini')
-            providers = self.text_config.get('providers', {})
-            provider_config = providers.get(active_provider, {})
+            # 品牌人设约束以字符串追加方式融入，避免破坏模板占位符
+            brand_context = self._build_brand_reply_context(brand)
+            if brand_context:
+                logger.info(f"注入品牌人设约束: brand={brand.get('name', '')}")
+                prompt += brand_context
 
-            model = provider_config.get('model', 'gemini-2.0-flash-exp')
-            temperature = provider_config.get('temperature', 1.0)
-            max_output_tokens = provider_config.get('max_output_tokens', 4000)
+            # 从配置中获取模型参数
+            model, temperature, max_output_tokens = resolve_generation_params(
+                self.text_config, default_max_output_tokens=4000
+            )
 
             logger.info(f"调用文本生成 API: model={model}, temperature={temperature}")
             response_text = self.client.generate_text(
@@ -273,45 +230,10 @@ class ReplyService:
             }
 
         except Exception as e:
-            error_msg = str(e)
-            logger.error(f"评论回复生成失败: {error_msg}")
-
-            # 根据错误类型提供更详细的错误信息
-            if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower() or "401" in error_msg:
-                detailed_error = (
-                    f"API 认证失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "可能原因：API Key 无效或已过期\n"
-                    "解决方案：在系统设置页面检查并更新 API Key"
-                )
-            elif "model" in error_msg.lower() or "404" in error_msg:
-                detailed_error = (
-                    f"模型访问失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "解决方案：在系统设置页面检查模型名称配置"
-                )
-            elif "timeout" in error_msg.lower() or "连接" in error_msg:
-                detailed_error = (
-                    f"网络连接失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "解决方案：检查网络连接，稍后重试"
-                )
-            elif "rate" in error_msg.lower() or "429" in error_msg or "quota" in error_msg.lower():
-                detailed_error = (
-                    f"API 配额限制。\n"
-                    f"错误详情: {error_msg}\n"
-                    "解决方案：等待配额重置，或升级 API 套餐"
-                )
-            else:
-                detailed_error = (
-                    f"评论回复生成失败。\n"
-                    f"错误详情: {error_msg}\n"
-                    "建议：检查配置文件 text_providers.yaml"
-                )
-
+            logger.error(f"评论回复生成失败: {e}")
             return {
                 "success": False,
-                "error": detailed_error
+                "error": classify_llm_error(e, task_label="评论回复生成失败")
             }
 
 

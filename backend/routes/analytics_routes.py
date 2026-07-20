@@ -52,9 +52,12 @@ def create_analytics_blueprint():
         - title: 内容标题（必填）
         - platform: 发布平台（必填）
         - publish_date: 发布日期，YYYY-MM-DD（可选）
+        - publish_time: 发布时间，HH:MM（可选）
         - content_type: 内容类型/标签（可选）
         - views / likes / collects / comments / shares / followers_gained: 数值（可选，默认 0）
         - notes: 备注（可选）
+        - record_id: 关联的历史作品 ID（可选，默认空）
+        - calendar_plan_id: 关联的内容日历条目 ID（可选，默认空）
 
         返回：
         - success: 是否成功
@@ -89,6 +92,41 @@ def create_analytics_blueprint():
             )
         except Exception as e:
             return api_error_response(e, context={"endpoint": "/api/analytics/records"})
+
+    @analytics_bp.route('/analytics/records/batch', methods=['POST'])
+    def create_records_batch():
+        """
+        批量创建表现记录（粘贴表格导入）
+
+        请求体：
+        - records: 记录数组（每条结构同单条创建接口），一次最多 200 条
+
+        返回：
+        - success: 是否成功（请求整体被接受即为 true，允许部分行失败）
+        - created: 成功创建的条数
+        - failed: [{ index: 行下标, error: 失败原因 }]
+        """
+        try:
+            data = request.get_json(silent=True) or {}
+            records = data.get('records')
+
+            analytics_service = get_analytics_service()
+            result = analytics_service.create_records_batch(records)
+
+            return jsonify({
+                "success": True,
+                "created": result["created"],
+                "failed": result["failed"],
+            }), 200
+
+        except ValueError as e:
+            # 非数组 / 空数组 / 超出单次上限 -> 400
+            return api_error_response(
+                validation_error(str(e), "请检查导入数据后重试。"),
+                context={"endpoint": "/api/analytics/records/batch"},
+            )
+        except Exception as e:
+            return api_error_response(e, context={"endpoint": "/api/analytics/records/batch"})
 
     @analytics_bp.route('/analytics/records/<record_id>', methods=['PUT'])
     def update_record(record_id):
