@@ -1,0 +1,133 @@
+name: Backup Restore Environment Drill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-runtime:
+    name: Source runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Start source runtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/redink-source-data"
+          REDINK_DATA_DIR="$RUNNER_TEMP/redink-source-data" \
+          FLASK_HOST=127.0.0.1 \
+          FLASK_PORT=12398 \
+          uv run python -m backend.app >"$RUNNER_TEMP/source-runtime.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/source-runtime.pid"
+
+      - name: Run backup and restore drill
+        run: bash scripts/drill-backup-restore.sh
+
+      - name: Collect source runtime diagnostics
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/source-runtime.log" ]; then
+            tail -n 200 "$RUNNER_TEMP/source-runtime.log"
+          fi
+          if [ -f "$RUNNER_TEMP/source-runtime.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/source-runtime.pid")" 2>/dev/null || true
+          fi
+
+  docker-runtime:
+    name: Docker runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t redink-backup-drill:${{ github.sha }} .
+
+      - name: Start Docker runtime
+        run: |
+          mkdir -p "$RUNNER_TEMP/redink-docker-data"
+          chmod 777 "$RUNNER_TEMP/redink-docker-data"
+          docker run -d \
+            --name redink-backup-drill \
+            -p 127.0.0.1:12398:12398 \
+            -e REDINK_ALLOW_INSECURE=1 \
+            -v "$RUNNER_TEMP/redink-docker-data:/app/data" \
+            redink-backup-drill:${{ github.sha }}
+
+      - name: Run backup and restore drill
+        run: bash scripts/drill-backup-restore.sh
+
+      - name: Collect Docker diagnostics
+        if: always()
+        run: |
+          docker logs --tail 200 redink-backup-drill 2>&1 || true
+          docker rm -f redink-backup-drill >/dev/null 2>&1 || true
+
+  macos-desktop:
+    name: Packaged macOS desktop
+    runs-on: macos-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm
+        run: npm install -g pnpm@10.19.0
+
+      - name: Install backend dependencies
+        run: uv sync --locked
+
+      - name: Build packaged desktop app
+        run: bash scripts/build-macos-app.sh
+
+      - name: Start packaged desktop app
+        run: |
+          rm -rf "$HOME/Library/Application Support/RedInk"
+          dist/RedInk.app/Contents/MacOS/RedInk \
+            >"$RUNNER_TEMP/macos-desktop.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/macos-desktop.pid"
+
+      - name: Run backup and restore drill
+        run: bash scripts/drill-backup-restore.sh
+
+      - name: Collect desktop diagnostics
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/macos-desktop.log" ]; then
+            tail -n 200 "$RUNNER_TEMP/macos-desktop.log"
+          fi
+          if [ -f "$RUNNER_TEMP/macos-desktop.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/macos-desktop.pid")" 2>/dev/null || true
+          fi
