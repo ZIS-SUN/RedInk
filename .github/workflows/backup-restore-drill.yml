@@ -115,9 +115,29 @@ jobs:
       - name: Start packaged desktop app
         run: |
           rm -rf "$HOME/Library/Application Support/RedInk"
+          # headless：CI 无交互窗口，只让冻结二进制常驻提供 API
+          #（覆盖 Application Support 数据根 + 打包后的 create_app 路径）
+          REDINK_HEADLESS=1 \
           dist/RedInk.app/Contents/MacOS/RedInk \
             >"$RUNNER_TEMP/macos-desktop.log" 2>&1 &
           echo "$!" >"$RUNNER_TEMP/macos-desktop.pid"
+          # 启动步骤内先等到健康，失败时立刻暴露桌面日志，避免只看到 drill 的 60s 超时
+          for i in $(seq 1 90); do
+            if curl -fsS --noproxy '*' --max-time 2 \
+              "http://127.0.0.1:12398/api/health" >/dev/null 2>&1; then
+              echo "packaged desktop healthy after ${i}s"
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/macos-desktop.pid")" 2>/dev/null; then
+              echo "packaged desktop exited early" >&2
+              tail -n 200 "$RUNNER_TEMP/macos-desktop.log" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "packaged desktop not healthy within 90s" >&2
+          tail -n 200 "$RUNNER_TEMP/macos-desktop.log" || true
+          exit 1
 
       - name: Run backup and restore drill
         run: bash scripts/drill-backup-restore.sh

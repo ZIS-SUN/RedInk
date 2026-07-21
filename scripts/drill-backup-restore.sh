@@ -17,11 +17,12 @@ log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 pass() { printf '[PASS] %s\n' "$*"; }
 die() { printf '[FAIL] %s\nRESULT: FAIL\n' "$*" >&2; exit 1; }
 api_curl() {
+    # --noproxy '*'：避免本机演练被 HTTP_PROXY / 系统代理劫持到外网导致假超时
     if [ -n "${REDINK_ACCESS_TOKEN:-}" ]; then
-        curl -fsS --max-time 20 \
+        curl -fsS --noproxy '*' --max-time 20 \
             -H "X-Access-Token: ${REDINK_ACCESS_TOKEN}" "$@"
     else
-        curl -fsS --max-time 20 "$@"
+        curl -fsS --noproxy '*' --max-time 20 "$@"
     fi
 }
 

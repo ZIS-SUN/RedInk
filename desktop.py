@@ -31,6 +31,8 @@ NOTIFY_MAX_LENGTH = 200
 
 # 桌面 app 面向国内直连（siliconflow / 用户中转站），
 # 清掉可能从 shell / launchd 继承来的代理变量，避免 requests 走坏代理。
+# 注意：不要依赖清空 NO_PROXY 来绕过本机健康检查——macOS 仍可能从
+# SystemConfiguration 读到系统代理；本机探测一律走 ProxyHandler({}).
 _PROXY_ENV_VARS = (
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -45,6 +47,25 @@ def _strip_proxy_env() -> None:
     for name in _PROXY_ENV_VARS:
         os.environ.pop(name, None)
         os.environ.pop(name.lower(), None)
+
+
+def _is_headless_mode(argv: list[str] | None = None) -> bool:
+    """CI / 演练场景：只跑后端 API，不拉起 pywebview 窗口。
+
+    触发条件（任一）：
+    - 环境变量 REDINK_HEADLESS=1/true/yes
+    - 命令行含 --headless
+    """
+    env = (os.environ.get("REDINK_HEADLESS") or "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    args = sys.argv[1:] if argv is None else argv
+    return "--headless" in args
+
+
+def _local_http_opener() -> urllib.request.OpenerDirector:
+    """强制直连的 urllib opener，忽略环境变量与 macOS 系统代理。"""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 # ==================== 系统原生通知（按平台分支） ====================
@@ -237,19 +258,20 @@ def _pick_port() -> int:
 
 
 def _start_backend(port: int) -> threading.Thread:
+    """在守护线程中启动 threaded WSGI 服务。
+
+    使用 werkzeug.make_server 而非 app.run()：后者在 PyInstaller 冻结 /
+    无控制台 .app 场景下更容易在 banner 之后卡住；make_server 与测试夹具一致。
+    """
     from backend.app import create_app
+    from werkzeug.serving import make_server
 
     app = create_app()
+    server = make_server("127.0.0.1", port, app, threaded=True)
 
     def run() -> None:
         try:
-            app.run(
-                host="127.0.0.1",
-                port=port,
-                debug=False,
-                use_reloader=False,
-                threaded=True,
-            )
+            server.serve_forever()
         except Exception:
             traceback.print_exc()
 
@@ -262,9 +284,10 @@ def _wait_for_backend(port: int, timeout: float = HEALTH_TIMEOUT_SECONDS) -> Non
     url = f"http://127.0.0.1:{port}/api/health"
     deadline = time.monotonic() + timeout
     last_error: Exception | None = None
+    opener = _local_http_opener()
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=2) as response:
+            with opener.open(url, timeout=2) as response:
                 if response.status == 200:
                     return
         except Exception as exc:  # noqa: BLE001 - 启动阶段任何错误都重试
@@ -274,6 +297,17 @@ def _wait_for_backend(port: int, timeout: float = HEALTH_TIMEOUT_SECONDS) -> Non
         f"后端在 {timeout:.0f} 秒内未就绪（{url}）。"
         f"最后一次错误：{last_error!r}"
     )
+
+
+def _run_headless_until_signal() -> int:
+    """无窗口模式：阻塞主线程，让 daemon 后端持续对外服务。"""
+    print("[RedInk] headless 模式：仅提供 API，不启动桌面窗口")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        return 0
+    return 0
 
 
 def main() -> int:
@@ -298,6 +332,9 @@ def main() -> int:
         print("[RedInk] 后端启动失败：", file=sys.stderr)
         traceback.print_exc()
         return 1
+
+    if _is_headless_mode():
+        return _run_headless_until_signal()
 
     try:
         import webview

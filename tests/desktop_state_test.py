@@ -127,3 +127,42 @@ def test_import_desktop_has_no_window_side_effect():
     """模块级只定义函数/常量，不应存在已创建的 webview 窗口。"""
     assert hasattr(desktop, "main")
     assert callable(desktop.DesktopApi().notify)
+
+
+class TestHeadlessMode:
+    def test_env_flag(self, monkeypatch):
+        monkeypatch.setenv("REDINK_HEADLESS", "1")
+        assert desktop._is_headless_mode([]) is True
+
+    def test_cli_flag(self, monkeypatch):
+        monkeypatch.delenv("REDINK_HEADLESS", raising=False)
+        assert desktop._is_headless_mode(["--headless"]) is True
+
+    def test_default_off(self, monkeypatch):
+        monkeypatch.delenv("REDINK_HEADLESS", raising=False)
+        assert desktop._is_headless_mode([]) is False
+
+
+def test_wait_for_backend_bypasses_http_proxy(monkeypatch, tmp_path):
+    """健康检查必须直连 127.0.0.1，不能被坏掉的 HTTP_PROXY 劫持超时。"""
+    import threading
+
+    from werkzeug.serving import make_server
+
+    monkeypatch.setenv("REDINK_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("http_proxy", "http://127.0.0.1:1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
+
+    from backend.app import create_app
+
+    app = create_app()
+    server = make_server("127.0.0.1", 0, app, threaded=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        desktop._wait_for_backend(server.server_port, timeout=10)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
