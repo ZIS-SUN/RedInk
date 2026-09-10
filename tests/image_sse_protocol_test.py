@@ -415,11 +415,11 @@ def test_generate_client_disconnect_cancels_pending_pool_tasks(app, image_env):
         buffered=False,
     )
 
-    # 消费到线程池阻塞前生成器主动推送的全部事件：
-    # 封面 progress + 封面 complete + batch_start + 6 条逐页 progress = 9 个事件
+    # 消费到线程池阻塞前生成器主动推送的事件：
+    # batch_start + 全部页 progress（封面 1 + 内容 6）= 8 个 data 事件
     iterator = iter(response.response)
     data_chunks = 0
-    while data_chunks < 3 + content_total:
+    while data_chunks < 1 + 1 + content_total:
         chunk = next(iterator)
         if isinstance(chunk, bytes):
             chunk = chunk.decode("utf-8")
@@ -427,7 +427,7 @@ def test_generate_client_disconnect_cancels_pending_pool_tasks(app, image_env):
             data_chunks += 1
 
     # close() 触发 GeneratorExit → shutdown(cancel_futures=True) 取消排队任务，
-    # 随后 with 退出会等待 2 个已在执行的 worker，由后台定时器释放闸门
+    # 随后 with 退出会等待已在执行的 worker，由后台定时器释放闸门
     releaser = threading.Timer(0.3, gate.set)
     releaser.start()
     try:
@@ -436,7 +436,7 @@ def test_generate_client_disconnect_cancels_pending_pool_tasks(app, image_env):
         gate.set()
         releaser.cancel()
 
-    # 已真正开始执行的最多 worker_count（2）个，其余排队任务被取消
+    # 全并行下封面也占 worker；内容页真正跑起来的 ≤ worker_count
     assert len(content_calls) <= 2
     assert len(content_calls) < content_total
 
@@ -737,14 +737,13 @@ def test_generate_concurrent_slow_pages_emit_heartbeats(client, image_env):
 
     business, heartbeats = split_heartbeats(parse_sse_events(body))
     assert heartbeats, "并发等待期间应下发心跳事件"
-    # 封面 → batch_start → 2 条 progress → 2 条 complete → finish
-    assert [e[0] for e in business] == [
-        "progress", "complete",
-        "progress",
-        "progress", "progress",
-        "complete", "complete",
-        "finish",
-    ]
+    # 全并行：batch_start + 3 条 progress + 3 条 complete（完成顺序不保证）+ finish
+    kinds = [e[0] for e in business]
+    assert kinds[0] == "progress"
+    assert business[0][1].get("status") == "batch_start"
+    assert kinds.count("progress") == 1 + 3
+    assert kinds.count("complete") == 3
+    assert kinds[-1] == "finish"
     finish = business[-1][1]
     assert finish["success"] is True
     assert finish["completed"] == 3

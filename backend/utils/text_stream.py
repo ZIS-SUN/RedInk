@@ -110,6 +110,9 @@ class TextStreamClient:
             )
 
         try:
+            # text/event-stream 常不带 charset；requests 对 text/* 默认按
+            # ISO-8859-1 解码，会把 UTF-8 中文变成 å°é¢ 这类乱码。强制 UTF-8。
+            response.encoding = "utf-8"
             for raw_line in response.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue

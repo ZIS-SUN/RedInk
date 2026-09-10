@@ -346,6 +346,30 @@ def test_stream_client_parses_openai_chunks(monkeypatch):
 
     assert deltas == ["你好", "，世界"]
     assert fake_response.closed is True
+    # 防止 text/event-stream 无 charset 时被按 ISO-8859-1 解成中文乱码
+    assert getattr(fake_response, "encoding", None) == "utf-8"
+
+
+def test_stream_client_forces_utf8_for_chinese_bytes(monkeypatch):
+    """模拟上游按 UTF-8 字节返回中文；客户端必须用 utf-8 解码而非 latin-1。"""
+    chinese = "封面标题"
+    # 模拟「若错误地按 latin-1 解码」会得到的乱码，确认我们不会得到它
+    mojibake = chinese.encode("utf-8").decode("latin-1")
+    assert mojibake != chinese
+
+    line = "data: " + json.dumps(
+        {"choices": [{"delta": {"content": chinese}}]}, ensure_ascii=False
+    )
+    fake_response = FakeHttpResponse(lines=[line, "data: [DONE]"])
+    monkeypatch.setattr(
+        text_stream.requests, "post", lambda *args, **kwargs: fake_response
+    )
+
+    client = TextStreamClient(api_key="sk-test")
+    deltas = list(client.stream_text(prompt="hi", model="test-model"))
+
+    assert deltas == [chinese]
+    assert fake_response.encoding == "utf-8"
 
 
 def test_stream_client_sends_stream_payload(monkeypatch):

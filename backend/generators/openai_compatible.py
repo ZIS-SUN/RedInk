@@ -91,6 +91,11 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
             "n": 1,
             "size": size
         }
+        # 部分中转（如 yanyuc）用 type=url 返回可下载链接，避免巨大 b64 响应。
+        # 配置项 result_type，写入请求体字段 "type"（勿与 provider type 混淆）。
+        result_type = self.config.get("result_type")
+        if result_type:
+            payload["type"] = result_type
 
         return self.client.generate_via_images(payload)
 
